@@ -17,3 +17,7 @@ my-profile
 
 # Build
 dist/
+
+# runtime / testing
+.gemiterm
+{

@@ -1,145 +1,151 @@
 # GemiTerm
 
-Access and manage your Gemini web chats from the command line. GemiTerm bridges Playwright-based Google authentication to let you list, fetch, export, and continue conversations trapped in the Gemini web interface — without a standard API.
-
-## Installation
-
-### Windows (standalone - no Python required)
-
-Open PowerShell and run:
-
-```powershell
-irm https://raw.githubusercontent.com/expert-vision-software/GemiTerm/main/install.ps1 | iex
-```
-
-This downloads the latest `GemiTerm.exe`, installs Chromium browser, and adds GemiTerm to your PATH.
-
-**Uninstall:**
-```powershell
-irm https://raw.githubusercontent.com/expert-vision-software/GemiTerm/main/install.ps1 | iex -- -uninstall
-```
-
-### Linux
-
-Download the `GemiTerm` binary from the [latest release](https://github.com/expert-vision-software/GemiTerm/releases/latest).
-
-```bash
-chmod +x GemiTerm
-./GemiTerm install-browser  # install Chromium if needed
-```
-
-### pip/pipx (requires Python)
-
-```bash
-pip install gemiterm       # global install
-pipx install gemiterm      # global install (isolated)
-pipx run gemiterm auth     # temporary run (npx equivalent)
-```
-
-### From Source
-
-```bash
-pip install -e .
-playwright install chromium
-```
+Access and manage your Gemini web chats from the command line. GemiTerm bridges Playwright-based Google authentication to let you list, fetch, export, continue, and delete conversations trapped in the Gemini web interface — without a standard API. Built with [Bun](https://bun.sh) and TypeScript.
 
 ## Prerequisites
 
-- **Chromium Browser**: GemiTerm will attempt to use your system Chrome if available, otherwise it installs Playwright's Chromium automatically.
-- **Google Account**: A Google account with access to Gemini (https://gemini.google.com)
+- **[Bun](https://bun.sh)** runtime
+- **Chromium Browser** — GemiTerm uses your system Chrome/Edge if available, otherwise installs Playwright's Chromium automatically
+- **Google Account** with access to [Gemini](https://gemini.google.com)
+
+## Quick Start
+
+```bash
+bun install
+bun run src/cli/index.ts auth        # authenticate with Google
+bun run src/cli/index.ts list        # list your chats
+```
+
+## Development
+
+```bash
+bun install
+bun run dev              # run the CLI
+bun test                 # run tests (Bun test runner)
+bun run typecheck        # TypeScript type checking
+bun run build            # compile to standalone Bun binary
+bun run build:linux      # cross-compile for Linux x64
+bun run build:windows    # cross-compile for Windows x64
+```
 
 ## Usage
 
 ### Authentication
 
-Before using the CLI, you need to authenticate with your Google account:
-
 ```bash
 gemiterm auth
 ```
 
-This will open a browser window for you to log in with your Google account. Cookies will be saved for future use.
+Opens a browser window to log in with your Google account. Cookies are saved for future use.
 
 ### Check Status
-
-Verify your authentication status:
 
 ```bash
 gemiterm status
 ```
 
-### List Chats
+Shows the config directory and a table of all profiles with their authentication state.
 
-Display all your Gemini chats in a table:
+### List Chats
 
 ```bash
 gemiterm list
 ```
 
 Options:
-- `-n, --limit N`: Maximum number of chats to display (default: 10, max: 50)
+- `-n, --limit N`: Maximum number of chats (default: 10)
+- `--offset N`: Skip first N chats (default: 0)
+- `--sort <recent|oldest|alpha>`: Sort order
+- `-s, --search <query>`: Filter by title
+- `--after <date>`: Only chats after this date
+- `--before <date>`: Only chats before this date
+- `--all`: Show all chats (no limit)
+- `--all-profiles`: Merge chats from all profiles
+- `-f, --format <text|json>`: Output format
+- `-p, --path <path>`: Save output to file
 
 ### Fetch Chat History
-
-Fetch and display the message history of a specific conversation:
 
 ```bash
 gemiterm fetch <conversation_id>
 ```
 
 Options:
-- `--format, -f`: Output format - `text` (default) or `json`
+- `-f, --format <text|json>`: Output format
+- `-p, --path <path>`: Save output to file
 
 ### Continue a Chat
 
-Send a message to an existing conversation:
-
 ```bash
-gemiterm continue <conversation_id> <message>
+gemiterm continue <conversation_id> [message]
 ```
 
-### Start a New Chat
+Without a message, enters an interactive REPL session. Without a conversation ID, falls back to `list`.
 
-Start a new conversation:
+### Start a New Chat
 
 ```bash
 gemiterm new [message]
 ```
 
 Options:
-- `-p, --profile TEXT`: Profile to use for the new conversation
+- `-p, --profile <name>`: Use a specific profile
 
-With a message argument, creates a conversation, sends the message, prints the response, and returns the new conversation ID. Without a message argument, creates a conversation and starts an interactive chat session.
+Without a message, enters an interactive REPL session.
 
 ### Export Chat
-
-Export a conversation to a Markdown file:
 
 ```bash
 gemiterm export <conversation_id>
 ```
 
 Options:
-- `-o, --output PATH`: Custom output file path
-- `-f, --format FORMAT`: Export format - `markdown` (default) or `json`
+- `-o, --output <path>`: Custom output file path
+- `-f, --format <markdown|json>`: Export format (default: markdown)
 - `--include-metadata`: Include full metadata in export
 
 ### Export All Chats
-
-Export all conversations to a directory with an index file:
 
 ```bash
 gemiterm export-all
 ```
 
 Options:
-- `-o, --output-dir PATH`: Directory to export to (default: `./exports`)
-- `--since ISO_DATE`: Export only conversations newer than this date
-- `--include-metadata`: Include full metadata in each export
+- `-o, --output-dir <dir>`: Output directory (default: `./exports`)
+- `--since <date>`: Only chats newer than this date
+- `--include-metadata`: Include full metadata
+- `-a, --all-profiles`: Export from all profiles
+
+Creates an `index.md` with links to all exported files.
+
+### Delete a Chat
+
+```bash
+gemiterm delete <conversation_id>
+```
+
+Options:
+- `-f, --force`: Skip confirmation prompt
+
+### Manage Profiles
+
+```bash
+gemiterm profile list                    # list all profiles
+gemiterm profile add <name>               # add a new profile
+gemiterm profile delete <name>            # delete a profile
+gemiterm profile rename <name> <newName>  # rename a profile
+gemiterm profile default <name>          # set default profile
+```
+
+### Install Browser
+
+```bash
+gemiterm install-browser
+```
+
+Checks for system Chrome/Edge first, falls back to installing Playwright's Chromium.
 
 ### Verbose Logging
-
-Enable detailed logging for debugging:
 
 ```bash
 gemiterm -v <command>
@@ -149,69 +155,45 @@ gemiterm -v <command>
 
 ### Configuration Directory
 
-Default location: `~/.config/gemiterm/`
+Default locations:
+- **Windows**: `%APPDATA%\gemiterm\`
+- **Linux/macOS**: `~/.config/gemiterm/`
 
-Override with environment variable:
+Override with:
 ```bash
 export GEMITERM_CONFIG_DIR=/custom/path
 ```
 
-### Storage File
+### Profile Storage
 
-The storage file (`storage_state.json`) contains your authentication cookies. It is located in the configuration directory.
+```
+gemiterm/
+  profiles/
+    .default              # text file with default profile name
+    <profile-name>/
+      storage_state.json  # authentication cookies
+```
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `GEMITERM_CONFIG_DIR` | Configuration directory | `~/.config/gemiterm/` |
-| `GEMITERM_VERBOSE` | Enable verbose logging | `false` |
+| `GEMITERM_CONFIG_DIR` | Configuration directory | Platform default |
 
-## Troubleshooting
+## Architecture
 
-### Browser Automation Issues
-
-If browser automation fails or is unavailable, you can manually extract cookies from your browser:
-
-1. Install the "EditThisCookie" extension or similar in your browser
-2. Go to https://gemini.google.com and log in
-3. Export the cookies in JSON format
-4. Save them to `~/.config/gemiterm/storage_state.json` with the following format:
-   ```json
-   {
-     "cookies": [
-       {"name": "__Secure-1PSID", "value": "your_value_here", ...},
-       {"name": "__Secure-1PSIDTS", "value": "your_value_here", ...}
-     ]
-   }
-   ```
-
-### Session Expired
-
-If you see "Session expired" errors:
-
-1. Run `gemiterm auth` to re-authenticate
-2. If the issue persists, delete `storage_state.json` and run `gemiterm auth` again
-
-### API Errors
-
-If you encounter API errors:
-
-1. Run `gemiterm status` to check your authentication state
-2. Ensure you have a valid Google account with Gemini access
-3. Try re-authenticating with `gemiterm auth`
-
-### Verbose Logging
-
-Use the `-v` or `--verbose` flag to enable detailed logging for debugging:
-
-```bash
-gemiterm -v list
+```
+src/
+  cli/            # CLI commands, argument parsing, output formatting
+  core/           # Mediator pattern (CQRS), typed commands/queries, handlers, domain types
+  services/       # Business logic: auth flow, cookie management, Gemini API client
+  infrastructure/  # Config, file I/O, logging, validation, formatters
+tests/
+  cli/            # CLI command tests
+  core/           # Query handler tests
+  services/       # Service layer tests
+  infrastructure/  # Infrastructure tests
+  fixtures/       # Shared test fixtures
 ```
 
-## Future Enhancements
-
-- Interactive CLI mode with menu-driven navigation
-- REPL mode for conversational interaction
-- Support for conversation creation and deletion
-- Export to multiple formats (HTML, PDF)
+Core uses a **Mediator pattern** with typed Command/Query messages dispatching to registered handlers, decoupling CLI commands from business logic.
