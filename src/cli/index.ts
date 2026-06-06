@@ -7,6 +7,10 @@ import { CommandRegistry } from "./command-registry.ts";
 import { Logger } from "../infrastructure/logger.ts";
 import { Mediator } from "../core/mediator.ts";
 import { showHelp } from "./commands/help.ts";
+import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
+import { CookieStorage, ProfileManager } from "../infrastructure/storage.ts";
+import { getDefaultProfileName, listProfiles, ensureConfigDir } from "../infrastructure/config.ts";
+import { AuthenticationError } from "../core/errors.ts";
 import {
   AuthenticateCommandHandler,
   DeleteProfileCommandHandler,
@@ -58,18 +62,82 @@ function parseGlobalFlags(args: string[]): { flags: GlobalFlags; remaining: stri
 }
 
 function setupMediator(mediator: Mediator): void {
-  mediator.registerQueryHandler(new GetAuthStatusQueryHandler(null as any));
-  mediator.registerQueryHandler(new GetProfileStatusesQueryHandler(null as any));
-  mediator.registerQueryHandler(new ListChatsQueryHandler(null as any));
-  mediator.registerQueryHandler(new FetchChatQueryHandler(null as any));
-  mediator.registerQueryHandler(new ListModelsQueryHandler(null as any));
+  const logger = new Logger("mediator");
+  const cookieStorage = new CookieStorage();
+  const profileManager = new ProfileManager(cookieStorage);
+
+  const profileQueryService = {
+    async getProfileStatuses() {
+      return profileManager.getAllStatuses();
+    },
+    async getAuthStatus() {
+      const profiles = listProfiles();
+      if (profiles.length === 0) {
+        return { authenticated: false, profileName: null };
+      }
+      const defaultName = getDefaultProfileName();
+      const isValid = profileManager.hasValidCookies(defaultName);
+      return { authenticated: isValid, profileName: defaultName };
+    },
+  };
+
+  let geminiClient: GeminiClientService | null = null;
+
+  function getGeminiClient(): GeminiClientService {
+    if (geminiClient) return geminiClient;
+    const profiles = listProfiles();
+    if (profiles.length === 0) {
+      throw new AuthenticationError();
+    }
+    const profileName = getDefaultProfileName();
+    try {
+      const cookieData = profileManager.loadCookiesForApi(profileName);
+      geminiClient = new GeminiClientService(
+        { secure1psid: cookieData.secure1psid, secure1psidts: cookieData.secure1psidts },
+        logger,
+      );
+      return geminiClient;
+    } catch {
+      throw new AuthenticationError();
+    }
+  }
+
+  mediator.registerQueryHandler(new GetAuthStatusQueryHandler(profileQueryService));
+  mediator.registerQueryHandler(new GetProfileStatusesQueryHandler(profileQueryService));
+  mediator.registerQueryHandler(new ListChatsQueryHandler({
+    async listChats(options) { return getGeminiClient().listChats(options); },
+    async fetchChat(id) { return getGeminiClient().fetchChat(id); },
+    async listModels() { return getGeminiClient().listModels(); },
+  }));
+  mediator.registerQueryHandler(new FetchChatQueryHandler({
+    async listChats(options) { return getGeminiClient().listChats(options); },
+    async fetchChat(id) { return getGeminiClient().fetchChat(id); },
+    async listModels() { return getGeminiClient().listModels(); },
+  }));
+  mediator.registerQueryHandler(new ListModelsQueryHandler({
+    async listChats(options) { return getGeminiClient().listChats(options); },
+    async fetchChat(id) { return getGeminiClient().fetchChat(id); },
+    async listModels() { return getGeminiClient().listModels(); },
+  }));
   mediator.registerCommandHandler(new AuthenticateCommandHandler(null as any));
   mediator.registerCommandHandler(new DeleteProfileCommandHandler(null as any));
   mediator.registerCommandHandler(new RenameProfileCommandHandler(null as any));
   mediator.registerCommandHandler(new SetDefaultProfileCommandHandler(null as any));
-  mediator.registerCommandHandler(new DeleteConversationCommandHandler(null as any));
-  mediator.registerCommandHandler(new SendMessageCommandHandler(null as any));
-  mediator.registerCommandHandler(new StartNewChatCommandHandler(null as any));
+  mediator.registerCommandHandler(new DeleteConversationCommandHandler({
+    async deleteChat(id) { return getGeminiClient().deleteChat(id); },
+    async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
+    async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
+  }));
+  mediator.registerCommandHandler(new SendMessageCommandHandler({
+    async deleteChat(id) { return getGeminiClient().deleteChat(id); },
+    async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
+    async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
+  }));
+  mediator.registerCommandHandler(new StartNewChatCommandHandler({
+    async deleteChat(id) { return getGeminiClient().deleteChat(id); },
+    async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
+    async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
+  }));
 }
 
 async function main(): Promise<void> {

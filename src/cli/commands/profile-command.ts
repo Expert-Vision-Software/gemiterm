@@ -31,6 +31,12 @@ export class ProfileCommand implements CliCommand {
 
   async execute(args: string[], context: CliCommandContext): Promise<void> {
     const logger = new Logger("profile-command");
+
+    if (args.includes("--help") || args.includes("-h")) {
+      this.showUsage();
+      return;
+    }
+
     const action = args[0] as ProfileAction | undefined;
 
     if (!action) {

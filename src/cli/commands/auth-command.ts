@@ -16,6 +16,11 @@ export class AuthCommand implements CliCommand {
   readonly description = "Authenticate with Google Gemini";
 
   async execute(args: string[], context: CliCommandContext): Promise<void> {
+    if (args.includes("--help") || args.includes("-h")) {
+      this.showUsage();
+      return;
+    }
+
     const logger = new Logger("auth-command");
     const cookieStorage = new CookieStorage();
     const profileManager = new ProfileManager(cookieStorage);
@@ -145,6 +150,15 @@ export class AuthCommand implements CliCommand {
     }
 
     await authService.authenticate(profileName);
+  }
+
+  private showUsage(): void {
+    console.log(chalk.bold("Usage: gemiterm auth"));
+    console.log("");
+    console.log("Authenticate with Google Gemini.");
+    console.log("");
+    console.log("Options:");
+    console.log("  -h, --help    Show this help message");
   }
 
   private promptInput(prompt: string): Promise<string> {
