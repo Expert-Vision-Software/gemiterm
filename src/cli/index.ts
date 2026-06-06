@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    await handler.execute(subcommandArgs, { verbose: flags.verbose });
+    await handler.execute(subcommandArgs, { verbose: flags.verbose, mediator });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Command '${subcommand}' failed: ${message}`);

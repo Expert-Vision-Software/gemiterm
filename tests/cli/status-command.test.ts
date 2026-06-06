@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { StatusCommand } from "../../src/cli/commands/status-command.ts";
+import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
 import * as configModule from "../../src/infrastructure/config.ts";
 
@@ -10,7 +11,7 @@ describe("StatusCommand", () => {
 
   beforeEach(() => {
     command = new StatusCommand();
-    context = { verbose: false };
+    context = { verbose: false, mediator: new Mediator() };
     exitSpy = spyOn(process, "exit").mockImplementation((code?: number) => {
       throw new Error(`process.exit(${code})`);
     });

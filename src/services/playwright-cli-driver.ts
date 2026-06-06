@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import type { Cookie } from "../core/types.ts";
 
 const CLI_BIN = "bunx";
@@ -13,6 +13,7 @@ export class PlaywrightCliError extends Error {
 
 export class PlaywrightCliDriver {
   private readonly logger?: Console;
+  private browserProcess: ChildProcess | null = null;
 
   constructor(logger?: Console) {
     this.logger = logger;
@@ -67,7 +68,25 @@ export class PlaywrightCliDriver {
       "--persistent",
       `--profile=${profile}`,
     );
-    await this.runCli(args);
+
+    const proc = spawn(CLI_BIN, [CLI_PACKAGE, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32",
+      env: { ...process.env },
+      detached: false,
+    });
+
+    this.browserProcess = proc;
+
+    proc.on("error", (err: Error) => {
+      this.logger?.warn(`Browser process error: ${err.message}`);
+    });
+
+    proc.on("close", () => {
+      if (this.browserProcess === proc) {
+        this.browserProcess = null;
+      }
+    });
   }
 
   async evalJs(session: string, expression: string): Promise<string> {

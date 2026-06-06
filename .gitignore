@@ -22,3 +22,6 @@ Thumbs.db
 
 exports
 node_modules
+default
+my-profile
+.playwright-cli

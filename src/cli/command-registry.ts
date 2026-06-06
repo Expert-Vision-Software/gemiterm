@@ -1,9 +1,11 @@
 import { readdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Mediator } from "../core/mediator.ts";
 
 export interface CliCommandContext {
   verbose: boolean;
+  mediator: Mediator;
 }
 
 export interface CliCommand {
@@ -14,7 +16,7 @@ export interface CliCommand {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const COMMANDS_DIR = resolve(__dirname, "..", "commands");
+const COMMANDS_DIR = resolve(__dirname, "commands");
 
 export class CommandRegistry {
   private handlers = new Map<string, CliCommand>();
@@ -55,14 +57,23 @@ export class CommandRegistry {
       );
 
       for (const exported of Object.values(module)) {
+        if (exported == null || typeof exported !== "function") continue;
+
+        let instance: unknown;
+        try {
+          instance = new (exported as new () => CliCommand)();
+        } catch {
+          continue;
+        }
+
         if (
-          exported &&
-          typeof exported === "object" &&
-          "name" in exported &&
-          "execute" in exported &&
-          typeof (exported as CliCommand).execute === "function"
+          instance &&
+          typeof instance === "object" &&
+          "name" in instance &&
+          "execute" in instance &&
+          typeof (instance as CliCommand).execute === "function"
         ) {
-          const command = exported as CliCommand;
+          const command = instance as CliCommand;
           this.register(command.name, command);
         }
       }

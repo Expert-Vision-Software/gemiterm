@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { AuthCommand } from "../../src/cli/commands/auth-command.ts";
+import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
 import * as configModule from "../../src/infrastructure/config.ts";
 
@@ -10,7 +11,7 @@ describe("AuthCommand", () => {
 
   beforeEach(() => {
     command = new AuthCommand();
-    context = { verbose: false };
+    context = { verbose: false, mediator: new Mediator() };
     listSpy = spyOn(configModule, "listProfiles").mockReturnValue([]);
   });
 

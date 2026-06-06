@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { CommandRegistry } from "../../src/cli/command-registry.ts";
+import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommand, CliCommandContext } from "../../src/cli/command-registry.ts";
 
 class FakeCommand implements CliCommand {
@@ -57,7 +58,7 @@ describe("CommandRegistry", () => {
     const handler = new FakeCommand("greet", "Greet", executeMock);
     registry.register("greet", handler);
 
-    const ctx: CliCommandContext = { verbose: false };
+    const ctx: CliCommandContext = { verbose: false, mediator: new Mediator() };
     await registry.getHandler("greet")!.execute(["--name", "World"], ctx);
 
     expect(executeMock).toHaveBeenCalledWith(["--name", "World"], ctx);
