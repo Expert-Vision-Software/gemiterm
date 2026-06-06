@@ -258,3 +258,73 @@ class TestGeminiClientFetchChat:
         result = client.fetch_chat("c_abc")
 
         assert result is None
+
+
+class TestGeminiClientStartNewChat:
+    """Tests for the start_new_chat method."""
+
+    @pytest.fixture
+    def mock_webapi_client(self):
+        with patch("gemiterm.gemini_client.WebAPIClient") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.init = AsyncMock()
+            mock_client.start_chat = MagicMock()
+            mock_client_class.return_value = mock_client
+            yield mock_client
+
+    def _create_client_with_mock_loop(self, mock_webapi_client, loop_mock):
+        client = GeminiClient("test_1psid", "test_1psidts")
+        client._client = mock_webapi_client
+        client._loop = loop_mock
+        return client
+
+    def test_start_new_chat_creates_new_conversation(self, mock_webapi_client):
+        """start_new_chat should create a new chat without cid and send first message."""
+        loop_mock = MagicMock()
+        client = self._create_client_with_mock_loop(mock_webapi_client, loop_mock)
+
+        mock_chat = MagicMock()
+        mock_chat.send_message = AsyncMock()
+        mock_chat.send_message.return_value = MagicMock(text="Hello from Gemini")
+        mock_chat.cid = "c_new_abc123"
+        mock_webapi_client.start_chat.return_value = mock_chat
+
+        result_text, result_cid = client.start_new_chat("Hello")
+
+        mock_webapi_client.start_chat.assert_called_once_with()
+        mock_chat.send_message.assert_called_once_with("Hello")
+        assert result_text == "Hello from Gemini"
+        assert result_cid == "c_new_abc123"
+
+    def test_start_new_chat_returns_text_and_cid(self, mock_webapi_client):
+        """start_new_chat should return tuple of (response_text, conversation_id)."""
+        loop_mock = MagicMock()
+        client = self._create_client_with_mock_loop(mock_webapi_client, loop_mock)
+
+        mock_chat = MagicMock()
+        mock_chat.send_message = AsyncMock()
+        mock_chat.send_message.return_value = MagicMock(text="Response text")
+        mock_chat.cid = "c_new_xyz789"
+        mock_webapi_client.start_chat.return_value = mock_chat
+
+        result = client.start_new_chat("Initial message")
+
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        text, cid = result
+        assert text == "Response text"
+        assert cid == "c_new_xyz789"
+
+    def test_start_new_chat_api_error(self, mock_webapi_client):
+        """start_new_chat should raise GeminiAPIError on API failure."""
+        loop_mock = MagicMock()
+        client = self._create_client_with_mock_loop(mock_webapi_client, loop_mock)
+
+        mock_chat = MagicMock()
+        mock_chat.send_message = AsyncMock(side_effect=Exception("API error"))
+        mock_webapi_client.start_chat.return_value = mock_chat
+
+        from gemiterm.exceptions import GeminiAPIError
+
+        with pytest.raises(GeminiAPIError):
+            client.start_new_chat("Hello")

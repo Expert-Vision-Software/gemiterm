@@ -113,3 +113,14 @@ class GeminiClient:
         except Exception as e:
             logger.debug(f"continue_chat failed: {e}")
             raise GeminiAPIError(f"Failed to continue chat: {e}")
+
+    def start_new_chat(self, message: str) -> tuple[str, str]:
+        try:
+            client = self._ensure_client()
+            loop = self._get_loop()
+            chat = client.start_chat()
+            response = loop.run_until_complete(chat.send_message(message))
+            return response.text, chat.cid
+        except Exception as e:
+            logger.debug(f"start_new_chat failed: {e}")
+            raise GeminiAPIError(f"Failed to start new chat: {e}")

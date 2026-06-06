@@ -98,6 +98,19 @@ Send a message to an existing conversation:
 gemiterm continue <conversation_id> <message>
 ```
 
+### Start a New Chat
+
+Start a new conversation:
+
+```bash
+gemiterm new [message]
+```
+
+Options:
+- `-p, --profile TEXT`: Profile to use for the new conversation
+
+With a message argument, creates a conversation, sends the message, prints the response, and returns the new conversation ID. Without a message argument, creates a conversation and starts an interactive chat session.
+
 ### Export Chat
 
 Export a conversation to a Markdown file:

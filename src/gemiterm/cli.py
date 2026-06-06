@@ -596,6 +596,99 @@ def continue_chat_interactive(
             break
 
 
+@cli.command(name="new")
+@click.argument("message", required=False)
+@click.option(
+    "--profile",
+    "-p",
+    "profile_name",
+    type=str,
+    default=None,
+    help="Profile to use for the new conversation",
+)
+@click.pass_context
+def new_chat(ctx: click.Context, message: str | None, profile_name: str | None) -> None:
+    active_profiles = require_active_profiles(list_profile_statuses())
+
+    if profile_name:
+        if profile_name not in active_profiles:
+            console.print(f"[bold red]Profile '{profile_name}' is not active.[/bold red]")
+            console.print("[yellow]Run 'gemiterm auth' to authenticate.[/yellow]")
+            sys.exit(1)
+        secure_1psid, secure_1psidts = load_cookies(profile_name)
+    else:
+        secure_1psid, secure_1psidts = load_cookies()
+
+    if secure_1psid is None:
+        console.print("[bold red]No active profile found.[/bold red]")
+        console.print("[yellow]Run 'gemiterm auth' to authenticate.[/yellow]")
+        sys.exit(1)
+
+    if message and message.strip():
+        new_chat_single(message, secure_1psid, secure_1psidts)
+    else:
+        new_chat_interactive(secure_1psid, secure_1psidts)
+
+
+def new_chat_single(message: str, secure_1psid: str, secure_1psidts: str | None) -> None:
+    try:
+        client = GeminiClient(secure_1psid, secure_1psidts)
+        response_text, conversation_id = client.start_new_chat(message)
+        console.print(f"[bold green]Response:[/bold green] {response_text}")
+        console.print()
+        console.print(f"[bold cyan]New conversation ID:[/bold cyan] {conversation_id}")
+    except (CookieExpiredError, AuthenticationError, GeminiAPIError) as e:
+        handle_cli_error(e)
+
+
+def new_chat_interactive(secure_1psid: str, secure_1psidts: str | None) -> None:
+    try:
+        client = GeminiClient(secure_1psid, secure_1psidts)
+    except Exception as e:
+        console.print(f"[bold red]Failed to initialize client:[/bold red] {e}")
+        sys.exit(1)
+
+    loop = client._get_loop()
+    web_client = client._ensure_client()
+    chat = web_client.start_chat()
+
+    console.print("[bold cyan]New conversation started.[/bold cyan]")
+    console.print("[dim]Type your message and press Enter to send.[/dim]")
+    console.print("[dim]Type /exit or press Ctrl+C to end the session.[/dim]")
+    console.print()
+
+    while True:
+        try:
+            user_input = input_with_exit("[bold green]>[/bold green] ")
+
+            if user_input.strip().lower() == "/exit":
+                console.print("[bold cyan]Ending chat session...[/bold cyan]")
+                break
+
+            if not user_input.strip():
+                continue
+
+            try:
+                response = loop.run_until_complete(chat.send_message(user_input))
+                console.print(f"[bold blue]Response:[/bold blue] {response.text}")
+                console.print()
+                if chat.cid:
+                    console.print(f"[bold cyan]Conversation ID:[/bold cyan] {chat.cid}")
+                    console.print()
+            except (CookieExpiredError, AuthenticationError) as e:
+                handle_cli_error(e)
+            except GeminiAPIError as e:
+                console.print(f"[bold red]API error:[/bold red] {e}")
+                console.print("[dim]Try sending another message or /exit to quit.[/dim]")
+                console.print()
+        except KeyboardInterrupt:
+            console.print("\n[bold yellow]Session ended by user.[/bold yellow]")
+            break
+        except EOFError:
+            console.print("\n[bold yellow]Session ended.[/bold yellow]")
+            break
+
+
 @cli.command()
 @click.argument("conversation_id")
 @click.option("--force", is_flag=True, help="Skip confirmation prompt")
