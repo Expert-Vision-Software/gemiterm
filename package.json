@@ -12,6 +12,11 @@
     "dev": "bun run src/cli/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:unit": "bun test tests/unit",
+    "test:integration": "bun test tests/integration",
+    "test:parity": "bun test tests/parity",
+    "test:smoke": "bun test tests/smoke",
+    "test:all": "bun test",
     "build": "bun build --compile --target=bun --outdir=dist src/cli/index.ts",
     "build:linux": "bun build --compile --target=bun-linux-x64 --outdir=dist src/cli/index.ts",
     "build:windows": "bun build --compile --target=bun-windows-x64 --outdir=dist src/cli/index.ts"
