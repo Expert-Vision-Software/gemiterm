@@ -1,0 +1,186 @@
+import chalk from "chalk";
+import { createInterface } from "node:readline";
+import type { CliCommand, CliCommandContext } from "../command-registry.ts";
+import type { Mediator, Command } from "../../core/mediator.ts";
+import { Logger } from "../../infrastructure/logger.ts";
+import {
+  COMMAND_TYPES,
+  type StartNewChatCommandPayload,
+  type StartNewChatCommandResult,
+} from "../../core/command-handlers.ts";
+
+interface NewCommandOptions {
+  help: boolean;
+  profile: string | null;
+}
+
+const DEFAULT_OPTIONS: NewCommandOptions = {
+  help: false,
+  profile: null,
+};
+
+export class NewCommand implements CliCommand {
+  readonly name = "new";
+  readonly description = "Start a new conversation";
+
+  async execute(args: string[], context: CliCommandContext): Promise<void> {
+    const logger = new Logger("new-command");
+    const options = this.parseArgs(args);
+
+    if (options.help) {
+      this.showUsage();
+      return;
+    }
+
+    let message: string | null = null;
+
+    for (const arg of args) {
+      if (arg.startsWith("--") || arg.startsWith("-")) continue;
+      if (!message) {
+        message = arg;
+      }
+    }
+
+    const mediator: Mediator = context.mediator;
+
+    if (message) {
+      await this.sendNonInteractive(mediator, message, options.profile, logger);
+    } else {
+      await this.startInteractive(mediator, options.profile, logger);
+    }
+  }
+
+  private async sendNonInteractive(
+    mediator: Mediator,
+    message: string,
+    profileName: string | null,
+    logger: Logger,
+  ): Promise<void> {
+    logger.debug("Starting new chat with message");
+    const payload: StartNewChatCommandPayload = { message };
+    if (profileName) {
+      payload.profileName = profileName;
+    }
+
+    const result = await mediator.send<StartNewChatCommandResult>({
+      type: COMMAND_TYPES.START_NEW_CHAT,
+      payload,
+    } as Command<StartNewChatCommandPayload>);
+
+    console.log(chalk.cyan(`Conversation ID: ${result.conversationId}`));
+    console.log(chalk.blue.bold("Model:"));
+    console.log(result.response);
+  }
+
+  private async startInteractive(
+    mediator: Mediator,
+    profileName: string | null,
+    logger: Logger,
+  ): Promise<void> {
+    const profileLabel = profileName ?? "default";
+    console.log(chalk.dim(`Starting new chat session (profile: ${chalk.cyan(profileLabel)})`));
+    console.log(chalk.dim("Type your message and press Enter. Type /exit to quit.\n"));
+
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    let conversationId: string | null = null;
+
+    const prompt = (): void => {
+      rl.question(chalk.green.bold("You: "), async (input) => {
+        const trimmed = input.trim();
+
+        if (trimmed === "/exit" || trimmed === "/quit") {
+          rl.close();
+          return;
+        }
+
+        if (!trimmed) {
+          prompt();
+          return;
+        }
+
+        try {
+          const payload: StartNewChatCommandPayload = { message: trimmed };
+          if (profileName) {
+            payload.profileName = profileName;
+          }
+
+          const isFirst = !conversationId;
+          const result = await mediator.send<StartNewChatCommandResult>({
+            type: COMMAND_TYPES.START_NEW_CHAT,
+            payload,
+          } as Command<StartNewChatCommandPayload>);
+
+          if (isFirst) {
+            conversationId = result.conversationId;
+            console.log(chalk.dim(`Conversation started: ${chalk.cyan(conversationId)}`));
+          } else {
+            console.log(chalk.dim(`Response from: ${chalk.cyan(result.conversationId)}`));
+          }
+
+          console.log(chalk.blue.bold("Model:"));
+          console.log(result.response);
+          console.log("");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(chalk.red(`Error: ${message}`));
+          console.log("");
+        }
+
+        prompt();
+      });
+    };
+
+    prompt();
+
+    await new Promise<void>((resolve) => {
+      rl.on("close", () => {
+        console.log(chalk.dim("\nGoodbye."));
+        resolve();
+      });
+    });
+  }
+
+  private parseArgs(args: string[]): NewCommandOptions {
+    const options = { ...DEFAULT_OPTIONS };
+
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === "--help" || arg === "-h") {
+        options.help = true;
+      } else if (arg === "--profile" || arg === "-p") {
+        const next = args[i + 1];
+        if (next && !next.startsWith("-")) {
+          options.profile = next;
+          i++;
+        } else {
+          console.error(chalk.red(`Error: --profile requires a profile name`));
+          process.exit(1);
+        }
+      }
+    }
+
+    return options;
+  }
+
+  private showUsage(): void {
+    console.log(chalk.bold("Usage: gemiterm new [message] [options]"));
+    console.log("");
+    console.log(chalk.bold("Arguments:"));
+    console.log(
+      `  ${chalk.cyan("message".padEnd(20))}${chalk.dim("Message to send (optional, starts interactive mode if omitted)")}`,
+    );
+    console.log("");
+    console.log(chalk.bold("Options:"));
+    console.log(
+      `  ${chalk.cyan("--profile, -p <name>".padEnd(22))}${chalk.dim("Use a specific profile (default profile used if omitted)")}`,
+    );
+    console.log(`  ${chalk.cyan("--help, -h".padEnd(22))}${chalk.dim("Show this help message")}`);
+    console.log("");
+    console.log(chalk.dim("If no message is provided, an interactive chat session will start."));
+    console.log(chalk.dim("In interactive mode, type /exit or /quit to exit."));
+  }
+}
