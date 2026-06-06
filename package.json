@@ -19,7 +19,7 @@
     "build:windows": "bun build --compile --target=bun-windows-x64 --outdir=dist src/cli/index.ts"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "chalk": "^5.6.2",
