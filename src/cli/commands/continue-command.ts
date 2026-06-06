@@ -132,7 +132,7 @@ export class ContinueCommand implements CliCommand {
   private async invokeListCommand(context: CliCommandContext): Promise<void> {
     const { CommandRegistry } = await import("../command-registry.ts");
     const registry = new CommandRegistry();
-    await registry.autoDiscover();
+    registry.registerAllCommands();
 
     const listHandler = registry.getHandler("list");
     if (listHandler) {

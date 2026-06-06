@@ -12,7 +12,7 @@ import { validateProfileName } from "../../infrastructure/validators.ts";
 import { formatProfileTable } from "../../infrastructure/formatters.ts";
 
 export class AuthCommand implements CliCommand {
-  readonly name = "login";
+  readonly name = "auth";
   readonly description = "Authenticate with Google Gemini";
 
   async execute(args: string[], context: CliCommandContext): Promise<void> {

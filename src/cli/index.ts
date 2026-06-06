@@ -94,7 +94,7 @@ async function main(): Promise<void> {
   }
 
   const registry = new CommandRegistry();
-  await registry.autoDiscover();
+  registry.registerAllCommands();
 
   const mediator = new Mediator();
   setupMediator(mediator);

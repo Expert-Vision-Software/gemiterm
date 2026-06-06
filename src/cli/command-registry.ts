@@ -1,7 +1,15 @@
-import { readdirSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Mediator } from "../core/mediator.ts";
+import { AuthCommand } from "./commands/auth-command.ts";
+import { ProfileCommand } from "./commands/profile-command.ts";
+import { StatusCommand } from "./commands/status-command.ts";
+import { ListCommand } from "./commands/list-command.ts";
+import { FetchCommand } from "./commands/fetch-command.ts";
+import { ContinueCommand } from "./commands/continue-command.ts";
+import { NewCommand } from "./commands/new-command.ts";
+import { DeleteCommand } from "./commands/delete-command.ts";
+import { ExportCommand } from "./commands/export-command.ts";
+import { ExportAllCommand } from "./commands/export-all-command.ts";
+import { InstallBrowserCommand } from "./commands/install-browser-command.ts";
 
 export interface CliCommandContext {
   verbose: boolean;
@@ -13,10 +21,6 @@ export interface CliCommand {
   readonly description: string;
   execute(args: string[], context: CliCommandContext): Promise<void>;
 }
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const COMMANDS_DIR = resolve(__dirname, "commands");
 
 export class CommandRegistry {
   private handlers = new Map<string, CliCommand>();
@@ -40,43 +44,17 @@ export class CommandRegistry {
     return [...this.handlers.keys()];
   }
 
-  async autoDiscover(): Promise<void> {
-    let entries: string[];
-    try {
-      entries = readdirSync(COMMANDS_DIR);
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      if (!entry.endsWith(".ts") || entry.startsWith("_")) continue;
-
-      const filePath = join(COMMANDS_DIR, entry);
-      const module = await import(
-        `file://${filePath.replace(/\\/g, "/")}`
-      );
-
-      for (const exported of Object.values(module)) {
-        if (exported == null || typeof exported !== "function") continue;
-
-        let instance: unknown;
-        try {
-          instance = new (exported as new () => CliCommand)();
-        } catch {
-          continue;
-        }
-
-        if (
-          instance &&
-          typeof instance === "object" &&
-          "name" in instance &&
-          "execute" in instance &&
-          typeof (instance as CliCommand).execute === "function"
-        ) {
-          const command = instance as CliCommand;
-          this.register(command.name, command);
-        }
-      }
-    }
+  registerAllCommands(): void {
+    this.register("auth", new AuthCommand());
+    this.register("profile", new ProfileCommand());
+    this.register("status", new StatusCommand());
+    this.register("list", new ListCommand());
+    this.register("fetch", new FetchCommand());
+    this.register("continue", new ContinueCommand());
+    this.register("new", new NewCommand());
+    this.register("delete", new DeleteCommand());
+    this.register("export", new ExportCommand());
+    this.register("export-all", new ExportAllCommand());
+    this.register("install-browser", new InstallBrowserCommand());
   }
 }
