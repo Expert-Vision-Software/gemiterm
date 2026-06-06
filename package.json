@@ -10,8 +10,6 @@
   "scripts": {
     "start": "bun run src/cli/index.ts",
     "dev": "bun run src/cli/index.ts",
-    "lint": "ruff check src/",
-    "format": "ruff format src/",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "build": "bun build --compile --target=bun --outdir=dist src/cli/index.ts",

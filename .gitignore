@@ -1,15 +1,3 @@
-# Python build artifacts
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-dist/
-build/
-
-# Python
-*.pyc
-*.pyo
-
 # IDE
 .vscode/
 .idea/
@@ -20,8 +8,12 @@ build/
 .DS_Store
 Thumbs.db
 
-exports
+# Bun
 node_modules
+exports
 default
 my-profile
 .playwright-cli
+
+# Build
+dist/

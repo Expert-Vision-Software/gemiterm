@@ -1,4 +1,0 @@
-python-gemini-api
-playwright
-click
-rich
