@@ -41,10 +41,10 @@ function parseGlobalFlags(args: string[]): { flags: GlobalFlags; remaining: stri
   for (const arg of args) {
     switch (arg) {
       case "--verbose":
+      case "-v":
         flags.verbose = true;
         break;
       case "--version":
-      case "-v":
         flags.version = true;
         break;
       case "--help":
@@ -88,13 +88,13 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  if (remaining.length === 0 || flags.help) {
-    showHelp();
-    process.exit(0);
-  }
-
   const registry = new CommandRegistry();
   registry.registerAllCommands();
+
+  if (remaining.length === 0 || flags.help) {
+    showHelp(registry);
+    process.exit(0);
+  }
 
   const mediator = new Mediator();
   setupMediator(mediator);
