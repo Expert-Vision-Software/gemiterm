@@ -8,20 +8,23 @@ describe("AuthCommand", () => {
   let command: AuthCommand;
   let context: CliCommandContext;
   let listSpy: ReturnType<typeof spyOn>;
+  let defaultProfileSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new AuthCommand();
     context = { verbose: false, mediator: new Mediator() };
     listSpy = spyOn(configModule, "listProfiles").mockReturnValue([]);
+    defaultProfileSpy = spyOn(configModule, "getDefaultProfileName").mockReturnValue("default");
   });
 
   afterEach(() => {
     mock.restore();
     listSpy.mockRestore();
+    defaultProfileSpy.mockRestore();
   });
 
   test("has correct name and description", () => {
-    expect(command.name).toBe("login");
+    expect(command.name).toBe("auth");
     expect(command.description).toBe("Authenticate with Google Gemini");
   });
 

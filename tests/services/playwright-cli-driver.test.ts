@@ -46,32 +46,20 @@ describe("PlaywrightCliDriver", () => {
   });
 
   describe("openHeaded", () => {
-    test("constructs correct args without session", async () => {
-      const origRunCli = driver.runCli.bind(driver);
-      const runCliMock = mock(async (args: string[]) => {
-        expect(args).toContain("open");
-        expect(args).toContain("https://gemini.google.com");
-        expect(args).toContain("--browser=chromium");
-        expect(args).toContain("--headed");
-        expect(args).toContain("--persistent");
-        expect(args).toContain("--profile=my-profile");
-        return "";
-      });
-      driver.runCli = runCliMock;
-
-      await driver.openHeaded("https://gemini.google.com", "my-profile");
-      expect(runCliMock).toHaveBeenCalledTimes(1);
+    test("constructs correct args without session", () => {
+      const args = driver.buildOpenHeadedArgs("https://gemini.google.com", "my-profile");
+      expect(args).toContain("open");
+      expect(args).toContain("https://gemini.google.com");
+      expect(args).toContain("--browser=chromium");
+      expect(args).toContain("--headed");
+      expect(args).toContain("--persistent");
+      expect(args).toContain("--profile=my-profile");
+      expect(args).not.toContain(expect.stringContaining("-s="));
     });
 
-    test("includes session flag when provided", async () => {
-      const runCliMock = mock(async (args: string[]) => {
-        expect(args[0]).toBe("-s=my-session");
-        return "";
-      });
-      driver.runCli = runCliMock;
-
-      await driver.openHeaded("https://gemini.google.com", "my-profile", "my-session");
-      expect(runCliMock).toHaveBeenCalledTimes(1);
+    test("includes session flag when provided", () => {
+      const args = driver.buildOpenHeadedArgs("https://gemini.google.com", "my-profile", "my-session");
+      expect(args[0]).toBe("-s=my-session");
     });
   });
 

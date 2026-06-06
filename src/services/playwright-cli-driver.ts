@@ -56,6 +56,27 @@ export class PlaywrightCliDriver {
   }
 
   async openHeaded(url: string, profile: string, session?: string): Promise<void> {
+    const args = this.buildOpenHeadedArgs(url, profile, session);
+
+    this.browserProcess = spawn(CLI_BIN, [CLI_PACKAGE, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: process.platform === "win32",
+      env: { ...process.env },
+      detached: false,
+    });
+
+    this.browserProcess.on("error", (err: Error) => {
+      this.logger?.warn(`Browser process error: ${err.message}`);
+    });
+
+    this.browserProcess.on("close", () => {
+      if (this.browserProcess) {
+        this.browserProcess = null;
+      }
+    });
+  }
+
+  buildOpenHeadedArgs(url: string, profile: string, session?: string): string[] {
     const args: string[] = [];
     if (session) {
       args.push(`-s=${session}`);
@@ -68,25 +89,7 @@ export class PlaywrightCliDriver {
       "--persistent",
       `--profile=${profile}`,
     );
-
-    const proc = spawn(CLI_BIN, [CLI_PACKAGE, ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: process.platform === "win32",
-      env: { ...process.env },
-      detached: false,
-    });
-
-    this.browserProcess = proc;
-
-    proc.on("error", (err: Error) => {
-      this.logger?.warn(`Browser process error: ${err.message}`);
-    });
-
-    proc.on("close", () => {
-      if (this.browserProcess === proc) {
-        this.browserProcess = null;
-      }
-    });
+    return args;
   }
 
   async evalJs(session: string, expression: string): Promise<string> {
