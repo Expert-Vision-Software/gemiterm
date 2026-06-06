@@ -657,6 +657,7 @@ def new_chat_interactive(secure_1psid: str, secure_1psidts: str | None) -> None:
     console.print("[dim]Type /exit or press Ctrl+C to end the session.[/dim]")
     console.print()
 
+    shown_cid = False
     while True:
         try:
             user_input = input_with_exit("[bold green]>[/bold green] ")
@@ -672,9 +673,10 @@ def new_chat_interactive(secure_1psid: str, secure_1psidts: str | None) -> None:
                 response = loop.run_until_complete(chat.send_message(user_input))
                 console.print(f"[bold blue]Response:[/bold blue] {response.text}")
                 console.print()
-                if chat.cid:
+                if chat.cid and not shown_cid:
                     console.print(f"[bold cyan]Conversation ID:[/bold cyan] {chat.cid}")
                     console.print()
+                    shown_cid = True
             except (CookieExpiredError, AuthenticationError) as e:
                 handle_cli_error(e)
             except GeminiAPIError as e:
