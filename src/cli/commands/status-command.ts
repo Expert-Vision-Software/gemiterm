@@ -11,6 +11,17 @@ export class StatusCommand implements CliCommand {
 
   async execute(args: string[], context: CliCommandContext): Promise<void> {
     const logger = new Logger("status-command");
+
+    if (args.includes("--help") || args.includes("-h")) {
+      console.log("Usage: gemiterm status");
+      console.log("");
+      console.log("Show configuration and profile status.");
+      console.log("");
+      console.log("Options:");
+      console.log("  -h, --help    Show this help message");
+      return;
+    }
+
     ensureConfigDir();
 
     const configDir = getConfigDir();
