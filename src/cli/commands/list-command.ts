@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator } from "../../core/mediator.ts";
+import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import {
   QUERY_TYPES,
@@ -66,7 +66,7 @@ export class ListCommand implements CliCommand {
     const result = await mediator.send<ListChatsQueryResult>({
       type: QUERY_TYPES.LIST_CHATS,
       payload: query,
-    });
+    } as Query<ListChatsQueryPayload>);
 
     let chats = result.chats;
 

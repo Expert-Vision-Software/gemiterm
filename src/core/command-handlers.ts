@@ -3,7 +3,7 @@ import type { AuthResult } from "./types.ts";
 import { AuthenticationError } from "./errors.ts";
 
 function extractPayload<T>(command: Command<T>): T {
-  return command.payload as unknown as T;
+  return command.payload;
 }
 
 export interface AuthenticateCommandPayload {
@@ -94,7 +94,7 @@ export interface IGeminiClientService {
 }
 
 export class AuthenticateCommandHandler
-  implements CommandHandler<Command<AuthenticateCommandPayload>, AuthenticateCommandResult>
+  implements CommandHandler<AuthenticateCommandPayload, AuthenticateCommandResult>
 {
   readonly commandType = COMMAND_TYPES.AUTHENTICATE;
   private readonly profileService: IProfileService;
@@ -122,7 +122,7 @@ export class AuthenticateCommandHandler
 }
 
 export class DeleteProfileCommandHandler
-  implements CommandHandler<Command<DeleteProfileCommandPayload>, DeleteProfileCommandResult>
+  implements CommandHandler<DeleteProfileCommandPayload, DeleteProfileCommandResult>
 {
   readonly commandType = COMMAND_TYPES.DELETE_PROFILE;
   private readonly profileService: IProfileService;
@@ -139,7 +139,7 @@ export class DeleteProfileCommandHandler
 }
 
 export class RenameProfileCommandHandler
-  implements CommandHandler<Command<RenameProfileCommandPayload>, RenameProfileCommandResult>
+  implements CommandHandler<RenameProfileCommandPayload, RenameProfileCommandResult>
 {
   readonly commandType = COMMAND_TYPES.RENAME_PROFILE;
   private readonly profileService: IProfileService;
@@ -157,7 +157,7 @@ export class RenameProfileCommandHandler
 
 export class SetDefaultProfileCommandHandler
   implements
-    CommandHandler<Command<SetDefaultProfileCommandPayload>, SetDefaultProfileCommandResult>
+    CommandHandler<SetDefaultProfileCommandPayload, SetDefaultProfileCommandResult>
 {
   readonly commandType = COMMAND_TYPES.SET_DEFAULT_PROFILE;
   private readonly profileService: IProfileService;
@@ -177,7 +177,7 @@ export class SetDefaultProfileCommandHandler
 
 export class DeleteConversationCommandHandler
   implements
-    CommandHandler<Command<DeleteConversationCommandPayload>, DeleteConversationCommandResult>
+    CommandHandler<DeleteConversationCommandPayload, DeleteConversationCommandResult>
 {
   readonly commandType = COMMAND_TYPES.DELETE_CONVERSATION;
   private readonly geminiClient: IGeminiClientService;
@@ -196,7 +196,7 @@ export class DeleteConversationCommandHandler
 }
 
 export class SendMessageCommandHandler
-  implements CommandHandler<Command<SendMessageCommandPayload>, SendMessageCommandResult>
+  implements CommandHandler<SendMessageCommandPayload, SendMessageCommandResult>
 {
   readonly commandType = COMMAND_TYPES.SEND_MESSAGE;
   private readonly geminiClient: IGeminiClientService;
@@ -213,7 +213,7 @@ export class SendMessageCommandHandler
 }
 
 export class StartNewChatCommandHandler
-  implements CommandHandler<Command<StartNewChatCommandPayload>, StartNewChatCommandResult>
+  implements CommandHandler<StartNewChatCommandPayload, StartNewChatCommandResult>
 {
   readonly commandType = COMMAND_TYPES.START_NEW_CHAT;
   private readonly geminiClient: IGeminiClientService;

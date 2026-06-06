@@ -2,7 +2,7 @@ import type { Query, QueryHandler } from "./mediator.ts";
 import type { ChatInfo, Message, ProfileStatus } from "./types.ts";
 
 function extractPayload<T>(query: Query<T>): T {
-  return query.payload as unknown as T;
+  return query.payload;
 }
 
 export interface ListChatsQueryPayload {
@@ -65,7 +65,7 @@ export interface IProfileQueryService {
 }
 
 export class ListChatsQueryHandler
-  implements QueryHandler<Query<ListChatsQueryPayload>, ListChatsQueryResult>
+  implements QueryHandler<ListChatsQueryPayload, ListChatsQueryResult>
 {
   readonly queryType = QUERY_TYPES.LIST_CHATS;
   private readonly geminiClient: IGeminiClientQueryService;
@@ -82,7 +82,7 @@ export class ListChatsQueryHandler
 }
 
 export class FetchChatQueryHandler
-  implements QueryHandler<Query<FetchChatQueryPayload>, FetchChatQueryResult>
+  implements QueryHandler<FetchChatQueryPayload, FetchChatQueryResult>
 {
   readonly queryType = QUERY_TYPES.FETCH_CHAT;
   private readonly geminiClient: IGeminiClientQueryService;
@@ -99,7 +99,7 @@ export class FetchChatQueryHandler
 }
 
 export class GetProfileStatusesQueryHandler
-  implements QueryHandler<Query<GetProfileStatusesQueryPayload>, GetProfileStatusesQueryResult>
+  implements QueryHandler<GetProfileStatusesQueryPayload, GetProfileStatusesQueryResult>
 {
   readonly queryType = QUERY_TYPES.GET_PROFILE_STATUSES;
   private readonly profileService: IProfileQueryService;
@@ -115,7 +115,7 @@ export class GetProfileStatusesQueryHandler
 }
 
 export class GetAuthStatusQueryHandler
-  implements QueryHandler<Query<GetAuthStatusQueryPayload>, GetAuthStatusQueryResult>
+  implements QueryHandler<GetAuthStatusQueryPayload, GetAuthStatusQueryResult>
 {
   readonly queryType = QUERY_TYPES.GET_AUTH_STATUS;
   private readonly profileService: IProfileQueryService;
@@ -131,7 +131,7 @@ export class GetAuthStatusQueryHandler
 }
 
 export class ListModelsQueryHandler
-  implements QueryHandler<Query<ListModelsQueryPayload>, ListModelsQueryResult>
+  implements QueryHandler<ListModelsQueryPayload, ListModelsQueryResult>
 {
   readonly queryType = QUERY_TYPES.LIST_MODELS;
   private readonly geminiClient: IGeminiClientQueryService;
