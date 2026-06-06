@@ -39,20 +39,18 @@ function parseGlobalFlags(args: string[]): { flags: GlobalFlags; remaining: stri
   const remaining: string[] = [];
 
   for (const arg of args) {
-    switch (arg) {
-      case "--verbose":
-      case "-v":
-        flags.verbose = true;
-        break;
-      case "--version":
-        flags.version = true;
-        break;
-      case "--help":
-      case "-h":
+    if (arg === "--verbose" || arg === "-v") {
+      flags.verbose = true;
+    } else if (arg === "--version") {
+      flags.version = true;
+    } else if (arg === "--help" || arg === "-h") {
+      if (remaining.length === 0) {
         flags.help = true;
-        break;
-      default:
+      } else {
         remaining.push(arg);
+      }
+    } else {
+      remaining.push(arg);
     }
   }
 
@@ -91,7 +89,7 @@ async function main(): Promise<void> {
   const registry = new CommandRegistry();
   registry.registerAllCommands();
 
-  if (remaining.length === 0 || flags.help) {
+  if (remaining.length === 0) {
     showHelp(registry);
     process.exit(0);
   }
