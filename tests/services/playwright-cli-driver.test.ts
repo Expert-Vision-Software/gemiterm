@@ -1,11 +1,39 @@
-import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
-import { PlaywrightCliDriver, PlaywrightCliError } from "../../src/services/playwright-cli-driver.ts";
+import { describe, test, expect, beforeEach, mock } from "bun:test";
+import {
+  PlaywrightCliDriver,
+  PlaywrightCliError,
+  type PlaywrightRunner,
+  type PlaywrightRunnerResult,
+  type PlaywrightStrategy,
+} from "../../src/services/playwright-cli-driver.ts";
+
+function createMockRunner(strategy: PlaywrightStrategy = "direct"): PlaywrightRunner & {
+  _run: ReturnType<typeof mock>;
+  _spawnDetached: ReturnType<typeof mock>;
+  _results: PlaywrightRunnerResult[];
+} {
+  const _run = mock(async (_args: string[]) => ({ exitCode: 0, stdout: "1.0.0", stderr: "" }));
+  const _spawnDetached = mock((_args: string[]) => {});
+  return {
+    strategy,
+    _run,
+    _spawnDetached,
+    _results: [],
+    async run(args) {
+      const result = await _run(args);
+      return result;
+    },
+    spawnDetached(args) {
+      _spawnDetached(args);
+    },
+  };
+}
 
 describe("PlaywrightCliDriver", () => {
   let driver: PlaywrightCliDriver;
 
   beforeEach(() => {
-    driver = new PlaywrightCliDriver();
+    driver = new PlaywrightCliDriver({ runner: createMockRunner() });
   });
 
   describe("withSession", () => {
@@ -22,56 +50,98 @@ describe("PlaywrightCliDriver", () => {
 
   describe("runCli", () => {
     test("resolves with stdout on successful exit", async () => {
-      const result = await driver.runCli(["--version"]);
-      expect(result).toBeTruthy();
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 0, stdout: "v1.2.3", stderr: "" });
+      const d = new PlaywrightCliDriver({ runner });
+
+      const result = await d.runCli(["--version"]);
+      expect(result).toBe("v1.2.3");
+      expect(runner._run).toHaveBeenCalledWith(["--version"]);
     });
 
     test("rejects with PlaywrightCliError on non-zero exit", async () => {
-      await expect(driver.runCli(["nonexistent-command"])).rejects.toBeInstanceOf(
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "boom" });
+      const d = new PlaywrightCliDriver({ runner });
+
+      await expect(d.runCli(["nonexistent-command"])).rejects.toBeInstanceOf(
         PlaywrightCliError,
       );
     });
 
     test("PlaywrightCliError has correct properties", async () => {
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 2, stdout: "", stderr: "nope" });
+      const d = new PlaywrightCliDriver({ runner });
+
       try {
-        await driver.runCli(["nonexistent-command"]);
+        await d.runCli(["nonexistent-command"]);
         expect.unreachable("Should have thrown");
       } catch (err) {
         expect(err).toBeInstanceOf(PlaywrightCliError);
         const e = err as PlaywrightCliError;
         expect(e.name).toBe("PlaywrightCliError");
         expect(e.message).toContain("nonexistent-command");
+        expect(e.message).toContain("nope");
       }
     });
   });
 
   describe("openHeaded", () => {
     test("constructs correct args without session", () => {
-      const args = driver.buildOpenHeadedArgs("https://gemini.google.com", "my-profile");
+      const d = new PlaywrightCliDriver({
+        runner: createMockRunner(),
+        profileDirResolver: (name) => `/abs/path/to/${name}`,
+      });
+      const args = d.buildOpenHeadedArgs("https://gemini.google.com/app", "my-profile");
       expect(args).toContain("open");
-      expect(args).toContain("https://gemini.google.com");
+      expect(args).toContain("https://gemini.google.com/app");
       expect(args).toContain("--browser=chromium");
       expect(args).toContain("--headed");
       expect(args).toContain("--persistent");
-      expect(args).toContain("--profile=my-profile");
+      expect(args).toContain("--profile=/abs/path/to/my-profile");
       expect(args).not.toContain(expect.stringContaining("-s="));
     });
 
     test("includes session flag when provided", () => {
-      const args = driver.buildOpenHeadedArgs("https://gemini.google.com", "my-profile", "my-session");
+      const args = driver.buildOpenHeadedArgs(
+        "https://gemini.google.com/app",
+        "my-profile",
+        "my-session",
+      );
       expect(args[0]).toBe("-s=my-session");
+    });
+
+    test("resolves profile to absolute path via injected resolver", () => {
+      const resolver = mock((name: string) => `/custom/root/${name}`);
+      const d = new PlaywrightCliDriver({ runner: createMockRunner(), profileDirResolver: resolver });
+      const args = d.buildOpenHeadedArgs("https://gemini.google.com/app", "p1");
+      expect(args).toContain("--profile=/custom/root/p1");
+      expect(resolver).toHaveBeenCalledWith("p1");
+    });
+
+    test("openHeaded spawns detached with correct args", async () => {
+      const runner = createMockRunner();
+      const d = new PlaywrightCliDriver({ runner });
+      await d.openHeaded("https://gemini.google.com/app", "p1", "s1");
+      expect(runner._spawnDetached).toHaveBeenCalledTimes(1);
+      const args = runner._spawnDetached.mock.calls[0]![0] as string[];
+      expect(args[0]).toBe("-s=s1");
+      expect(args).toContain("open");
+      expect(args).toContain("https://gemini.google.com/app");
     });
   });
 
   describe("evalJs", () => {
-    test("passes expression with session and json flag", async () => {
-      const runCliMock = mock(async (args: string[]) => {
-        expect(args).toEqual(["-s=test-session", "eval", "() => document.title", "--json"]);
-        return '"Gemini"';
+    test("passes expression with session, no --json flag", async () => {
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
+        expect(args).toEqual(["-s=test-session", "eval", "() => document.title"]);
+        return { exitCode: 0, stdout: '"Gemini"', stderr: "" };
       });
-      driver.runCli = runCliMock;
+      const d = new PlaywrightCliDriver({ runner });
 
-      const result = await driver.evalJs("test-session", "() => document.title");
+      const result = await d.evalJs("test-session", "() => document.title");
       expect(result).toBe('"Gemini"');
     });
   });
@@ -101,13 +171,14 @@ describe("PlaywrightCliDriver", () => {
         },
       ]);
 
-      const runCliMock = mock(async (args: string[]) => {
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
         expect(args).toEqual(["-s=sess1", "cookie-list", "--json"]);
-        return cookieData;
+        return { exitCode: 0, stdout: cookieData, stderr: "" };
       });
-      driver.runCli = runCliMock;
+      const d = new PlaywrightCliDriver({ runner });
 
-      const cookies = await driver.cookieList("sess1");
+      const cookies = await d.cookieList("sess1");
       expect(cookies).toHaveLength(2);
       expect(cookies[0].name).toBe("__Secure-1PSID");
       expect(cookies[0].value).toBe("abc123");
@@ -116,28 +187,33 @@ describe("PlaywrightCliDriver", () => {
     });
 
     test("returns empty array for invalid JSON", async () => {
-      const runCliMock = mock(async () => "not-json");
-      driver.runCli = runCliMock;
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 0, stdout: "not-json", stderr: "" });
+      const d = new PlaywrightCliDriver({ runner });
 
-      const cookies = await driver.cookieList("sess1");
+      const cookies = await d.cookieList("sess1");
       expect(cookies).toEqual([]);
     });
 
     test("returns empty array for non-array JSON", async () => {
-      const runCliMock = mock(async () => '{"error": "no cookies"}');
-      driver.runCli = runCliMock;
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 0, stdout: '{"error": "no cookies"}', stderr: "" });
+      const d = new PlaywrightCliDriver({ runner });
 
-      const cookies = await driver.cookieList("sess1");
+      const cookies = await d.cookieList("sess1");
       expect(cookies).toEqual([]);
     });
 
     test("handles cookies missing fields with defaults", async () => {
-      const runCliMock = mock(async () =>
-        JSON.stringify([{ name: "test-cookie", value: "val" }]),
-      );
-      driver.runCli = runCliMock;
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: JSON.stringify([{ name: "test-cookie", value: "val" }]),
+        stderr: "",
+      });
+      const d = new PlaywrightCliDriver({ runner });
 
-      const cookies = await driver.cookieList("sess1");
+      const cookies = await d.cookieList("sess1");
       expect(cookies).toHaveLength(1);
       expect(cookies[0].name).toBe("test-cookie");
       expect(cookies[0].domain).toBe("");
@@ -151,53 +227,90 @@ describe("PlaywrightCliDriver", () => {
 
   describe("stateSave", () => {
     test("passes correct args", async () => {
-      const runCliMock = mock(async (args: string[]) => {
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
         expect(args).toEqual(["-s=sess1", "state-save", "/tmp/state.json"]);
-        return "";
+        return { exitCode: 0, stdout: "", stderr: "" };
       });
-      driver.runCli = runCliMock;
+      const d = new PlaywrightCliDriver({ runner });
 
-      await driver.stateSave("sess1", "/tmp/state.json");
-      expect(runCliMock).toHaveBeenCalledTimes(1);
+      await d.stateSave("sess1", "/tmp/state.json");
+      expect(runner._run).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("stateLoad", () => {
     test("passes correct args", async () => {
-      const runCliMock = mock(async (args: string[]) => {
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
         expect(args).toEqual(["-s=sess1", "state-load", "/tmp/state.json"]);
-        return "";
+        return { exitCode: 0, stdout: "", stderr: "" };
       });
-      driver.runCli = runCliMock;
+      const d = new PlaywrightCliDriver({ runner });
 
-      await driver.stateLoad("sess1", "/tmp/state.json");
-      expect(runCliMock).toHaveBeenCalledTimes(1);
+      await d.stateLoad("sess1", "/tmp/state.json");
+      expect(runner._run).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("closeSession", () => {
     test("passes correct args", async () => {
-      const runCliMock = mock(async (args: string[]) => {
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
         expect(args).toEqual(["-s=sess1", "close"]);
-        return "";
+        return { exitCode: 0, stdout: "", stderr: "" };
       });
-      driver.runCli = runCliMock;
+      const d = new PlaywrightCliDriver({ runner });
 
-      await driver.closeSession("sess1");
-      expect(runCliMock).toHaveBeenCalledTimes(1);
+      await d.closeSession("sess1");
+      expect(runner._run).toHaveBeenCalledTimes(1);
+    });
+
+    test("swallows 'not found' errors (session already closed)", async () => {
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: "",
+        stderr: "session not found",
+      });
+      const d = new PlaywrightCliDriver({ runner });
+
+      await expect(d.closeSession("sess1")).resolves.toBeUndefined();
+    });
+
+    test("propagates other PlaywrightCliError failures", async () => {
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: "",
+        stderr: "something else failed",
+      });
+      const d = new PlaywrightCliDriver({ runner });
+
+      await expect(d.closeSession("sess1")).rejects.toBeInstanceOf(PlaywrightCliError);
     });
   });
 
   describe("closeAll", () => {
     test("passes correct args without session", async () => {
-      const runCliMock = mock(async (args: string[]) => {
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
         expect(args).toEqual(["close-all"]);
-        return "";
+        return { exitCode: 0, stdout: "", stderr: "" };
       });
-      driver.runCli = runCliMock;
+      const d = new PlaywrightCliDriver({ runner });
 
-      await driver.closeAll();
-      expect(runCliMock).toHaveBeenCalledTimes(1);
+      await d.closeAll();
+      expect(runner._run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("strategy", () => {
+    test("exposes the runner's strategy", () => {
+      const d1 = new PlaywrightCliDriver({ runner: createMockRunner("direct") });
+      expect(d1.strategy).toBe("direct");
+      const d2 = new PlaywrightCliDriver({ runner: createMockRunner("bunx") });
+      expect(d2.strategy).toBe("bunx");
     });
   });
 });

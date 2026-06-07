@@ -1,5 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:test";
-import { AuthService, AuthServiceTimeoutError } from "../../src/services/auth-service.ts";
+import {
+  AuthService,
+  AuthServiceTimeoutError,
+} from "../../src/services/auth-service.ts";
+import { BrowserClosedError } from "../../src/services/cookie-monitor.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
@@ -7,13 +11,21 @@ import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 function createMockDriver() {
   return {
     openHeaded: mock(async (_url: string, _profile: string, _session?: string) => {}),
+    closeSession: mock(async (_session: string) => {}),
     closeAll: mock(async () => {}),
   };
 }
 
 function createMockCookieMonitor() {
   return {
-    start: mock(async (_session: string, _callback: (cookies: Cookie[]) => void, _timeout?: number) => {}),
+    start: mock(
+      async (
+        _session: string,
+        _onCookiesFound: (cookies: Cookie[]) => void,
+        _timeoutMs?: number,
+        _onBrowserClosed?: () => void,
+      ) => {},
+    ),
     stop: mock(() => {}),
     isRunning: false,
   };
@@ -60,6 +72,20 @@ function makeAuthCookies(): Cookie[] {
   ];
 }
 
+function buildService(
+  driver: ReturnType<typeof createMockDriver>,
+  cookieMonitor: ReturnType<typeof createMockCookieMonitor>,
+  cookieStorage: ReturnType<typeof createMockCookieStorage>,
+  logger: Logger,
+) {
+  return new AuthService({
+    driver: driver as never,
+    cookieMonitor: cookieMonitor as never,
+    cookieStorage: cookieStorage as never,
+    logger,
+  });
+}
+
 describe("AuthService", () => {
   let driver: ReturnType<typeof createMockDriver>;
   let cookieMonitor: ReturnType<typeof createMockCookieMonitor>;
@@ -81,188 +107,150 @@ describe("AuthService", () => {
   describe("authenticate", () => {
     test("completes full auth flow and returns cookies", async () => {
       const authCookies = makeAuthCookies();
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(authCookies);
+        },
+      );
 
-      cookieMonitor.start.mockImplementation(async (_session, callback) => {
-        callback(authCookies);
-      });
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
 
-      const promptSpy = spyOn(console, "log").mockImplementation(() => {});
-
-      process.env.GEMITERM_CONFIG_DIR = "";
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
-
-      spyOn(svc, "waitForEnter").mockResolvedValue(undefined);
-
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
       const result = await svc.authenticate("test-profile");
 
       expect(result.cookies).toHaveLength(2);
-      expect(result.cookies[0].name).toBe("__Secure-1PSID");
+      expect(result.cookies[0]!.name).toBe("__Secure-1PSID");
       expect(result.expiresAt).not.toBeNull();
       expect(driver.openHeaded).toHaveBeenCalledTimes(1);
       expect(cookieMonitor.start).toHaveBeenCalledTimes(1);
       expect(cookieStorage.save).toHaveBeenCalledTimes(1);
-      expect(driver.closeAll).toHaveBeenCalledTimes(1);
-      promptSpy.mockRestore();
-      delete process.env.GEMITERM_CONFIG_DIR;
+      expect(driver.closeSession).toHaveBeenCalledTimes(1);
+      expect(driver.closeSession).toHaveBeenCalledWith("test-profile");
+      expect(driver.closeAll).not.toHaveBeenCalled();
+      logSpy.mockRestore();
     });
 
     test("rejects on timeout", async () => {
-      cookieMonitor.start.mockImplementation(async () => {
-        // never calls callback -> timeout
-      });
+      cookieMonitor.start.mockImplementationOnce(
+        async () => {
+          // never invokes callback -> hard timeout fires
+        },
+      );
 
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
-      await expect(svc.waitForCookies("default", 100)).rejects.toThrow(
+      await expect(svc.waitForLogin("default", 50)).rejects.toBeInstanceOf(
         AuthServiceTimeoutError,
       );
     });
 
-    test("throws on invalid profile name", async () => {
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+    test("rejects with BrowserClosedError when monitor reports browser closed", async () => {
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, _onFound, _timeout, onBrowserClosed) => {
+          onBrowserClosed?.();
+        },
+      );
 
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+
+      await expect(svc.waitForLogin("default", 60_000)).rejects.toBeInstanceOf(
+        BrowserClosedError,
+      );
+    });
+
+    test("throws on invalid profile name", async () => {
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
       await expect(svc.authenticate("bad name!")).rejects.toThrow("invalid characters");
     });
   });
 
-  describe("promptUser", () => {
-    test("prints the prompt message", () => {
+  describe("notifyUser", () => {
+    test("prints the URL and a hint about auto-detection", () => {
       const logSpy = spyOn(console, "log").mockImplementation(() => {});
 
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      svc.notifyUser("default");
 
-      svc.promptUser();
-      expect(logSpy).toHaveBeenCalledTimes(1);
-      const msg = logSpy.mock.calls[0][0] as string;
-      expect(msg).toContain("Press Enter to launch browser...");
+      const all = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(all).toContain("Opening headed browser");
+      expect(all).toContain("https://gemini.google.com/app");
+      expect(all).toContain("auto-detect");
       logSpy.mockRestore();
     });
   });
 
   describe("launchBrowser", () => {
-    test("calls openHeaded with correct URL, profile and session", async () => {
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+    test("calls openHeaded with app URL, profile name as both profile and session", async () => {
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
       await svc.launchBrowser("my-profile");
 
       expect(driver.openHeaded).toHaveBeenCalledTimes(1);
       expect(driver.openHeaded).toHaveBeenCalledWith(
-        "https://gemini.google.com",
+        "https://gemini.google.com/app",
         "my-profile",
-        "auth-my-profile",
+        "my-profile",
       );
     });
   });
 
-  describe("startCookieMonitor", () => {
-    test("logs the target session name", () => {
-      const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
-
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
-
-      svc.startCookieMonitor("default");
-      expect(infoSpy).toHaveBeenCalledWith(
-        "Cookie monitor target session: auth-default",
-      );
-      infoSpy.mockRestore();
-    });
-  });
-
-  describe("waitForCookies", () => {
+  describe("waitForLogin", () => {
     test("resolves with cookies when monitor callback fires", async () => {
       const authCookies = makeAuthCookies();
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(authCookies);
+        },
+      );
 
-      cookieMonitor.start.mockImplementation(async (_session, callback) => {
-        callback(authCookies);
-      });
-
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
-
-      const cookies = await svc.waitForCookies("default");
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const cookies = await svc.waitForLogin("default", 60_000);
       expect(cookies).toHaveLength(2);
-      expect(cookies[0].name).toBe("__Secure-1PSID");
+      expect(cookies[0]!.name).toBe("__Secure-1PSID");
     });
 
-    test("rejects with AuthServiceTimeoutError on timeout", async () => {
-      cookieMonitor.start.mockImplementation(async () => {});
+    test("rejects with AuthServiceTimeoutError on hard timeout", async () => {
+      cookieMonitor.start.mockImplementationOnce(async () => {});
 
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
-      await expect(svc.waitForCookies("default", 50)).rejects.toBeInstanceOf(
+      await expect(svc.waitForLogin("default", 50)).rejects.toBeInstanceOf(
         AuthServiceTimeoutError,
       );
     });
 
     test("stops cookie monitor on timeout", async () => {
-      cookieMonitor.start.mockImplementation(async () => {});
+      cookieMonitor.start.mockImplementationOnce(async () => {});
 
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
       try {
-        await svc.waitForCookies("default", 50);
+        await svc.waitForLogin("default", 50);
       } catch {
         // expected
       }
 
       expect(cookieMonitor.stop).toHaveBeenCalled();
     });
+
+    test("does not double-resolve when timeout and callback race", async () => {
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          // schedule callback AND let the timeout race
+          setTimeout(() => callback(makeAuthCookies()), 5);
+        },
+      );
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const cookies = await svc.waitForLogin("default", 200);
+      expect(cookies).toHaveLength(2);
+    });
   });
 
   describe("extractCookies", () => {
     test("saves cookies via cookieStorage", async () => {
       const cookies = makeAuthCookies();
-
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
       await svc.extractCookies("default", cookies);
 
@@ -272,67 +260,61 @@ describe("AuthService", () => {
   });
 
   describe("confirmAuthSuccess", () => {
-    test("prints success message with cookie count", () => {
+    test("prints success messages, expiry, and __Secure-1PSID check", () => {
       const logSpy = spyOn(console, "log").mockImplementation(() => {});
 
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      svc.confirmAuthSuccess(2, new Date("2026-12-31T00:00:00Z"), makeAuthCookies());
 
-      svc.confirmAuthSuccess(2, new Date("2026-12-31T00:00:00Z"));
-
-      expect(logSpy).toHaveBeenCalledTimes(2);
-      expect(logSpy.mock.calls[0][0]).toContain("Authentication successful!");
-      expect(logSpy.mock.calls[0][0]).toContain("2 cookies");
-      expect(logSpy.mock.calls[1][0]).toContain("Session expires:");
+      const all = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(all).toContain("Login auto-detected");
+      expect(all).toContain("Authentication successful");
+      expect(all).toContain("2 cookies");
+      expect(all).toContain("Session expires");
+      expect(all).toContain("__Secure-1PSID");
       logSpy.mockRestore();
     });
 
     test("prints success without expiry when expiresAt is null", () => {
       const logSpy = spyOn(console, "log").mockImplementation(() => {});
 
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      svc.confirmAuthSuccess(1, null, []);
 
-      svc.confirmAuthSuccess(1, null);
+      const all = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(all).toContain("Authentication successful");
+      expect(all).toContain("1 cookies");
+      expect(all).not.toContain("Session expires");
+      logSpy.mockRestore();
+    });
 
-      expect(logSpy).toHaveBeenCalledTimes(1);
-      expect(logSpy.mock.calls[0][0]).toContain("Authentication successful!");
-      expect(logSpy.mock.calls[0][0]).toContain("1 cookies");
+    test("indicates missing __Secure-1PSID cookie when absent", () => {
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      svc.confirmAuthSuccess(0, null, []);
+
+      const all = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(all).toContain("__Secure-1PSID");
+      expect(all).toContain("❌");
       logSpy.mockRestore();
     });
   });
 
   describe("closeBrowser", () => {
-    test("calls closeAll on the driver", async () => {
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+    test("calls closeSession on the driver with the profile name", async () => {
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
       await svc.closeBrowser("default");
 
-      expect(driver.closeAll).toHaveBeenCalledTimes(1);
+      expect(driver.closeSession).toHaveBeenCalledTimes(1);
+      expect(driver.closeSession).toHaveBeenCalledWith("default");
     });
 
-    test("does not throw when closeAll fails", async () => {
-      driver.closeAll.mockRejectedValue(new Error("browser already closed"));
+    test("does not throw when closeSession fails", async () => {
+      driver.closeSession.mockRejectedValueOnce(new Error("browser already closed"));
 
-      const svc = new AuthService({
-        driver: driver as never,
-        cookieMonitor: cookieMonitor as never,
-        cookieStorage: cookieStorage as never,
-        logger,
-      });
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
       await expect(svc.closeBrowser("default")).resolves.toBeUndefined();
     });

@@ -1,16 +1,15 @@
 import chalk from "chalk";
-import { createInterface } from "node:readline";
 import type { Cookie, AuthResult } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { PlaywrightCliDriver } from "./playwright-cli-driver.ts";
 import type { CookieMonitor } from "./cookie-monitor.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
+import { BrowserClosedError } from "./cookie-monitor.ts";
 import { ensureConfigDir, getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 
-const GEMINI_AUTH_URL = "https://gemini.google.com";
+const GEMINI_AUTH_URL = "https://gemini.google.com/app";
 const DEFAULT_AUTH_TIMEOUT_MS = 300_000;
-const SESSION_PREFIX = "auth";
 
 export interface AuthServiceDeps {
   driver: PlaywrightCliDriver;
@@ -45,59 +44,61 @@ export class AuthService {
 
     this.logger.info(`Starting authentication for profile: ${name}`);
 
-    this.promptUser();
-    await this.waitForEnter();
+    this.notifyUser(name);
     await this.launchBrowser(name);
-    this.startCookieMonitor(name);
-    const cookies = await this.waitForCookies(name, DEFAULT_AUTH_TIMEOUT_MS);
+
+    const cookies = await this.waitForLogin(name, DEFAULT_AUTH_TIMEOUT_MS);
     await this.extractCookies(name, cookies);
     const expiresAt = this.getCookieExpiry(cookies);
-    this.confirmAuthSuccess(cookies.length, expiresAt);
+    this.confirmAuthSuccess(cookies.length, expiresAt, cookies);
     await this.closeBrowser(name);
 
     return { cookies, expiresAt };
   }
 
-  promptUser(): void {
-    console.log(chalk.cyan("Press Enter to launch browser..."));
-  }
-
-  async waitForEnter(): Promise<void> {
-    return new Promise<void>((resolve) => {
-      const rl = createInterface({ input: process.stdin });
-      rl.question("", () => {
-        rl.close();
-        resolve();
-      });
-    });
+  notifyUser(profileName: string): void {
+    console.log(
+      chalk.cyan(`\n🔍 Opening headed browser → ${GEMINI_AUTH_URL}  (profile: ${profileName})`),
+    );
+    console.log(
+      chalk.dim("   Log in manually — we'll auto-detect and close the browser when you're in.\n"),
+    );
   }
 
   async launchBrowser(profileName: string): Promise<void> {
-    const sessionName = this.getSessionName(profileName);
     this.logger.info(`Launching browser for profile: ${profileName}`);
-    await this.driver.openHeaded(GEMINI_AUTH_URL, profileName, sessionName);
+    await this.driver.openHeaded(GEMINI_AUTH_URL, profileName, profileName);
   }
 
-  startCookieMonitor(profileName: string): void {
-    const sessionName = this.getSessionName(profileName);
-    this.logger.info(`Cookie monitor target session: ${sessionName}`);
-  }
-
-  async waitForCookies(profileName: string, timeoutMs = DEFAULT_AUTH_TIMEOUT_MS): Promise<Cookie[]> {
-    const sessionName = this.getSessionName(profileName);
+  async waitForLogin(profileName: string, timeoutMs: number): Promise<Cookie[]> {
+    this.logger.info(`Waiting for auth cookies (timeout: ${timeoutMs}ms)...`);
 
     return new Promise<Cookie[]>((resolve, reject) => {
-      this.logger.info(`Waiting for auth cookies (timeout: ${timeoutMs}ms)...`);
+      let settled = false;
+
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        fn();
+      };
 
       const timeoutHandle = setTimeout(() => {
         this.cookieMonitor.stop();
-        reject(new AuthServiceTimeoutError(timeoutMs));
+        settle(() => reject(new AuthServiceTimeoutError(timeoutMs)));
       }, timeoutMs);
 
-      this.cookieMonitor.start(sessionName, (cookies) => {
-        clearTimeout(timeoutHandle);
-        resolve(cookies);
-      }, timeoutMs);
+      this.cookieMonitor.start(
+        profileName,
+        (cookies) => {
+          clearTimeout(timeoutHandle);
+          settle(() => resolve(cookies));
+        },
+        timeoutMs,
+        () => {
+          clearTimeout(timeoutHandle);
+          settle(() => reject(new BrowserClosedError()));
+        },
+      );
     });
   }
 
@@ -107,24 +108,23 @@ export class AuthService {
     this.cookieStorage.save(profileName, cookies);
   }
 
-  confirmAuthSuccess(cookieCount: number, expiresAt: Date | null): void {
+  confirmAuthSuccess(cookieCount: number, expiresAt: Date | null, cookies: Cookie[] = []): void {
+    console.log(chalk.green(`\n✅ Login auto-detected — saving state…`));
     console.log(chalk.green(`\nAuthentication successful! (${cookieCount} cookies captured)`));
     if (expiresAt) {
       console.log(chalk.dim(`Session expires: ${expiresAt.toLocaleString()}`));
     }
+    const hasSid = cookies.some((c) => c.name === "__Secure-1PSID");
+    console.log(chalk.dim(`   Has __Secure-1PSID: ${hasSid ? "✅" : "❌"}`));
   }
 
   async closeBrowser(profileName: string): Promise<void> {
     this.logger.info(`Closing browser for profile: ${profileName}`);
     try {
-      await this.driver.closeAll();
+      await this.driver.closeSession(profileName);
     } catch (err) {
       this.logger.warn(`Failed to close browser: ${err}`);
     }
-  }
-
-  private getSessionName(profileName: string): string {
-    return `${SESSION_PREFIX}-${profileName}`;
   }
 
   private getCookieExpiry(cookies: Cookie[]): Date | null {

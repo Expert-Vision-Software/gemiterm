@@ -1,8 +1,11 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { getProfileDir } from "../infrastructure/path-utils.ts";
 import type { Cookie } from "../core/types.ts";
 
-const CLI_BIN = "bunx";
+const CLI_BIN_DIRECT = "playwright-cli";
+const CLI_BIN_FALLBACK = "bunx";
 const CLI_PACKAGE = "@playwright/cli";
+const PROBE_TIMEOUT_MS = 5_000;
+const BROWSER_CLOSED_MESSAGE = "not found";
 
 export class PlaywrightCliError extends Error {
   constructor(command: string, exitCode: number, stderr: string) {
@@ -11,69 +14,98 @@ export class PlaywrightCliError extends Error {
   }
 }
 
+export interface PlaywrightRunnerResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+export type PlaywrightStrategy = "direct" | "bunx";
+
+export interface PlaywrightRunner {
+  readonly strategy: PlaywrightStrategy;
+  run(args: string[]): Promise<PlaywrightRunnerResult>;
+  spawnDetached(args: string[]): void;
+}
+
+class BunPlaywrightRunner implements PlaywrightRunner {
+  readonly strategy: PlaywrightStrategy;
+  private readonly bin: string[];
+
+  constructor(strategy: PlaywrightStrategy) {
+    this.strategy = strategy;
+    this.bin = strategy === "direct" ? [CLI_BIN_DIRECT] : [CLI_BIN_FALLBACK, CLI_PACKAGE];
+  }
+
+  async run(args: string[]): Promise<PlaywrightRunnerResult> {
+    const proc = Bun.spawn([...this.bin, ...args], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "ignore",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return {
+      exitCode: exitCode ?? -1,
+      stdout: stdout.trim(),
+      stderr: stderr.trim(),
+    };
+  }
+
+  spawnDetached(args: string[]): void {
+    const proc = Bun.spawn([...this.bin, ...args], {
+      stdout: "ignore",
+      stderr: "ignore",
+      stdin: "ignore",
+    });
+    proc.exited.catch(() => {});
+  }
+}
+
+export interface PlaywrightCliDriverOptions {
+  logger?: Console;
+  runner?: PlaywrightRunner;
+  profileDirResolver?: (profileName: string) => string;
+}
+
 export class PlaywrightCliDriver {
   private readonly logger?: Console;
-  private browserProcess: ChildProcess | null = null;
+  private runner: PlaywrightRunner;
+  private readonly profileDirResolver: (profileName: string) => string;
+  private probed = false;
 
-  constructor(logger?: Console) {
-    this.logger = logger;
+  constructor(opts: PlaywrightCliDriverOptions = {}) {
+    this.logger = opts.logger;
+    this.profileDirResolver = opts.profileDirResolver ?? ((name) => getProfileDir(name));
+    this.runner = opts.runner ?? new BunPlaywrightRunner("direct");
+  }
+
+  async isAvailable(): Promise<boolean> {
+    if (!this.probed) {
+      const ok = await this.probe();
+      this.probed = true;
+      return ok;
+    }
+    return true;
+  }
+
+  get strategy(): PlaywrightStrategy {
+    return this.runner.strategy;
   }
 
   async runCli(args: string[]): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      const proc = spawn(CLI_BIN, [CLI_PACKAGE, ...args], {
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: process.platform === "win32",
-        env: { ...process.env },
-      });
-
-      const stdoutChunks: Buffer[] = [];
-      const stderrChunks: Buffer[] = [];
-
-      proc.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
-      proc.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-
-      proc.on("error", (err: Error) => {
-        reject(new PlaywrightCliError(args.join(" "), -1, err.message));
-      });
-
-      proc.on("close", (code) => {
-        const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
-        const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
-
-        if (code !== 0) {
-          reject(new PlaywrightCliError(args.join(" "), code ?? -1, stderr));
-          return;
-        }
-
-        resolve(stdout);
-      });
-    });
+    const result = await this.runner.run(args);
+    if (result.exitCode !== 0) {
+      throw new PlaywrightCliError(args.join(" "), result.exitCode, result.stderr);
+    }
+    return result.stdout;
   }
 
   withSession(session: string, args: string[]): string[] {
     return [`-s=${session}`, ...args];
-  }
-
-  async openHeaded(url: string, profile: string, session?: string): Promise<void> {
-    const args = this.buildOpenHeadedArgs(url, profile, session);
-
-    this.browserProcess = spawn(CLI_BIN, [CLI_PACKAGE, ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: process.platform === "win32",
-      env: { ...process.env },
-      detached: false,
-    });
-
-    this.browserProcess.on("error", (err: Error) => {
-      this.logger?.warn(`Browser process error: ${err.message}`);
-    });
-
-    this.browserProcess.on("close", () => {
-      if (this.browserProcess) {
-        this.browserProcess = null;
-      }
-    });
   }
 
   buildOpenHeadedArgs(url: string, profile: string, session?: string): string[] {
@@ -87,39 +119,75 @@ export class PlaywrightCliDriver {
       "--browser=chromium",
       "--headed",
       "--persistent",
-      `--profile=${profile}`,
+      `--profile=${this.profileDirResolver(profile)}`,
     );
     return args;
   }
 
+  async openHeaded(url: string, profile: string, session?: string): Promise<void> {
+    const args = this.buildOpenHeadedArgs(url, profile, session);
+    this.runner.spawnDetached(args);
+  }
+
   async evalJs(session: string, expression: string): Promise<string> {
-    const args = this.withSession(session, ["eval", expression, "--json"]);
-    return this.runCli(args);
+    return this.runCli(this.withSession(session, ["eval", expression]));
   }
 
   async cookieList(session: string): Promise<Cookie[]> {
-    const args = this.withSession(session, ["cookie-list", "--json"]);
-    const output = await this.runCli(args);
-    return this.parseCookieListOutput(output);
+    const raw = await this.runCli(this.withSession(session, ["cookie-list", "--json"]));
+    return this.parseCookieListOutput(raw);
   }
 
   async stateSave(session: string, path: string): Promise<void> {
-    const args = this.withSession(session, ["state-save", path]);
-    await this.runCli(args);
+    await this.runCli(this.withSession(session, ["state-save", path]));
   }
 
   async stateLoad(session: string, path: string): Promise<void> {
-    const args = this.withSession(session, ["state-load", path]);
-    await this.runCli(args);
+    await this.runCli(this.withSession(session, ["state-load", path]));
   }
 
   async closeSession(session: string): Promise<void> {
-    const args = this.withSession(session, ["close"]);
-    await this.runCli(args);
+    try {
+      await this.runCli(this.withSession(session, ["close"]));
+    } catch (err) {
+      if (err instanceof PlaywrightCliError && err.message.toLowerCase().includes(BROWSER_CLOSED_MESSAGE)) {
+        return;
+      }
+      throw err;
+    }
   }
 
   async closeAll(): Promise<void> {
     await this.runCli(["close-all"]);
+  }
+
+  private async probe(): Promise<boolean> {
+    const direct = new BunPlaywrightRunner("direct");
+    if (await this.tryVersion(direct)) {
+      this.runner = direct;
+      return true;
+    }
+    const bunx = new BunPlaywrightRunner("bunx");
+    if (await this.tryVersion(bunx)) {
+      this.runner = bunx;
+      return true;
+    }
+    this.logger?.warn("Neither 'playwright-cli' nor 'bunx @playwright/cli' is available on this system.");
+    return false;
+  }
+
+  private async tryVersion(r: BunPlaywrightRunner): Promise<boolean> {
+    try {
+      const result = await Promise.race([
+        r.run(["--version"]),
+        new Promise<{ exitCode: number }>((_, reject) =>
+          setTimeout(() => reject(new Error("probe timeout")), PROBE_TIMEOUT_MS),
+        ),
+      ]);
+      return result.exitCode === 0;
+    } catch {
+      return false;
+    }
   }
 
   private parseCookieListOutput(raw: string): Cookie[] {
