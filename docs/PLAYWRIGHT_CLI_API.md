@@ -115,7 +115,28 @@ playwright-cli -s=myprofile cookie-delete "name"
 playwright-cli -s=myprofile cookie-clear
 ```
 
-**Important**: `cookie-list` outputs a human-readable text table by default. Use `--json` for machine-parseable JSON output.
+**Important**: `cookie-list` outputs a human-readable text table by default. The `--json` flag (undocumented in `--help`, silently supported) wraps that text in a JSON object: `{"result": "<text>"}` — it does **not** emit a JSON array of cookie objects. See [Cookie-list output format](#cookie-list-output-format) below for the real shapes.
+
+### Cookie-list output format
+
+`cookie-list` is one of the most-misused commands because `--json` does not return what its name suggests.
+
+**Default output (no flag)** — one cookie per line, no header:
+```
+__Secure-1PSID=abc123 (domain: .google.com, path: /)
+__Secure-1PSIDTS=xyz789 (domain: .google.com, path: /)
+```
+
+**With `--json`** — single-line wrapper whose `result` field is the same text as above:
+```json
+{"result": "__Secure-1PSID=abc123 (domain: .google.com, path: /)\n__Secure-1PSIDTS=xyz789 (domain: .google.com, path: /)\n"}
+```
+
+**Empty state** — the literal line `No cookies found` (and with `--json`, `{"result": "No cookies found\n"}`).
+
+**What's missing from the text format:** `expires`, `httpOnly`, `secure`, `sameSite`. If you need those, use `run-code` with `page.context().cookies()` or call `state-save` and parse the resulting file.
+
+**Note:** `--json` is not listed in `cookie-list --help` but is silently supported. Verified in `@playwright/cli` v0.1.13.
 
 ## Evaluation & Snapshots
 
@@ -210,7 +231,7 @@ Located at `.playwright/cli.config.json` by default:
 
 | Command | Default Output | With `--json` |
 |---|---|---|
-| `cookie-list` | Text table (name, value, domain, flags) | JSON array of cookie objects |
+| `cookie-list` | Text table (name, value, domain, flags) | JSON wrapper `{"result": "<text>"}` (not an array) |
 | `snapshot` | YAML/HTML (not AX tree) | JSON status wrapper |
 | `state-save` | Writes file to disk, confirmation on stdout | N/A |
 | `eval` | Raw JS return value | JSON status wrapper |
@@ -233,6 +254,8 @@ playwright-cli -s=gemini eval "document.querySelector('textarea[aria-label*=\"pr
 # Check URL
 playwright-cli -s=gemini eval "window.location.href"
 ```
+
+> Tip: cookie-based detection (poll `cookie-list` for `__Secure-1PSID`) is more reliable than DOM probes because cookies are observable even when the page is still mid-render. See [Cookie-list output format](#cookie-list-output-format) for how to parse the response.
 
 ### Cookie Scraping Pipeline
 
@@ -260,4 +283,24 @@ playwright-cli -s=mysess state-load .auth/gemini.json
 
 # 3. Reload page to apply cookies
 playwright-cli -s=mysess reload
+
+## Common Pitfalls
+
+Things that look right but will silently break your code. Verified against `@playwright/cli` v0.1.13.
+
+### `cookie-list --json` is not a JSON array
+
+It's a wrapper `{"result": "<text>"}` around the same human-readable text. Calling `JSON.parse` and treating the result as an array will always yield zero cookies, and your login detection will time out without any visible error. See [Cookie-list output format](#cookie-list-output-format).
+
+### `eval` results are wrapped unless you pass `--raw`
+
+`playwright-cli -s=X eval "..."` returns a JSON status envelope, e.g. `{"status":"success","result":"..."}`. To get the raw return value, append `--raw`. Required whenever you compare an eval result to a literal string (e.g. `=== "true"`).
+
+### `open` is fire-and-forget (daemon-style)
+
+`playwright-cli open <url>` returns as soon as the browser process has been launched, not when the page is loaded. If you start polling the session immediately after, your first `eval` / `cookie-list` may race the still-spawning daemon and throw. Either delay the first poll or use the `state-save` round-trip to wait for the page to be ready.
+
+### `--profile` requires an absolute path
+
+Relative paths are accepted by the CLI but the resulting profile directory is not portable across working directories and may not be picked up by subsequent runs.
 ```
