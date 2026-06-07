@@ -4,7 +4,6 @@ import type { Logger } from "../infrastructure/logger.ts";
 import type { PlaywrightCliDriver } from "./playwright-cli-driver.ts";
 import type { CookieMonitor } from "./cookie-monitor.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
-import { BrowserClosedError } from "./cookie-monitor.ts";
 import { ensureConfigDir, getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 
@@ -44,16 +43,18 @@ export class AuthService {
 
     this.logger.info(`Starting authentication for profile: ${name}`);
 
-    this.notifyUser(name);
-    await this.launchBrowser(name);
+    try {
+      this.notifyUser(name);
+      await this.launchBrowser(name);
 
-    const cookies = await this.waitForLogin(name, DEFAULT_AUTH_TIMEOUT_MS);
-    await this.extractCookies(name, cookies);
-    const expiresAt = this.getCookieExpiry(cookies);
-    this.confirmAuthSuccess(cookies.length, expiresAt, cookies);
-    await this.closeBrowser(name);
-
-    return { cookies, expiresAt };
+      const cookies = await this.waitForLogin(name, DEFAULT_AUTH_TIMEOUT_MS);
+      await this.extractCookies(name, cookies);
+      const expiresAt = this.getCookieExpiry(cookies);
+      this.confirmAuthSuccess(cookies.length, expiresAt, cookies);
+      return { cookies, expiresAt };
+    } finally {
+      await this.closeBrowser(name);
+    }
   }
 
   notifyUser(profileName: string): void {
@@ -94,10 +95,6 @@ export class AuthService {
           settle(() => resolve(cookies));
         },
         timeoutMs,
-        () => {
-          clearTimeout(timeoutHandle);
-          settle(() => reject(new BrowserClosedError()));
-        },
       );
     });
   }

@@ -120,15 +120,22 @@ describe("PlaywrightCliDriver", () => {
       expect(resolver).toHaveBeenCalledWith("p1");
     });
 
-    test("openHeaded spawns detached with correct args", async () => {
+    test("openHeaded awaits runCli with URL as last arg", async () => {
       const runner = createMockRunner();
       const d = new PlaywrightCliDriver({ runner });
       await d.openHeaded("https://gemini.google.com/app", "p1", "s1");
-      expect(runner._spawnDetached).toHaveBeenCalledTimes(1);
-      const args = runner._spawnDetached.mock.calls[0]![0] as string[];
+      expect(runner._run).toHaveBeenCalledTimes(1);
+      const args = runner._run.mock.calls[0]![0] as string[];
       expect(args[0]).toBe("-s=s1");
       expect(args).toContain("open");
-      expect(args).toContain("https://gemini.google.com/app");
+      expect(args[args.length - 1]).toBe("https://gemini.google.com/app");
+    });
+
+    test("openHeaded throws PlaywrightCliError when open command fails", async () => {
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "open failed" });
+      const d = new PlaywrightCliDriver({ runner });
+      await expect(d.openHeaded("https://gemini.google.com/app", "p1", "s1")).rejects.toBeInstanceOf(PlaywrightCliError);
     });
   });
 

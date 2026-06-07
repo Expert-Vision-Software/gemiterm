@@ -115,18 +115,18 @@ export class PlaywrightCliDriver {
     }
     args.push(
       "open",
-      url,
       "--browser=chromium",
       "--headed",
       "--persistent",
       `--profile=${this.profileDirResolver(profile)}`,
+      url,
     );
     return args;
   }
 
   async openHeaded(url: string, profile: string, session?: string): Promise<void> {
     const args = this.buildOpenHeadedArgs(url, profile, session);
-    this.runner.spawnDetached(args);
+    await this.runCli(args);
   }
 
   async evalJs(session: string, expression: string): Promise<string> {

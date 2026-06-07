@@ -2,8 +2,6 @@ import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import {
   CookieMonitor,
   CookieMonitorTimeoutError,
-  BrowserClosedError,
-  BROWSER_CLOSED_FAILURE_THRESHOLD,
 } from "../../src/services/cookie-monitor.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
@@ -128,14 +126,15 @@ describe("CookieMonitor", () => {
   });
 
   describe("start / stop lifecycle", () => {
-    test("calls onCookiesFound when both cookies detected immediately", async () => {
-      driver.evalJs.mockResolvedValueOnce("true");
-      driver.cookieList.mockResolvedValueOnce(authCookies);
+    test("calls onCookiesFound once interval ticks", async () => {
+      driver.evalJs.mockResolvedValue("true");
+      driver.cookieList.mockResolvedValue(authCookies);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const callback = mock((_cookies: Cookie[]) => {});
 
-      await monitor.start("sess1", callback);
+      await monitor.start("sess1", callback, 10_000);
+      await new Promise((r) => setTimeout(r, 2100));
       expect(callback).toHaveBeenCalledTimes(1);
       expect(monitor.isRunning).toBe(false);
     });
@@ -155,12 +154,13 @@ describe("CookieMonitor", () => {
     });
 
     test("does not call onCookiesFound if eval returns 'false' (not logged in)", async () => {
-      driver.evalJs.mockResolvedValueOnce("false");
+      driver.evalJs.mockResolvedValue("false");
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const callback = mock((_cookies: Cookie[]) => {});
 
       const startPromise = monitor.start("sess1", callback, 10_000);
+      await new Promise((r) => setTimeout(r, 100));
       monitor.stop();
       await startPromise;
 
@@ -174,91 +174,56 @@ describe("CookieMonitor", () => {
       monitor.stop();
       expect(monitor.isRunning).toBe(false);
     });
-  });
 
-  describe("browser-closed detection", () => {
-    test("invokes onBrowserClosed after threshold consecutive eval throws", async () => {
-      driver.evalJs.mockRejectedValue(new Error("session gone"));
-
-      const monitor = new CookieMonitor({ driver: driver as never, logger });
-      const onCookiesFound = mock((_cookies: Cookie[]) => {});
-      const onBrowserClosed = mock(() => {});
-
-      await monitor.start("sess1", onCookiesFound, 60_000, onBrowserClosed, { failureThreshold: 1 });
-      expect(onBrowserClosed).toHaveBeenCalledTimes(1);
-      expect(onCookiesFound).toHaveBeenCalledTimes(0);
-    });
-
-    test("does not invoke onBrowserClosed when threshold is not reached", async () => {
-      driver.evalJs.mockRejectedValue(new Error("session gone"));
-
-      const monitor = new CookieMonitor({ driver: driver as never, logger });
-      const onCookiesFound = mock((_cookies: Cookie[]) => {});
-      const onBrowserClosed = mock(() => {});
-
-      await monitor.start("sess1", onCookiesFound, 60_000, onBrowserClosed, { failureThreshold: 5 });
-      expect(onBrowserClosed).toHaveBeenCalledTimes(0);
-    });
-
-    test("invokes onBrowserClosed when cookieList throws past threshold", async () => {
-      driver.evalJs.mockResolvedValue("true");
-      driver.cookieList.mockRejectedValue(new Error("cookies unreachable"));
-
-      const monitor = new CookieMonitor({ driver: driver as never, logger });
-      const onCookiesFound = mock((_cookies: Cookie[]) => {});
-      const onBrowserClosed = mock(() => {});
-
-      await monitor.start("sess1", onCookiesFound, 60_000, onBrowserClosed, { failureThreshold: 1 });
-      expect(onBrowserClosed).toHaveBeenCalledTimes(1);
-    });
-
-    test("does not invoke onBrowserClosed when eval succeeds and cookies present", async () => {
-      driver.evalJs.mockResolvedValueOnce("true");
-      driver.cookieList.mockResolvedValueOnce(authCookies);
-
-      const monitor = new CookieMonitor({ driver: driver as never, logger });
-      const onCookiesFound = mock((_cookies: Cookie[]) => {});
-      const onBrowserClosed = mock(() => {});
-
-      await monitor.start("sess1", onCookiesFound, 60_000, onBrowserClosed, { failureThreshold: 1 });
-      expect(onBrowserClosed).toHaveBeenCalledTimes(0);
-      expect(onCookiesFound).toHaveBeenCalledTimes(1);
-    });
-
-    test("REGRESSION: does not register failure when eval returns 'false' repeatedly", async () => {
+    test("does not call driver.evalJs immediately at start", async () => {
       driver.evalJs.mockResolvedValue("false");
       driver.cookieList.mockResolvedValue([]);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
-      const onCookiesFound = mock((_cookies: Cookie[]) => {});
-      const onBrowserClosed = mock(() => {});
+      const callback = mock((_cookies: Cookie[]) => {});
 
-      await monitor.start("sess1", onCookiesFound, 60_000, onBrowserClosed, { failureThreshold: 1 });
-      expect(onBrowserClosed).toHaveBeenCalledTimes(0);
-      expect(onCookiesFound).toHaveBeenCalledTimes(0);
+      await monitor.start("sess1", callback, 10_000);
+      expect(driver.evalJs).not.toHaveBeenCalled();
+      monitor.stop();
     });
 
-    test("does not invoke onBrowserClosed when a transient eval throw is followed by 'false'", async () => {
-      driver.evalJs
-        .mockRejectedValueOnce(new Error("transient"))
-        .mockResolvedValue("false");
+    test("calls driver.evalJs once after POLL_INTERVAL_MS", async () => {
+      driver.evalJs.mockResolvedValue("false");
       driver.cookieList.mockResolvedValue([]);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
-      const onCookiesFound = mock((_cookies: Cookie[]) => {});
-      const onBrowserClosed = mock(() => {});
+      const callback = mock((_cookies: Cookie[]) => {});
 
-      await monitor.start("sess1", onCookiesFound, 60_000, onBrowserClosed, { failureThreshold: 2 });
-      expect(onBrowserClosed).toHaveBeenCalledTimes(0);
+      await monitor.start("sess1", callback, 10_000);
+      await new Promise((r) => setTimeout(r, 2100));
+      expect(driver.evalJs.mock.calls.length).toBe(1);
+      monitor.stop();
     });
 
-    test("BROWSER_CLOSED_FAILURE_THRESHOLD constant is exported and positive", () => {
-      expect(BROWSER_CLOSED_FAILURE_THRESHOLD).toBeGreaterThan(0);
+    test("swallows repeated eval throws without rejecting", async () => {
+      driver.evalJs.mockRejectedValue(new Error("session gone"));
+      driver.cookieList.mockResolvedValue([]);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const callback = mock((_cookies: Cookie[]) => {});
+
+      await expect(monitor.start("sess1", callback, 10_000)).resolves.toBeUndefined();
+      await new Promise((r) => setTimeout(r, 2500));
+      expect(callback).toHaveBeenCalledTimes(0);
+      monitor.stop();
     });
 
-    test("BrowserClosedError is exported with correct name", () => {
-      const e = new BrowserClosedError();
-      expect(e.name).toBe("BrowserClosedError");
+    test("swallows repeated cookieList throws without rejecting", async () => {
+      driver.evalJs.mockResolvedValue("true");
+      driver.cookieList.mockRejectedValue(new Error("cookies unreachable"));
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const callback = mock((_cookies: Cookie[]) => {});
+
+      await expect(monitor.start("sess1", callback, 10_000)).resolves.toBeUndefined();
+      await new Promise((r) => setTimeout(r, 2500));
+      expect(callback).toHaveBeenCalledTimes(0);
+      monitor.stop();
     });
   });
 });

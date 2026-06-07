@@ -4,26 +4,17 @@ import type { PlaywrightCliDriver } from "./playwright-cli-driver.ts";
 
 const POLL_INTERVAL_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 300_000;
-export const BROWSER_CLOSED_FAILURE_THRESHOLD = 5;
 
 const REQUIRED_COOKIES = new Set(["__Secure-1PSID", "__Secure-1PSIDTS"]);
 
 const LOGIN_PROBE_JS = `document.querySelector('a[href^="https://accounts.google.com/SignOutOptions"]') !== null`;
 
 type CookiesFoundCallback = (cookies: Cookie[]) => void;
-type BrowserClosedCallback = () => void;
 
 export class CookieMonitorTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Cookie monitor timed out after ${timeoutMs}ms`);
     this.name = "CookieMonitorTimeoutError";
-  }
-}
-
-export class BrowserClosedError extends Error {
-  constructor() {
-    super("Browser was closed before login completed.");
-    this.name = "BrowserClosedError";
   }
 }
 
@@ -44,9 +35,6 @@ export class CookieMonitor {
   private timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   private _stopped = false;
   private _started = false;
-  private consecutiveFailures = 0;
-  private onBrowserClosedRef: BrowserClosedCallback | null = null;
-  private failureThreshold = BROWSER_CLOSED_FAILURE_THRESHOLD;
   private readonly driver: PlaywrightCliDriver;
   private readonly logger: Logger;
 
@@ -63,8 +51,6 @@ export class CookieMonitor {
     session: string,
     onCookiesFound: CookiesFoundCallback,
     timeoutMs = DEFAULT_TIMEOUT_MS,
-    onBrowserClosed?: BrowserClosedCallback,
-    options: { failureThreshold?: number } = {},
   ): Promise<void> {
     if (this._started) {
       this.logger.warn("CookieMonitor already started, ignoring duplicate start call");
@@ -73,9 +59,6 @@ export class CookieMonitor {
 
     this._started = true;
     this._stopped = false;
-    this.consecutiveFailures = 0;
-    this.onBrowserClosedRef = onBrowserClosed ?? null;
-    this.failureThreshold = options.failureThreshold ?? BROWSER_CLOSED_FAILURE_THRESHOLD;
     this.logger.info(`Cookie monitor started for session '${session}' (timeout: ${timeoutMs}ms)`);
 
     this.timeoutHandle = setTimeout(() => {
@@ -88,8 +71,6 @@ export class CookieMonitor {
       if (this._stopped) return;
       await this.poll(session, onCookiesFound);
     }, POLL_INTERVAL_MS);
-
-    await this.poll(session, onCookiesFound);
   }
 
   stop(): void {
@@ -153,10 +134,8 @@ export class CookieMonitor {
     try {
       signal = await this.driver.evalJs(session, LOGIN_PROBE_JS);
     } catch {
-      this.registerFailure();
       return;
     }
-    this.consecutiveFailures = 0;
 
     if (signal.trim() !== "true") {
       return;
@@ -166,10 +145,8 @@ export class CookieMonitor {
     try {
       cookies = await this.driver.cookieList(session);
     } catch {
-      this.registerFailure();
       return;
     }
-    this.consecutiveFailures = 0;
 
     const authCookies = cookies.filter((c) => REQUIRED_COOKIES.has(c.name));
     if (authCookies.length < REQUIRED_COOKIES.size) {
@@ -178,17 +155,5 @@ export class CookieMonitor {
 
     this.stop();
     onCookiesFound(authCookies);
-  }
-
-  private registerFailure(): void {
-    this.consecutiveFailures++;
-    if (this.consecutiveFailures >= this.failureThreshold) {
-      this.logger.warn(
-        `Browser appears closed (${this.consecutiveFailures} consecutive poll failures)`,
-      );
-      const cb = this.onBrowserClosedRef;
-      this.stop();
-      cb?.();
-    }
   }
 }

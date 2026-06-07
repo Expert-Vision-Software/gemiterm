@@ -3,7 +3,6 @@ import {
   AuthService,
   AuthServiceTimeoutError,
 } from "../../src/services/auth-service.ts";
-import { BrowserClosedError } from "../../src/services/cookie-monitor.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
@@ -23,7 +22,6 @@ function createMockCookieMonitor() {
         _session: string,
         _onCookiesFound: (cookies: Cookie[]) => void,
         _timeoutMs?: number,
-        _onBrowserClosed?: () => void,
       ) => {},
     ),
     stop: mock(() => {}),
@@ -144,18 +142,13 @@ describe("AuthService", () => {
       );
     });
 
-    test("rejects with BrowserClosedError when monitor reports browser closed", async () => {
-      cookieMonitor.start.mockImplementationOnce(
-        async (_session, _onFound, _timeout, onBrowserClosed) => {
-          onBrowserClosed?.();
-        },
-      );
-
+    test("calls closeBrowser in finally even when waitForLogin throws", async () => {
       const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const spy = spyOn(svc, "waitForLogin").mockRejectedValueOnce(new Error("boom"));
 
-      await expect(svc.waitForLogin("default", 60_000)).rejects.toBeInstanceOf(
-        BrowserClosedError,
-      );
+      await expect(svc.authenticate("test-profile")).rejects.toThrow("boom");
+      expect(driver.closeSession).toHaveBeenCalledWith("test-profile");
+      spy.mockRestore();
     });
 
     test("throws on invalid profile name", async () => {
