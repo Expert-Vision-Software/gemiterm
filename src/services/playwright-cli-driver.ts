@@ -191,27 +191,55 @@ export class PlaywrightCliDriver {
   }
 
   private parseCookieListOutput(raw: string): Cookie[] {
+    let text = raw;
     try {
       const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        this.logger?.warn("cookie-list returned non-array JSON");
-        return [];
+      if (Array.isArray(parsed)) {
+        return parsed.map((c: Record<string, unknown>) => this.cookieFromObject(c));
       }
-      return parsed.map((c: Record<string, unknown>) => ({
-        name: String(c.name ?? ""),
-        value: String(c.value ?? ""),
-        domain: String(c.domain ?? ""),
-        path: String(c.path ?? "/"),
-        expires: typeof c.expires === "number" ? c.expires : -1,
-        httpOnly: Boolean(c.httpOnly),
-        secure: Boolean(c.secure),
-        sameSite: (["Strict", "Lax", "None"].includes(String(c.sameSite))
-          ? String(c.sameSite)
-          : "None") as Cookie["sameSite"],
-      }));
+      if (parsed && typeof parsed === "object" && typeof (parsed as { result?: unknown }).result === "string") {
+        text = (parsed as { result: string }).result;
+      }
     } catch {
-      this.logger?.warn(`Failed to parse cookie-list output as JSON: ${raw}`);
-      return [];
+      // not JSON; treat raw as plain text
     }
+    return this.parseCookieListText(text);
+  }
+
+  private parseCookieListText(text: string): Cookie[] {
+    const cookies: Cookie[] = [];
+    const re = /^([^=]+)=(.+) \(domain: ([^,]+), path: (.+)\)$/;
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === "No cookies found") continue;
+      const match = trimmed.match(re);
+      if (!match) continue;
+      cookies.push(this.cookieFromObject({
+        name: match[1],
+        value: match[2],
+        domain: match[3],
+        path: match[4],
+        expires: -1,
+        httpOnly: false,
+        secure: false,
+        sameSite: "None",
+      }));
+    }
+    return cookies;
+  }
+
+  private cookieFromObject(c: Record<string, unknown>): Cookie {
+    return {
+      name: String(c.name ?? ""),
+      value: String(c.value ?? ""),
+      domain: String(c.domain ?? ""),
+      path: String(c.path ?? "/"),
+      expires: typeof c.expires === "number" ? c.expires : -1,
+      httpOnly: Boolean(c.httpOnly),
+      secure: Boolean(c.secure),
+      sameSite: (["Strict", "Lax", "None"].includes(String(c.sameSite))
+        ? String(c.sameSite)
+        : "None") as Cookie["sameSite"],
+    };
   }
 }
