@@ -8,6 +8,8 @@ export const BROWSER_CLOSED_FAILURE_THRESHOLD = 5;
 
 const REQUIRED_COOKIES = new Set(["__Secure-1PSID", "__Secure-1PSIDTS"]);
 
+const LOGIN_PROBE_JS = `document.querySelector('a[href^="https://accounts.google.com/SignOutOptions"]') !== null`;
+
 type CookiesFoundCallback = (cookies: Cookie[]) => void;
 type BrowserClosedCallback = () => void;
 
@@ -109,22 +111,10 @@ export class CookieMonitor {
 
   async checkLoggedIn(session: string): Promise<boolean> {
     try {
-      const result = await this.driver.evalJs(
-        session,
-        `(() => {
-          const url = window.location.href;
-          const onApp = url.includes("gemini.google.com/app");
-          const textarea = document.querySelector('textarea[aria-label*="prompt" i]');
-          return JSON.stringify({ onApp, hasPrompt: !!textarea });
-        })()`,
-      );
-
-      const parsed = JSON.parse(result) as { onApp: boolean; hasPrompt: boolean };
-      const loggedIn = parsed.onApp || parsed.hasPrompt;
+      const result = await this.driver.evalJs(session, LOGIN_PROBE_JS);
+      const loggedIn = result.trim() === "true";
       if (loggedIn) {
-        this.logger.info(
-          `Login signal detected: onApp=${parsed.onApp} hasPrompt=${parsed.hasPrompt}`,
-        );
+        this.logger.info("Login detected via sign-out link");
       }
       return loggedIn;
     } catch (err) {
@@ -159,35 +149,33 @@ export class CookieMonitor {
   ): Promise<void> {
     if (this._stopped) return;
 
-    let isLoggedIn = false;
+    let signal: string;
     try {
-      isLoggedIn = await this.checkLoggedIn(session);
+      signal = await this.driver.evalJs(session, LOGIN_PROBE_JS);
     } catch {
       this.registerFailure();
       return;
     }
-
-    if (isLoggedIn) {
-      this.consecutiveFailures = 0;
-    } else {
-      this.registerFailure();
-      return;
-    }
-
-    let authCookies: Cookie[] = [];
-    try {
-      authCookies = await this.checkCookies(session);
-    } catch {
-      this.registerFailure();
-      return;
-    }
-
-    if (authCookies.length < REQUIRED_COOKIES.size) {
-      this.registerFailure();
-      return;
-    }
-
     this.consecutiveFailures = 0;
+
+    if (signal.trim() !== "true") {
+      return;
+    }
+
+    let cookies: Cookie[];
+    try {
+      cookies = await this.driver.cookieList(session);
+    } catch {
+      this.registerFailure();
+      return;
+    }
+    this.consecutiveFailures = 0;
+
+    const authCookies = cookies.filter((c) => REQUIRED_COOKIES.has(c.name));
+    if (authCookies.length < REQUIRED_COOKIES.size) {
+      return;
+    }
+
     this.stop();
     onCookiesFound(authCookies);
   }

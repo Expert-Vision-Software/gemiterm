@@ -130,7 +130,7 @@ export class PlaywrightCliDriver {
   }
 
   async evalJs(session: string, expression: string): Promise<string> {
-    return this.runCli(this.withSession(session, ["eval", expression]));
+    return this.runCli(this.withSession(session, ["eval", expression, "--raw"]));
   }
 
   async cookieList(session: string): Promise<Cookie[]> {

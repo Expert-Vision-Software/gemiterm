@@ -10,7 +10,7 @@ import type { Cookie } from "../../src/core/types.ts";
 
 function createMockDriver() {
   return {
-    evalJs: mock(async (_session: string, _expression: string) => ""),
+    evalJs: mock(async (_session: string, _expression: string) => "false"),
     cookieList: mock(async (_session: string) => [] as Cookie[]),
   };
 }
@@ -59,44 +59,28 @@ describe("CookieMonitor", () => {
   });
 
   describe("checkLoggedIn", () => {
-    test("returns true when on app page with prompt textarea", async () => {
-      driver.evalJs.mockResolvedValueOnce(
-        JSON.stringify({ onApp: true, hasPrompt: true }),
-      );
+    test("returns true when eval returns 'true' (sign-out link present)", async () => {
+      driver.evalJs.mockResolvedValueOnce("true");
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const result = await monitor.checkLoggedIn("sess1");
       expect(result).toBe(true);
     });
 
-    test("returns true when on app page even without prompt textarea (OR semantics)", async () => {
-      driver.evalJs.mockResolvedValueOnce(
-        JSON.stringify({ onApp: true, hasPrompt: false }),
-      );
-
-      const monitor = new CookieMonitor({ driver: driver as never, logger });
-      const result = await monitor.checkLoggedIn("sess1");
-      expect(result).toBe(true);
-    });
-
-    test("returns true when prompt textarea present but URL is not on app (OR semantics)", async () => {
-      driver.evalJs.mockResolvedValueOnce(
-        JSON.stringify({ onApp: false, hasPrompt: true }),
-      );
-
-      const monitor = new CookieMonitor({ driver: driver as never, logger });
-      const result = await monitor.checkLoggedIn("sess1");
-      expect(result).toBe(true);
-    });
-
-    test("returns false when neither signal present", async () => {
-      driver.evalJs.mockResolvedValueOnce(
-        JSON.stringify({ onApp: false, hasPrompt: false }),
-      );
+    test("returns false when eval returns 'false' (no sign-out link)", async () => {
+      driver.evalJs.mockResolvedValueOnce("false");
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const result = await monitor.checkLoggedIn("sess1");
       expect(result).toBe(false);
+    });
+
+    test("returns true when eval returns 'true' with surrounding whitespace", async () => {
+      driver.evalJs.mockResolvedValueOnce("  true  \n");
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const result = await monitor.checkLoggedIn("sess1");
+      expect(result).toBe(true);
     });
 
     test("returns false when eval throws", async () => {
@@ -145,7 +129,7 @@ describe("CookieMonitor", () => {
 
   describe("start / stop lifecycle", () => {
     test("calls onCookiesFound when both cookies detected immediately", async () => {
-      driver.evalJs.mockResolvedValueOnce(JSON.stringify({ onApp: true, hasPrompt: true }));
+      driver.evalJs.mockResolvedValueOnce("true");
       driver.cookieList.mockResolvedValueOnce(authCookies);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
@@ -157,7 +141,7 @@ describe("CookieMonitor", () => {
     });
 
     test("stop() prevents further polling", async () => {
-      driver.evalJs.mockResolvedValue(JSON.stringify({ onApp: false, hasPrompt: false }));
+      driver.evalJs.mockResolvedValue("false");
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const callback = mock((_cookies: Cookie[]) => {});
@@ -170,8 +154,8 @@ describe("CookieMonitor", () => {
       expect(monitor.isRunning).toBe(false);
     });
 
-    test("does not call onCookiesFound if not logged in", async () => {
-      driver.evalJs.mockResolvedValueOnce(JSON.stringify({ onApp: false, hasPrompt: false }));
+    test("does not call onCookiesFound if eval returns 'false' (not logged in)", async () => {
+      driver.evalJs.mockResolvedValueOnce("false");
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const callback = mock((_cookies: Cookie[]) => {});
@@ -193,7 +177,7 @@ describe("CookieMonitor", () => {
   });
 
   describe("browser-closed detection", () => {
-    test("invokes onBrowserClosed after threshold consecutive eval failures", async () => {
+    test("invokes onBrowserClosed after threshold consecutive eval throws", async () => {
       driver.evalJs.mockRejectedValue(new Error("session gone"));
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
@@ -217,7 +201,7 @@ describe("CookieMonitor", () => {
     });
 
     test("invokes onBrowserClosed when cookieList throws past threshold", async () => {
-      driver.evalJs.mockResolvedValue(JSON.stringify({ onApp: true, hasPrompt: true }));
+      driver.evalJs.mockResolvedValue("true");
       driver.cookieList.mockRejectedValue(new Error("cookies unreachable"));
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
@@ -229,7 +213,7 @@ describe("CookieMonitor", () => {
     });
 
     test("does not invoke onBrowserClosed when eval succeeds and cookies present", async () => {
-      driver.evalJs.mockResolvedValueOnce(JSON.stringify({ onApp: true, hasPrompt: true }));
+      driver.evalJs.mockResolvedValueOnce("true");
       driver.cookieList.mockResolvedValueOnce(authCookies);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
@@ -239,6 +223,33 @@ describe("CookieMonitor", () => {
       await monitor.start("sess1", onCookiesFound, 60_000, onBrowserClosed, { failureThreshold: 1 });
       expect(onBrowserClosed).toHaveBeenCalledTimes(0);
       expect(onCookiesFound).toHaveBeenCalledTimes(1);
+    });
+
+    test("REGRESSION: does not register failure when eval returns 'false' repeatedly", async () => {
+      driver.evalJs.mockResolvedValue("false");
+      driver.cookieList.mockResolvedValue([]);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const onCookiesFound = mock((_cookies: Cookie[]) => {});
+      const onBrowserClosed = mock(() => {});
+
+      await monitor.start("sess1", onCookiesFound, 60_000, onBrowserClosed, { failureThreshold: 1 });
+      expect(onBrowserClosed).toHaveBeenCalledTimes(0);
+      expect(onCookiesFound).toHaveBeenCalledTimes(0);
+    });
+
+    test("does not invoke onBrowserClosed when a transient eval throw is followed by 'false'", async () => {
+      driver.evalJs
+        .mockRejectedValueOnce(new Error("transient"))
+        .mockResolvedValue("false");
+      driver.cookieList.mockResolvedValue([]);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const onCookiesFound = mock((_cookies: Cookie[]) => {});
+      const onBrowserClosed = mock(() => {});
+
+      await monitor.start("sess1", onCookiesFound, 60_000, onBrowserClosed, { failureThreshold: 2 });
+      expect(onBrowserClosed).toHaveBeenCalledTimes(0);
     });
 
     test("BROWSER_CLOSED_FAILURE_THRESHOLD constant is exported and positive", () => {

@@ -133,10 +133,10 @@ describe("PlaywrightCliDriver", () => {
   });
 
   describe("evalJs", () => {
-    test("passes expression with session, no --json flag", async () => {
+    test("passes expression with session and --raw flag", async () => {
       const runner = createMockRunner();
       runner._run.mockImplementationOnce(async (args) => {
-        expect(args).toEqual(["-s=test-session", "eval", "() => document.title"]);
+        expect(args).toEqual(["-s=test-session", "eval", "() => document.title", "--raw"]);
         return { exitCode: 0, stdout: '"Gemini"', stderr: "" };
       });
       const d = new PlaywrightCliDriver({ runner });
