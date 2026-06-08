@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: CI Test Runs On Pull Requests And Pushes To Main
-The system MUST run a test job on every `pull_request` event and every `push` to the `main` branch. The test job MUST run on `ubuntu-latest` and MUST execute `bun install --frozen-lockfile`, `bun test`, and `bun run typecheck` in that order. A failure in any of these three commands MUST cause the test job to exit non-zero and fail the workflow.
+The system MUST run a test job on every `pull_request` event and every `push` to the `main` branch. The test job MUST run on `ubuntu-latest` and MUST execute `bun install --frozen-lockfile`, `bun test`, `bun run typecheck`, and a path-and-file mediation lint check in that order. A failure in any of these commands MUST cause the test job to exit non-zero and fail the workflow.
 
 #### Scenario: Pull request to main runs the test job
 - **WHEN** a contributor opens a pull request targeting `main`
-- **THEN** the `test` workflow runs on `ubuntu-latest`, executes `bun install --frozen-lockfile`, `bun test`, and `bun run typecheck`, and the pull request cannot be merged while the test job is failing
+- **THEN** the `test` workflow runs on `ubuntu-latest`, executes `bun install --frozen-lockfile`, `bun test`, `bun run typecheck`, and the path-and-file mediation lint check, and the pull request cannot be merged while the test job is failing
 
 #### Scenario: Push to main runs the test job
 - **WHEN** commits are pushed directly to the `main` branch
-- **THEN** the `test` workflow runs the same three commands on `ubuntu-latest` and reports success or failure based on their exit codes
+- **THEN** the `test` workflow runs the same commands on `ubuntu-latest` and reports success or failure based on their exit codes
 
 #### Scenario: Test failure fails CI
 - **WHEN** `bun test` exits with a non-zero status (one or more test cases fail)
@@ -17,6 +17,10 @@ The system MUST run a test job on every `pull_request` event and every `push` to
 
 #### Scenario: Typecheck failure fails CI
 - **WHEN** `bun run typecheck` exits with a non-zero status (TypeScript reports one or more errors)
+- **THEN** the test job exits non-zero and the workflow is marked as failed
+
+#### Scenario: Path-and-file mediation lint failure fails CI
+- **WHEN** the lint check finds a `node:fs`, `node:path`, or `node:os` import in `src/` outside the allowed exemptions (see the `path-and-file-mediation` spec)
 - **THEN** the test job exits non-zero and the workflow is marked as failed
 
 ### Requirement: Cross-Platform Build On Version Tags
