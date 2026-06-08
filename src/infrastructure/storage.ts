@@ -1,21 +1,11 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-  rmSync,
-  renameSync,
-} from "node:fs";
-import { dirname } from "node:path";
+import { ensureDir, existsFile, readJsonFile, writeTextFile, removeDir, renameDir } from "./io.ts";
 import type { Cookie, ProfileStatus } from "../core/types.ts";
 import {
   getProfilePath,
   getProfileDir,
-  getProfilesDir,
   getDefaultProfileMarkerPath,
 } from "./path-utils.ts";
 import {
-  ensureConfigDir,
   getDefaultProfileName,
   setDefaultProfileName,
   listProfiles,
@@ -51,29 +41,24 @@ function checkCookieFreshness(cookies: Cookie[]): boolean {
 export class CookieStorage {
   save(profileName: string, cookies: Cookie[]): void {
     const filePath = getProfilePath(profileName);
-    const dir = dirname(filePath);
-    mkdirSync(dir, { recursive: true });
     const state: StorageState = { cookies };
-    writeFileSync(filePath, JSON.stringify(state, null, 2), "utf-8");
+    writeTextFile(filePath, JSON.stringify(state, null, 2));
   }
 
   load(profileName: string): Cookie[] {
     const filePath = getProfilePath(profileName);
-    if (!existsSync(filePath)) {
+    if (!existsFile(filePath)) {
       throw new Error(
         `No storage state found for profile '${profileName}'. Run 'gemiterm auth' to authenticate.`,
       );
     }
-    const raw = readFileSync(filePath, "utf-8");
-    const state: StorageState = JSON.parse(raw);
+    const state = readJsonFile<StorageState>(filePath);
     return state.cookies ?? [];
   }
 
   delete(profileName: string): void {
     const dir = getProfileDir(profileName);
-    if (existsSync(dir)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    removeDir(dir);
   }
 
   list(): string[] {
@@ -90,11 +75,11 @@ export class ProfileManager {
 
   create(profileName: string): void {
     const dir = getProfileDir(profileName);
-    if (existsSync(dir)) {
+    if (existsFile(dir)) {
       throw new Error(`Profile '${profileName}' already exists.`);
     }
     const isFirst = listProfiles().length === 0;
-    mkdirSync(dir, { recursive: true });
+    ensureDir(dir);
     if (isFirst) {
       setDefaultProfileName(profileName);
     }
@@ -108,8 +93,8 @@ export class ProfileManager {
         setDefaultProfileName(remaining[0]);
       } else {
         const marker = getDefaultProfileMarkerPath();
-        if (existsSync(marker)) {
-          rmSync(marker);
+        if (existsFile(marker)) {
+          removeDir(marker);
         }
       }
     }
@@ -118,20 +103,20 @@ export class ProfileManager {
   rename(oldName: string, newName: string): void {
     const oldDir = getProfileDir(oldName);
     const newDir = getProfileDir(newName);
-    if (!existsSync(oldDir)) {
+    if (!existsFile(oldDir)) {
       throw new Error(`Profile '${oldName}' does not exist.`);
     }
-    if (existsSync(newDir)) {
+    if (existsFile(newDir)) {
       throw new Error(`Profile '${newName}' already exists.`);
     }
-    renameSync(oldDir, newDir);
+    renameDir(oldDir, newDir);
     if (getDefaultProfileName() === oldName) {
       setDefaultProfileName(newName);
     }
   }
 
   setDefault(name: string): void {
-    if (!existsSync(getProfileDir(name))) {
+    if (!existsFile(getProfileDir(name))) {
       throw new Error(`Profile '${name}' does not exist.`);
     }
     setDefaultProfileName(name);
@@ -148,7 +133,7 @@ export class ProfileManager {
   getStatus(name: string): ProfileStatus {
     const defaultName = getDefaultProfileName();
     const filePath = getProfilePath(name);
-    if (!existsSync(filePath)) {
+    if (!existsFile(filePath)) {
       return {
         name,
         exists: false,
@@ -184,7 +169,6 @@ export class ProfileManager {
   }
 
   getAllStatuses(): ProfileStatus[] {
-    ensureConfigDir();
     const defaultName = getDefaultProfileName();
     const profiles = listProfiles();
     return profiles.map((name) => {

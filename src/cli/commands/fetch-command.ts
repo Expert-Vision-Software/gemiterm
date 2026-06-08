@@ -1,7 +1,4 @@
 import chalk from "chalk";
-import { writeFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { mkdirSync } from "node:fs";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
@@ -11,6 +8,7 @@ import {
   type FetchChatQueryResult,
 } from "../../core/query-handlers.ts";
 import type { Message } from "../../core/types.ts";
+import { writeTextFile } from "../../infrastructure/io.ts";
 
 interface FetchCommandOptions {
   help: boolean;
@@ -119,11 +117,8 @@ export class FetchCommand implements CliCommand {
   }
 
   private writeOutput(path: string, content: string): void {
-    const resolved = resolve(path);
-    const dir = dirname(resolved);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(resolved, content, "utf-8");
-    console.log(chalk.dim(`Output written to: ${resolved}`));
+    writeTextFile(path, content);
+    console.log(chalk.dim(`Output written to: ${path}`));
   }
 
   private parseArgs(args: string[]): FetchCommandOptions {

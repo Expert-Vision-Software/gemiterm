@@ -8,12 +8,29 @@ Access and manage your Gemini web chats from the command line. GemiTerm bridges 
 - **Chromium Browser** — GemiTerm uses your system Chrome/Edge if available, otherwise installs Playwright's Chromium automatically
 - **Google Account** with access to [Gemini](https://gemini.google.com)
 
+## Installation
+
+See [docs/INSTALL.md](docs/INSTALL.md) for the full guide, uninstall instructions, troubleshooting, and build-from-source steps.
+
+**Windows** (PowerShell 7+):
+
+```powershell
+irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.ps1 | iex
+```
+
+**Linux / WSL**:
+
+```bash
+curl -fsSL https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.sh | bash
+```
+
+> **Upgrading from v1.4.1?** Your profiles, cookies, and default profile marker are preserved. The installer replaces the binary in place; it does NOT touch your config dir. See the "Upgrade from v1.4.1" section in [docs/INSTALL.md](docs/INSTALL.md) for details.
+
 ## Quick Start
 
 ```bash
-bun install
-bun run src/cli/index.ts auth        # authenticate with Google
-bun run src/cli/index.ts list        # list your chats
+gemiterm auth          # authenticate with Google
+gemiterm list          # list your chats
 ```
 
 ## Development
@@ -27,6 +44,35 @@ bun run build            # compile to standalone Bun binary
 bun run build:linux      # cross-compile for Linux x64
 bun run build:windows    # cross-compile for Windows x64
 ```
+
+For installing Chromium, use the platform-specific wrapper scripts:
+```bash
+bash scripts/install-browser.sh   # Linux/macOS
+pwsh scripts/install-browser.ps1 # Windows
+```
+
+## Building from source
+
+GemiTerm is built with [Bun](https://bun.sh) 1.3.13 or later.
+
+```bash
+bun run build            # native binary (dist/gemiterm or dist/gemiterm.exe)
+bun run build:linux      # Linux x64 binary (dist/gemiterm)
+bun run build:windows    # Windows x64 binary (dist/gemiterm.exe)
+bun run build:release    # minified release binary (dist/gemiterm)
+```
+
+Output paths:
+- **Linux/macOS**: `dist/gemiterm`
+- **Windows**: `dist/gemiterm.exe`
+
+## Release artifacts
+
+The v2.0.0 release ships the following GitHub Release assets:
+- `GemiTerm` — Linux x64 binary
+- `GemiTerm.exe` — Windows x64 binary
+- `install.sh` — POSIX installer script
+- `install.ps1` — Windows PowerShell installer script
 
 ## Usage
 
@@ -156,8 +202,8 @@ gemiterm -v <command>
 ### Configuration Directory
 
 Default locations:
-- **Windows**: `%APPDATA%\gemiterm\`
-- **Linux/macOS**: `~/.config/gemiterm/`
+- **Binary**: `$env:LOCALAPPDATA\GemiTerm\` (Windows), `~/.local/bin/gemiterm` (Linux/macOS)
+- **Config**: `%APPDATA%\gemiterm\` (Windows), `~/.config/gemiterm/` (Linux/macOS)
 
 Override with:
 ```bash

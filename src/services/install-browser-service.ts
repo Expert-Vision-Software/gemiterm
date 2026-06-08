@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join, sep } from "node:path";
+import { existsFile, safeReadTextFile } from "../infrastructure/io.ts";
+import { isWSL } from "../infrastructure/path-utils.ts";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { PlaywrightCliError } from "./playwright-cli-driver.ts";
 import { Logger } from "../infrastructure/logger.ts";
@@ -17,6 +18,17 @@ export class InstallBrowserError extends Error {
     super(message);
     this.name = "InstallBrowserError";
   }
+}
+
+interface WindowsKnownDirs {
+  programFiles: string;
+  localAppData: string;
+}
+
+function getWindowsKnownDirs(): WindowsKnownDirs {
+  const programFiles = process.env["ProgramFiles(x86)"] ?? process.env["ProgramFiles"] ?? "C:\\Program Files";
+  const localAppData = process.env["LOCALAPPDATA"] ?? join(process.env["USERPROFILE"] ?? "C:\\Users", "AppData", "Local");
+  return { programFiles, localAppData };
 }
 
 export class InstallBrowserService {
@@ -65,38 +77,27 @@ export class InstallBrowserService {
   }
 
   private findWindowsBrowser(): BrowserCheckResult {
+    const { programFiles, localAppData } = getWindowsKnownDirs();
     const candidates = [
-      { name: "Microsoft Edge", paths: this.getEdgePaths() },
-      { name: "Google Chrome", paths: this.getChromePaths() },
+      { name: "Microsoft Edge", paths: [
+        join(localAppData, "Microsoft", "Edge", "Application", "msedge.exe"),
+        join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe"),
+      ]},
+      { name: "Google Chrome", paths: [
+        join(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
+        join(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
+      ]},
     ];
 
     for (const candidate of candidates) {
       for (const path of candidate.paths) {
-        if (existsSync(path)) {
+        if (existsFile(path)) {
           return { found: true, browserName: candidate.name, path };
         }
       }
     }
 
     return { found: false, browserName: "none" };
-  }
-
-  private getEdgePaths(): string[] {
-    const programFiles = process.env["ProgramFiles(x86)"] ?? process.env["ProgramFiles"] ?? "C:\\Program Files";
-    const localAppData = process.env["LOCALAPPDATA"] ?? join(process.env["USERPROFILE"] ?? "C:\\Users", "AppData", "Local");
-    return [
-      join(localAppData, "Microsoft", "Edge", "Application", "msedge.exe"),
-      join(programFiles, "Microsoft", "Edge", "Application", "msedge.exe"),
-    ];
-  }
-
-  private getChromePaths(): string[] {
-    const programFiles = process.env["ProgramFiles(x86)"] ?? process.env["ProgramFiles"] ?? "C:\\Program Files";
-    const localAppData = process.env["LOCALAPPDATA"] ?? join(process.env["USERPROFILE"] ?? "C:\\Users", "AppData", "Local");
-    return [
-      join(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
-      join(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
-    ];
   }
 
   private findLinuxBrowser(): BrowserCheckResult {
@@ -109,12 +110,12 @@ export class InstallBrowserService {
     ];
 
     for (const candidate of candidates) {
-      if (existsSync(candidate.path)) {
+      if (existsFile(candidate.path)) {
         return { found: true, browserName: candidate.name, path: candidate.path };
       }
     }
 
-    if (this.isWsl()) {
+    if (isWSL()) {
       return this.findWslBrowser();
     }
 
@@ -130,52 +131,35 @@ export class InstallBrowserService {
     const edgePath = join(windowsRoot, "Program Files (x86)", "Microsoft", "Edge", "Application", "msedge.exe");
     const chromePath = join(windowsRoot, "Program Files", "Google", "Chrome", "Application", "chrome.exe");
 
-    if (existsSync(edgePath)) {
+    if (existsFile(edgePath)) {
       return { found: true, browserName: "Microsoft Edge (Windows via WSL)", path: edgePath };
     }
-    if (existsSync(chromePath)) {
+    if (existsFile(chromePath)) {
       return { found: true, browserName: "Google Chrome (Windows via WSL)", path: chromePath };
     }
 
     return { found: false, browserName: "none" };
   }
 
-  private isWsl(): boolean {
-    try {
-      return existsSync("/proc/version") && this.readFileSafe("/proc/version").toLowerCase().includes("microsoft");
-    } catch {
-      return false;
-    }
-  }
-
   private getWslWindowsRoot(): string | null {
-    try {
-      const mountOutput = this.readFileSafe("/proc/mounts");
-      const lines = mountOutput.split("\n");
-      for (const line of lines) {
-        if (line.includes("9p") && line.includes("drvfs")) {
-          const parts = line.split(/\s+/);
-          if (parts.length >= 2) {
-            const mountPoint = parts[1];
-            if (mountPoint.endsWith(sep) || mountPoint.endsWith("/")) {
-              return mountPoint.slice(0, -1);
-            }
-            return mountPoint;
+    const mountOutput = safeReadTextFile("/proc/mounts");
+    if (!mountOutput) {
+      return null;
+    }
+    const lines = mountOutput.split("\n");
+    for (const line of lines) {
+      if (line.includes("9p") && line.includes("drvfs")) {
+        const parts = line.split(/\s+/);
+        if (parts.length >= 2) {
+          const mountPoint = parts[1];
+          if (mountPoint.endsWith("/")) {
+            return mountPoint.slice(0, -1);
           }
+          return mountPoint;
         }
       }
-    } catch {
-      // ignore
     }
     return null;
-  }
-
-  private readFileSafe(path: string): string {
-    try {
-      return readFileSync(path, "utf-8");
-    } catch {
-      return "";
-    }
   }
 
   private async runInstall(): Promise<string> {

@@ -98,6 +98,29 @@ If any change touches these files, the full test suite must pass
   the original Python → Bun migration tasks to current status and to the
   specific OpenSpec change that handles any remaining work.
 
+## Code conventions
+
+- **Path and file operations are mandatory mediation.** No file in `src/`
+  outside `src/infrastructure/path-utils.ts`, `src/infrastructure/io.ts`,
+  and `src/services/install-browser-service.ts` may import from
+  `node:fs`, `node:path`, or `node:os`. The lint script
+  `scripts/lint-path-mediation.{sh,ps1}` (also exposed as
+  `bun run lint:mediation`) enforces this. If you need a new path or
+  file-system helper, add it to the right module first and consume it
+  from there — do not bypass the mediation.
+- **All new file-system operations go through `io.ts`.** Use
+  `writeTextFile` / `readTextFile` / `readJsonFile` / `writeJsonFile` /
+  `ensureDir` / `existsFile` / `removeDir` / `renameDir` /
+  `isDirectory` / `listSubdirectories` / `safeReadTextFile`. New
+  functions should be added only when at least 2 call sites need them.
+- **All new path operations go through `path-utils.ts`.** Use
+  `resolvePath`, `joinPath`, `dirnamePath`, `getConfigDir`,
+  `getProfilesDir`, `getProfilePath`, `getProfileDir`,
+  `getDefaultProfileMarkerPath`, `isWSL`, `getProjectRoot`, or
+  `getPackageJson`. Do not call `node:path` directly.
+- **Errors from `io.ts` throw `IOError`** with a `cause` field for the
+  original error. Do not catch and re-throw the raw `node:fs` error.
+
 ## Repo hygiene
 
 These items are tracked in the `cross-platform-build-and-ci` change's tasks:
