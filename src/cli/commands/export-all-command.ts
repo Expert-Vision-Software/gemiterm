@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import { resolve, join } from "node:path";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
@@ -13,6 +12,7 @@ import {
 } from "../../core/query-handlers.ts";
 import { formatChatAsMarkdown } from "../../infrastructure/formatters.ts";
 import { ensureDir, writeTextFile } from "../../infrastructure/io.ts";
+import { joinPath, resolvePath } from "../../infrastructure/path-utils.ts";
 
 interface ExportAllCommandOptions {
   help: boolean;
@@ -75,7 +75,7 @@ export class ExportAllCommand implements CliCommand {
       console.log(chalk.bold(`Found ${chats.length} conversation${chats.length !== 1 ? "s" : ""} to export.`));
       console.log("");
 
-      const outputDir = resolve(options.outputDir);
+      const outputDir = resolvePath(options.outputDir);
       ensureDir(outputDir);
 
       const results: ExportResult[] = [];
@@ -92,7 +92,7 @@ export class ExportAllCommand implements CliCommand {
           } as Query<FetchChatQueryPayload>);
 
           const filename = this.sanitizeFilename(chat.title || chat.id);
-          const filePath = join(outputDir, `${filename}.md`);
+          const filePath = joinPath(outputDir, `${filename}.md`);
           const content = formatChatAsMarkdown(
             fetchResult.messages,
             chat.title,
@@ -173,7 +173,7 @@ export class ExportAllCommand implements CliCommand {
       }
     }
 
-    const indexPath = join(outputDir, "index.md");
+    const indexPath = joinPath(outputDir, "index.md");
     writeTextFile(indexPath, lines.join("\n"));
   }
 
@@ -188,7 +188,7 @@ export class ExportAllCommand implements CliCommand {
       console.log(`  Failed:  ${chalk.red(failed.length)}`);
     }
     console.log(`  Output:  ${outputDir}`);
-    console.log(`  Index:   ${chalk.cyan(join(outputDir, "index.md"))}`);
+    console.log(`  Index:   ${chalk.cyan(joinPath(outputDir, "index.md"))}`);
   }
 
   private parseArgs(args: string[]): ExportAllCommandOptions {

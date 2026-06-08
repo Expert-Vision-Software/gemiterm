@@ -22,6 +22,14 @@ function resolvePath(...parts: string[]): string {
   return resolve(join(...parts));
 }
 
+function joinPath(...parts: string[]): string {
+  return join(...parts);
+}
+
+function dirnamePath(path: string): string {
+  return dirname(path);
+}
+
 function getConfigDir(): string {
   return _getConfigDir();
 }
@@ -104,6 +112,8 @@ function getPackageJson(importMetaUrl?: string): PackageJson {
 
 export {
   resolvePath,
+  joinPath,
+  dirnamePath,
   getConfigDir,
   getProfilesDir,
   getProfilePath,

@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import { resolve } from "node:path";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
@@ -135,9 +134,8 @@ export class ListCommand implements CliCommand {
   }
 
   private writeOutput(path: string, content: string): void {
-    const resolved = resolve(path);
-    writeTextFile(resolved, content);
-    console.log(chalk.dim(`Output written to: ${resolved}`));
+    writeTextFile(path, content);
+    console.log(chalk.dim(`Output written to: ${path}`));
   }
 
   private parseArgs(args: string[]): ListCommandOptions {

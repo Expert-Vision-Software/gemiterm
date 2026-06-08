@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import { resolve } from "node:path";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
@@ -69,16 +68,15 @@ export class ExportCommand implements CliCommand {
       } as Query<FetchChatQueryPayload>);
 
       const outputPath = options.output || this.defaultFilename(conversationId, options.format);
-      const resolved = resolve(outputPath);
 
       const content =
         options.format === "json"
           ? formatChatAsJson(result.messages, conversationId)
           : formatChatAsMarkdown(result.messages, conversationId, conversationId, options.includeMetadata);
 
-      writeTextFile(resolved, content);
-      console.log(chalk.green(`Exported conversation '${chalk.cyan(conversationId)}' to: ${resolved}`));
-      logger.info(`Exported conversation ${conversationId} to ${resolved}`);
+      writeTextFile(outputPath, content);
+      console.log(chalk.green(`Exported conversation '${chalk.cyan(conversationId)}' to: ${outputPath}`));
+      logger.info(`Exported conversation ${conversationId} to ${outputPath}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Error: ${message}`));

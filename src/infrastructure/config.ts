@@ -1,4 +1,3 @@
-import { dirname } from "node:path";
 import {
   ensureDir,
   existsFile,
@@ -11,6 +10,7 @@ import {
   getConfigDir,
   getDefaultProfileMarkerPath,
   getProfilesDir,
+  dirnamePath,
   DEFAULT_PROFILE_MARKER,
 } from "./path-utils.ts";
 
@@ -24,7 +24,7 @@ function getDefaultProfileName(): string {
 
 function setDefaultProfileName(name: string): void {
   const marker = getDefaultProfileMarkerPath();
-  ensureDir(dirname(marker));
+  ensureDir(dirnamePath(marker));
   writeTextFile(marker, name);
 }
 
