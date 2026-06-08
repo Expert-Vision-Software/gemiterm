@@ -45,6 +45,14 @@ The system MUST upgrade an existing v1.4.1 installation in place without modifyi
 - **WHEN** a user runs `gemiterm status` before and after the v1.4.1 → v2.0.0 upgrade
 - **THEN** both invocations print the same set of profile names and the same authentication-state column for each profile
 
+#### Scenario: PowerShell installer detects Python v1.4.1 and prompts uninstall without touching config
+- **WHEN** `install.ps1` runs and `pip show gemiterm` (or `gemiterm --version`) indicates a Python v1.4.1 install is present
+- **THEN** the installer prints `"WARNING: Python v1.4.1 detected. Your config data at %APPDATA%\gemiterm\ is safe and will be preserved. Please run 'pip uninstall gemiterm' before re-running this installer to complete the v2.0.0 installation."` and exits non-zero; the existing binary is NOT replaced and no config data is modified
+
+#### Scenario: POSIX installer detects Python v1.4.1 and prompts uninstall without touching config
+- **WHEN** `install.sh` runs and `pip show gemiterm` (or `gemiterm --version`) indicates a Python v1.4.1 install is present
+- **THEN** the installer prints `"WARNING: Python v1.4.1 detected. Your config data at ~/.config/gemiterm/ is safe and will be preserved. Please run 'pip uninstall gemiterm' before re-running this installer to complete the v2.0.0 installation."` and exits non-zero; the existing binary is NOT replaced and no config data is modified
+
 ### Requirement: `--uninstall` Removes Binary And PATH Entry, Preserves Config Dir
 The system MUST support a `--uninstall` flag on both `install.ps1` and `install.sh`. The uninstall flow MUST delete the binary, remove the install dir from the persistent user `PATH` (or remove the `~/.config/gemiterm/env.sh` snippet and the `source` line from `~/.bashrc` / `~/.zshrc` on POSIX), and MUST NOT delete or modify the user's config dir at `%APPDATA%\gemiterm\` (Windows) or `~/.config/gemiterm/` (POSIX). After uninstall, a re-install MUST restore the binary and find the same profiles as before the uninstall.
 
@@ -90,20 +98,28 @@ The system MUST add the install dir to the user `PATH` on a fresh install and MU
 - **WHEN** `install.sh` runs and `~/.config/gemiterm/env.sh` is written and the `source` line is appended to `~/.bashrc` only if not already present (case-insensitive substring check)
 - **THEN** a second `install.sh` run does not append a second `source` line and does not duplicate the `export PATH=...` line inside `env.sh`
 
-### Requirement: install-browser Step Runs As Part Of Install And Is Verified
-The system MUST invoke `gemiterm install-browser` as part of the install flow, MUST verify that Chromium is on disk after the invocation, and MUST exit non-zero with a clear message if the verification fails. The verification check is a glob over `$env:LOCALAPPDATA\ms-playwright\chromium-*\chrome.exe` (Windows) or `~/.cache/ms-playwright/chromium-*/chrome-linux/chrome` (POSIX).
+### Requirement: Browser Install Step Runs As Part Of Install And Is Verified
+The system MUST invoke `bunx @playwright/cli install chromium` directly (not via the `gemiterm install-browser` command) as part of the install flow, MUST verify that Chromium is on disk after the invocation, and MUST exit non-zero with a clear message if the verification fails. The verification check is a glob over `$env:LOCALAPPDATA\ms-playwright\chromium-*\chrome.exe` (Windows) or `~/.cache/ms-playwright/chromium-*/chrome-linux/chrome` (POSIX).
 
-#### Scenario: Fresh install downloads Chromium via install-browser
-- **WHEN** `install.ps1` (or `install.sh`) runs on a system without Chromium
-- **THEN** `gemiterm install-browser` is invoked, which downloads Chromium via Playwright, and the installer verifies the Chromium binary is present under the appropriate path before exiting 0
+#### Scenario: Fresh install downloads Chromium via playwright-cli
+- **WHEN** `install.ps1` (or `install.sh`) runs on a system without Chromium and `bun` is in PATH
+- **THEN** `bunx @playwright/cli install chromium` is invoked, which downloads Chromium via Playwright, and the installer verifies the Chromium binary is present under the appropriate path before exiting 0
 
-#### Scenario: install-browser failure fails the installer
-- **WHEN** `gemiterm install-browser` exits non-zero (e.g. network failure during the Chromium download)
-- **THEN** the installer prints `"Chromium installation verification failed. Re-run the installer after fixing the network, or run 'gemiterm install-browser' manually."` and exits non-zero; the existing binary (if upgrading) is left in place
+#### Scenario: Bun not present on system — installer bootstraps Bun first
+- **WHEN** `install.ps1` (or `install.sh`) runs and `bun` is not in PATH
+- **THEN** the installer downloads and installs Bun via the official installer (`irm https://bun.sh/install.ps1 | iex` on Windows, `curl -fsSL https://bun.sh/install | bash` on POSIX) before running `bunx @playwright/cli install chromium`
+
+#### Scenario: Bun bootstrap failure fails the installer
+- **WHEN** the Bun bootstrap step fails (network error)
+- **THEN** the installer prints `"Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."` and exits non-zero; the existing binary (if upgrading) is left in place
+
+#### Scenario: playwright-cli install failure fails the installer
+- **WHEN** `bunx @playwright/cli install chromium` exits non-zero (e.g. network failure during the Chromium download)
+- **THEN** the installer prints `"Chromium installation verification failed. Re-run the installer after fixing the network, or run 'bunx @playwright/cli install chromium' manually."` and exits non-zero; the existing binary (if upgrading) is left in place
 
 #### Scenario: Re-install on a system with Chromium is a no-op for the browser step
 - **WHEN** `install.ps1` (or `install.sh`) runs on a system that already has Chromium
-- **THEN** `gemiterm install-browser` returns quickly (no re-download), the verification step confirms Chromium is present, and the installer exits 0
+- **THEN** `bunx @playwright/cli install chromium` returns quickly (no re-download), the verification step confirms Chromium is present, and the installer exits 0
 
 ### Requirement: Network Failure Is Handled Gracefully
 The system MUST detect when the GitHub API or the release download is unreachable and MUST exit non-zero with a clear remediation message. The installer MUST NOT replace the existing binary on a failed download (idempotency of the upgrade flow).

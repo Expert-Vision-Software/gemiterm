@@ -8,6 +8,26 @@ Access and manage your Gemini web chats from the command line. GemiTerm bridges 
 - **Chromium Browser** — GemiTerm uses your system Chrome/Edge if available, otherwise installs Playwright's Chromium automatically
 - **Google Account** with access to [Gemini](https://gemini.google.com)
 
+## Installation
+
+### Option 1: npm (recommended)
+
+```bash
+bun install -g gemiterm   # or: npm install -g gemiterm
+```
+
+Then run `gemiterm auth` to authenticate.
+
+### Option 2: bunx (zero-install)
+
+```bash
+bunx gemiterm auth
+```
+
+### Option 3: Download binary
+
+Download the latest release from [GitHub Releases](https://github.com/Expert-Vision-Software/gemiterm/releases/latest) and run `gemiterm.exe` (Windows) or `GemiTerm` (Linux).
+
 ## Quick Start
 
 ```bash

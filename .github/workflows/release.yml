@@ -4,49 +4,52 @@ on:
   push:
     tags: ['v*']
 
+concurrency:
+  group: release
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
 jobs:
   release:
+    name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-linux, build-windows, build-wsl]
     steps:
       - uses: actions/checkout@v4
-      - name: Download Linux binary
-        uses: actions/download-artifact@v4
-        with:
-          name: GemiTerm
-          path: .
-      - name: Download Windows binary
-        uses: actions/download-artifact@v4
-        with:
-          name: GemiTerm.exe
-          path: .
-      - name: Download install scripts
-        run: |
-          # install.sh and install.ps1 are created by the v2-install-migration change
-          # This step assumes they exist in the repo root at release time
-          if [ -f install.sh ]; then
-            echo "Found install.sh"
-          else
-            echo "Warning: install.sh not found"
-          fi
-          if [ -f install.ps1 ]; then
-            echo "Found install.ps1"
-          else
-            echo "Warning: install.ps1 not found"
-          fi
       - name: Determine tag
         run: |
-          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-      - name: Make binaries executable
-        run: chmod +x GemiTerm
-      - uses: softprops/action-gh-release@v2
+          echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
           generate_release_notes: true
           files: |
             GemiTerm
             GemiTerm.exe
             install.sh
             install.ps1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - run: bun install
+      - name: Publish to npm
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          bun publish
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

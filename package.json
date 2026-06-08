@@ -3,7 +3,17 @@
   "version": "2.0.0",
   "module": "index.ts",
   "type": "module",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Expert-Vision-Software/gemiterm.git"
+  },
+  "homepage": "https://github.com/Expert-Vision-Software/gemiterm#readme",
+  "bugs": {
+    "url": "https://github.com/Expert-Vision-Software/gemiterm/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@types/bun": "^1.3.14"
   },
