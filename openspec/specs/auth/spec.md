@@ -201,20 +201,25 @@ The `ProfileAuthManager.getActiveProfiles()` method MUST return the names of all
 - **WHEN** no profiles are configured
 - **THEN** `getActiveProfiles()` returns `[]`
 
-### Requirement: ProfileAuthManager.findProfileForConversation returns the first active profile
-The `ProfileAuthManager.findProfileForConversation(conversationId)` method MUST iterate over the profiles in `profileManager.list()` order and return the name of the first profile whose status reports `isActive === true`. When no profile is active, the method MUST return `null`. The `conversationId` argument is currently accepted but MUST NOT be used in the lookup — the current implementation returns the first active profile regardless of the supplied conversation identifier. The method MUST NOT throw on a missing or unknown conversation id.
+### Requirement: ProfileAuthManager.findProfileForConversation returns the profile that owns the conversation
 
-#### Scenario: Returns first active profile
-- **WHEN** `findProfileForConversation("conv-123")` is called and two profiles exist, the first is active and the second is not
-- **THEN** the method returns the name of the first active profile (`"alpha"` in the test fixture)
+The `ProfileAuthManager.findProfileForConversation(conversationId)` method MUST iterate over all profiles in `profileManager.list()` order and, for each, call `geminiClient.profileHasConversation(name, conversationId)` to check whether the conversation appears in that profile's chat list. It MUST return the name of the first profile whose helper returns `true`. When no profile owns the conversation, the method MUST return `null`. The `conversationId` argument MUST be passed to the lookup helper; it MUST NOT be ignored. The method MUST NOT throw on a missing or unknown conversation id.
 
-#### Scenario: Returns null when no active profiles
-- **WHEN** `findProfileForConversation("conv-456")` is called and the only existing profile is not active
+#### Scenario: Returns the profile that owns the conversation
+- **WHEN** `findProfileForConversation("conv-123")` is called and conversation `conv-123` exists in profile `work` but not in profile `personal`
+- **THEN** the method returns the string `"work"`
+
+#### Scenario: Returns null when conversation is not in any profile
+- **WHEN** `findProfileForConversation("conv-456")` is called and conversation `conv-456` does not exist in any profile's chat list
 - **THEN** the method returns `null`
 
 #### Scenario: Returns null when no profiles exist
 - **WHEN** `findProfileForConversation("conv-789")` is called and no profiles are configured
 - **THEN** the method returns `null`
+
+#### Scenario: Returns first profile in list order when multiple profiles report ownership
+- **WHEN** `findProfileForConversation("conv-shared")` is called and conversation `conv-shared` exists in both profile `profile1` and profile `profile3`, and `profileManager.list()` returns `["profile1", "profile2", "profile3"]` in that order
+- **THEN** the method returns the string `"profile1"` (the first profile in list order that reports ownership)
 
 ### Requirement: PlaywrightCliDriver auto-detects between direct and bunx strategies
 The `PlaywrightCliDriver` constructor MUST default the underlying `PlaywrightRunner` to a `BunPlaywrightRunner` with strategy `"direct"` (invoking the `playwright-cli` binary directly). The first time `runCli` is needed, the driver MUST probe the available install: it MUST first try `playwright-cli --version`; if that exits with code 0, the strategy is `direct`. If the direct probe fails, the driver MUST try `bunx @playwright/cli --version`; on success, the strategy is `bunx`. If both probes fail, the driver MUST emit a warning and `runCli` MUST continue to throw `PlaywrightCliError` on any call. The probe MUST time out after 5000 ms (`PROBE_TIMEOUT_MS`) per attempt.
