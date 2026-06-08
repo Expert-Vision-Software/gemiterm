@@ -16,6 +16,7 @@ describe("delete command integration", () => {
   let mediatorSendSpy: ReturnType<typeof spyOn>;
   let findProfileSpy: ReturnType<typeof mock>;
   let getActiveProfilesSpy: ReturnType<typeof mock>;
+  let exitSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new DeleteCommand();
@@ -30,6 +31,9 @@ describe("delete command integration", () => {
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    exitSpy = spyOn(process, "exit").mockImplementation(() => {
+      throw new Error("process.exit called");
+    });
     originalEnv = {
       GEMITERM_CONFIG_DIR: process.env.GEMITERM_CONFIG_DIR,
     };
@@ -44,6 +48,7 @@ describe("delete command integration", () => {
     mock.restore();
     logSpy.mockRestore();
     errorSpy.mockRestore();
+    exitSpy.mockRestore();
     teardownTestConfig(originalEnv);
   });
 
@@ -129,7 +134,7 @@ describe("delete command integration", () => {
     test("exits with error when mediator fails", async () => {
       mediatorSendSpy.mockRejectedValue(new Error("Network error"));
 
-      await expect(command.execute(["conv-123", "--force"], context)).rejects.toThrow("Network error");
+      await expect(command.execute(["conv-123", "--force"], context)).rejects.toThrow("process.exit called");
     });
   });
 });

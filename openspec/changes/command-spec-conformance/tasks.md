@@ -16,21 +16,21 @@
 
 ## 3. Update `profile-auth-manager.test.ts` to encode the new behavior
 
-- [ ] 3.1 Add a leading comment block at the top of `tests/services/profile-auth-manager.test.ts` (above the first `describe`) stating: "The 8 tests in `describe('findProfileForConversation')` previously asserted the BUGGY 'first active profile' behavior; they have been updated to assert the CORRECT per-profile-lookup behavior. See `openspec/changes/command-spec-conformance/proposal.md` for context." This is required so reviewers do not flag the test changes as a regression.
-- [ ] 3.2 Rewrite the existing "returns first active profile" test (currently at `tests/services/profile-auth-manager.test.ts:188-200`) to: create two profiles, mock `GeminiClientService.profileHasConversation` to return `true` for `work` and `false` for `personal`, and assert the method returns `"work"`. The test name MUST be changed to "returns the profile that owns the conversation" (or similar) to reflect the new behavior.
-- [ ] 3.3 Keep the "returns null when no active profiles" test (currently at `tests/services/profile-auth-manager.test.ts:202-212`) but update it to mock `profileHasConversation` to return `false` for the only active profile; the assertion (`toBeNull()`) is unchanged.
-- [ ] 3.4 Keep the "returns null when no profiles exist" test (currently at `tests/services/profile-auth-manager.test.ts:214-222`) unchanged: the `profileManager.list()` returns an empty array, so the loop never runs and the method returns `null`.
-- [ ] 3.5 Add a new test "returns null when conversation is not in any profile" that creates two profiles with valid cookies, mocks `profileHasConversation` to return `false` for both, and asserts `findProfileForConversation` returns `null`.
-- [ ] 3.6 Add a new test "returns first profile in list order when multiple profiles report ownership" that creates three profiles, mocks `profileHasConversation` to return `true` for profiles 1 and 3 (and `false` for profile 2), and asserts the method returns profile 1 (the first in `list()` order). This guards the iteration-order contract.
-- [ ] 3.7 Add a new test "passes the conversationId argument to the lookup helper" that mocks `profileHasConversation` with a spy and asserts the spy was called with the exact `conversationId` string the test passed in. This is the regression gate that catches the "first-active-wins" bug recurring.
-- [ ] 3.8 The test count for `profile-auth-manager.test.ts` MUST be 11 or higher after the change (the original 8, minus 0 since we keep all but rename one, plus 3 new tests = 11; the new tests can be expanded to 4 if helpful for coverage).
+- [x] 3.1 Add a leading comment block at the top of `tests/services/profile-auth-manager.test.ts` (above the first `describe`) stating: "The 8 tests in `describe('findProfileForConversation')` previously asserted the BUGGY 'first active profile' behavior; they have been updated to assert the CORRECT per-profile-lookup behavior. See `openspec/changes/command-spec-conformance/proposal.md` for context." This is required so reviewers do not flag the test changes as a regression.
+- [x] 3.2 Rewrite the existing "returns first active profile" test (currently at `tests/services/profile-auth-manager.test.ts:188-200`) to: create two profiles, mock `GeminiClientService.profileHasConversation` to return `true` for `work` and `false` for `personal`, and assert the method returns `"work"`. The test name MUST be changed to "returns the profile that owns the conversation" (or similar) to reflect the new behavior.
+- [x] 3.3 Keep the "returns null when no active profiles" test (currently at `tests/services/profile-auth-manager.test.ts:202-212`) but update it to mock `profileHasConversation` to return `false` for the only active profile; the assertion (`toBeNull()`) is unchanged.
+- [x] 3.4 Keep the "returns null when no profiles exist" test (currently at `tests/services/profile-auth-manager.test.ts:214-222`) unchanged: the `profileManager.list()` returns an empty array, so the loop never runs and the method returns `null`.
+- [x] 3.5 Add a new test "returns null when conversation is not in any profile" that creates two profiles with valid cookies, mocks `profileHasConversation` to return `false` for both, and asserts `findProfileForConversation` returns `null`.
+- [x] 3.6 Add a new test "returns first profile in list order when multiple profiles report ownership" that creates three profiles, mocks `profileHasConversation` to return `true` for profiles 1 and 3 (and `false` for profile 2), and asserts the method returns profile 1 (the first in `list()` order). This guards the iteration-order contract.
+- [x] 3.7 Add a new test "passes the conversationId argument to the lookup helper" that mocks `profileHasConversation` with a spy and asserts the spy was called with the exact `conversationId` string the test passed in. This is the regression gate that catches the "first-active-wins" bug recurring.
+- [x] 3.8 The test count for `profile-auth-manager.test.ts` MUST be 11 or higher after the change (the original 8, minus 0 since we keep all but rename one, plus 3 new tests = 11; the new tests can be expanded to 4 if helpful for coverage).
 
 ## 4. Add `profile?: string` to `ChatInfo`
 
 - [x] 4.1 Read `src/core/types.ts:9-14` to confirm the current `ChatInfo` shape: `{ id, title, isPinned, timestamp }`.
 - [x] 4.2 Add an optional `profile?: string` field to the `ChatInfo` interface. The field MUST be optional (declared with `?`) to preserve backward compatibility for single-profile consumers and for JSON serialization that does not include the field.
 - [x] 4.3 Do NOT change any other field in the interface. The type is purely additive.
-- [ ] 4.4 Verify the change compiles via `bun run build` (or the project's TypeScript check command); the optional field MUST NOT break any existing `ChatInfo` construction sites.
+- [x] 4.4 Verify the change compiles via `bun run build` (or the project's TypeScript check command); the optional field MUST NOT break any existing `ChatInfo` construction sites.
 
 ## 5. Add `includeProfileColumn` flag to `formatChatList`
 
@@ -74,22 +74,22 @@
 
 ## 10. Add integration tests for continue/delete profile lookup
 
-- [ ] 10.1 Read `tests/integration/commands/continue.test.ts` if it exists; if it does not, create it following the pattern in `tests/integration/commands/list.test.ts` (mock the mediator, assert command behavior). The new test file MUST follow the existing test conventions (Bun's `describe`/`test`/`expect`).
-- [ ] 10.2 Add a new test in the continue integration suite: "resolves the profile that owns the conversation" — mock the `ProfileAuthManager.findProfileForConversation` to return `"work"`, mock the mediator to capture the `SendMessageCommandPayload`, and assert the payload's `profileName` is `"work"`.
-- [ ] 10.3 Add a new test in the continue integration suite: "throws AuthenticationError when no profile owns the conversation" — mock `findProfileForConversation` to return `null`, run the command, and assert the error message contains the remediation text and the process exits non-zero.
-- [ ] 10.4 Add a new test in the delete integration suite: "resolves the profile that owns the conversation" — analog of 10.2 for delete.
-- [ ] 10.5 Add a new test in the delete integration suite: "throws AuthenticationError when no profile owns the conversation" — analog of 10.3 for delete.
+- [x] 10.1 Read `tests/integration/commands/continue.test.ts` if it exists; if it does not, create it following the pattern in `tests/integration/commands/list.test.ts` (mock the mediator, assert command behavior). The new test file MUST follow the existing test conventions (Bun's `describe`/`test`/`expect`).
+- [x] 10.2 Add a new test in the continue integration suite: "resolves the profile that owns the conversation" — mock the `ProfileAuthManager.findProfileForConversation` to return `"work"`, mock the mediator to capture the `SendMessageCommandPayload`, and assert the payload's `profileName` is `"work"`.
+- [x] 10.3 Add a new test in the continue integration suite: "throws AuthenticationError when no profile owns the conversation" — mock `findProfileForConversation` to return `null`, run the command, and assert the error message contains the remediation text and the process exits non-zero.
+- [x] 10.4 Add a new test in the delete integration suite: "resolves the profile that owns the conversation" — analog of 10.2 for delete.
+- [x] 10.5 Add a new test in the delete integration suite: "throws AuthenticationError when no profile owns the conversation" — analog of 10.3 for delete.
 
 ## 11. Add integration test for list Profile column
 
-- [ ] 11.1 Add a new test in `tests/integration/commands/list.test.ts`: "renders Profile column when --all-profiles is set" — mock the mediator to return chats with a `profile` field, run `command.execute(["--all-profiles"], context)`, and assert the output contains the `PROFILE` header and the profile names from the mocks.
-- [ ] 11.2 Add a new test in `tests/integration/commands/list.test.ts`: "omits Profile column when --all-profiles is not set" — mock the mediator to return chats (with or without a `profile` field), run `command.execute([], context)`, and assert the output does NOT contain the `PROFILE` header.
-- [ ] 11.3 Add a new test in `tests/integration/commands/list.test.ts`: "JSON output includes profile field only when --all-profiles is set" — run the command with and without `--all-profiles --format json`, parse the JSON output, and assert the `profile` key is present in the `--all-profiles` case and absent in the other.
+- [x] 11.1 Add a new test in `tests/integration/commands/list.test.ts`: "renders Profile column when --all-profiles is set" — mock the mediator to return chats with a `profile` field, run `command.execute(["--all-profiles"], context)`, and assert the output contains the `PROFILE` header and the profile names from the mocks.
+- [x] 11.2 Add a new test in `tests/integration/commands/list.test.ts`: "omits Profile column when --all-profiles is not set" — mock the mediator to return chats (with or without a `profile` field), run `command.execute([], context)`, and assert the output does NOT contain the `PROFILE` header.
+- [x] 11.3 Add a new test in `tests/integration/commands/list.test.ts`: "JSON output includes profile field only when --all-profiles is set" — run the command with and without `--all-profiles --format json`, parse the JSON output, and assert the `profile` key is present in the `--all-profiles` case and absent in the other.
 
 ## 12. Final verification
 
-- [ ] 12.1 Run `bun test` from the repo root and confirm all tests pass. The baseline is 432/432; the new tests (4-5 in profile-auth-manager + 2 in continue integration + 2 in delete integration + 3 in list integration) bring the count to 442+ (exact count depends on how the new tests are split).
-- [ ] 12.2 Run `bun test tests/services/profile-auth-manager.test.ts` and confirm the test count is at least 11 (8 original + 3-4 new) and the leading comment is in place.
-- [ ] 12.3 Run `bun run build` (or the project's TypeScript check command) to confirm the `ChatInfo.profile` field and the `formatChatList` options object do not break any consumer.
-- [ ] 12.4 Manually run `gemiterm list` (single-profile mode) and confirm the output is byte-compatible with the pre-change format. Manually run `gemiterm list --all-profiles` (multi-profile mode) and confirm the Profile column appears. Manually run `gemiterm continue <id> <msg>` against a known conversation and confirm it routes to the right profile.
-- [ ] 12.5 Confirm no file under `src/services/playwright-cli-driver.ts`, `src/services/cookie-monitor.ts`, or `src/services/auth-service.ts` was modified. The git diff for those files MUST be empty.
+- [x] 12.1 Run `bun test` from the repo root and confirm all tests pass. The baseline is 432/432; the new tests (4-5 in profile-auth-manager + 2 in continue integration + 2 in delete integration + 3 in list integration) bring the count to 442+ (exact count depends on how the new tests are split).
+- [x] 12.2 Run `bun test tests/services/profile-auth-manager.test.ts` and confirm the test count is at least 11 (8 original + 3-4 new) and the leading comment is in place.
+- [x] 12.3 Run `bun run build` (or the project's TypeScript check command) to confirm the `ChatInfo.profile` field and the `formatChatList` options object do not break any consumer.
+- [x] 12.4 Manually run `gemiterm list` (single-profile mode) and confirm the output is byte-compatible with the pre-change format. Manually run `gemiterm list --all-profiles` (multi-profile mode) and confirm the Profile column appears. Manually run `gemiterm continue <id> <msg>` against a known conversation and confirm it routes to the right profile.
+- [x] 12.5 Confirm no file under `src/services/playwright-cli-driver.ts`, `src/services/cookie-monitor.ts`, or `src/services/auth-service.ts` was modified. The git diff for those files MUST be empty.
