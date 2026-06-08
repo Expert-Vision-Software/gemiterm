@@ -1,0 +1,139 @@
+## Purpose
+
+The Gemini API client wrapper. It owns the `GeminiClientService` class that implements both the `IGeminiClientService` (used by command handlers for mutations: delete, send, start-new) and the `IGeminiClientQueryService` (used by query handlers for reads: list chats, fetch chat, list models) interfaces. The wrapper issues authenticated `fetch` requests against `https://gemini.google.com`, attaching the `__Secure-1PSID` and `__Secure-1PSIDTS` cookies, and translates Gemini API responses into the domain types `ChatInfo` and `Message`.
+
+## Requirements
+
+### Requirement: GeminiClientService is constructed from cookies and a logger
+The `GeminiClientService` constructor MUST accept two arguments: a config object with `secure1psid: string` and an optional `secure1psidts?: string | null`, and a `Logger` instance. The `authenticated` flag MUST be initialized to `true` when `secure1psid` is a non-empty string and `false` otherwise. The class MUST implement BOTH `IGeminiClientService` and `IGeminiClientQueryService`.
+
+#### Scenario: Service initializes as authenticated with a 1PSID
+- **WHEN** a `GeminiClientService` is constructed with `{ secure1psid: "abc" }` and a logger
+- **THEN** `isAuthenticated()` returns `true`
+
+#### Scenario: Service initializes as unauthenticated without a 1PSID
+- **WHEN** a `GeminiClientService` is constructed with `{ secure1psid: "" }` and a logger
+- **THEN** `isAuthenticated()` returns `false`
+
+### Requirement: GeminiClientService builds the cookie header from the configured cookies
+For every authenticated request, the service MUST build a `Cookie` header that includes `__Secure-1PSID=<value>` and, when `secure1psidts` is non-null/non-empty, an additional `__Secure-1PSIDTS=<value>` segment joined by `; `. The header MUST be combined with the default headers `Content-Type: application/x-www-form-urlencoded` and a Chrome User-Agent string.
+
+#### Scenario: Cookie header includes both cookies when present
+- **WHEN** the service is configured with both `secure1psid` and `secure1psidts`
+- **THEN** outgoing requests carry a `Cookie` header whose value is `__Secure-1PSID=<psid>; __Secure-1PSIDTS=<psidts>`
+
+#### Scenario: Cookie header includes only 1PSID when 1PSIDTS is absent
+- **WHEN** the service is configured with `secure1psid` and `secure1psidts: null`
+- **THEN** outgoing requests carry a `Cookie` header whose value is `__Secure-1PSID=<psid>` (no 1PSIDTS segment)
+
+### Requirement: GeminiClientService.listChats returns ChatInfo sorted by recency
+The `listChats(options?)` method MUST GET `/app/api/chat/history` and parse the response JSON. Each entry in the `chats` array MUST be mapped to a `ChatInfo` object with fields:
+- `id: string` (from the API's `cid`)
+- `title: string` (from the API's `title`, defaulting to `"Untitled"` when missing)
+- `isPinned: boolean` (from the API's `is_pinned`, defaulting to `false` when missing)
+- `timestamp: number` (from the API's `timestamp`, defaulting to `0` when missing)
+
+The `ChatInfo` type MUST NOT include a `profile` field at this time. After mapping, the method MUST sort the array by `timestamp` descending, apply an in-memory `search` filter on the lowercased `title` when `options.search` is provided, then apply `options.offset` (skip) and `options.limit` (truncate) in that order. Network errors MUST be re-thrown as `GeminiAPIError`; HTTP 401/403 MUST be re-thrown as `AuthenticationError` with the message `Session expired or invalid. Please run 'gemiterm login' again.` and the service MUST mark itself unauthenticated.
+
+#### Scenario: listChats maps API response to ChatInfo
+- **WHEN** `/app/api/chat/history` returns a JSON object with a `chats` array of objects with `cid`, `title`, `is_pinned`, and `timestamp` fields
+- **THEN** the method resolves with a `ChatInfo[]` whose elements have `id` (from `cid`), `title`, `isPinned` (from `is_pinned`), and `timestamp` fields, and no `profile` field is present on any element
+
+#### Scenario: listChats sorts results by timestamp descending
+- **WHEN** the API returns chats with timestamps `1000` and `2000`
+- **THEN** the resolved array is ordered with the `timestamp: 2000` entry first and the `timestamp: 1000` entry second
+
+#### Scenario: listChats applies the search filter
+- **WHEN** `listChats({ search: "hello" })` is called and the response contains chats with mixed titles
+- **THEN** the resolved array contains only chats whose lowercased title includes the substring `hello`
+
+#### Scenario: listChats applies limit and offset in order
+- **WHEN** `listChats({ offset: 5, limit: 10 })` is called and the sorted response has 20 entries
+- **THEN** the resolved array has length 10 and is the slice of the sorted response from index 5 to index 14 (inclusive)
+
+#### Scenario: listChats surfaces 401/403 as AuthenticationError
+- **WHEN** the upstream API responds with HTTP 401 or 403
+- **THEN** the method rejects with an `AuthenticationError` whose message contains `Session expired` and `isAuthenticated()` returns `false` thereafter
+
+### Requirement: GeminiClientService.fetchChat returns ordered messages
+The `fetchChat(conversationId)` method MUST GET `/app/api/chat/history/<encoded-conversationId>` and parse the `turns` array. Each turn MUST be converted to a `Message` with:
+- `role: "user" | "model"` (mapped from the turn's `role`; non-`"user"` roles are normalized to `"model"`)
+- `content: string` (built from `turn.text` when present, else by joining `turn.parts[].text` strings, else the empty string)
+- `conversationId: string` (the same conversation id passed to the method)
+
+Errors from the underlying fetch MUST be wrapped in `GeminiAPIError` unless they are already a `GeminiAPIError` or `AuthenticationError`.
+
+#### Scenario: fetchChat returns messages with role and content
+- **WHEN** `/app/api/chat/history/<id>` returns a `turns` array with user and model turns
+- **THEN** the method resolves with a `Message[]` whose entries have the correct `role` (`"user"` or `"model"`) and `content`, and whose `conversationId` matches the input
+
+#### Scenario: fetchChat builds content from parts when text is absent
+- **WHEN** a turn has no `text` field but has `parts: [{ text: "a" }, { text: "b" }]`
+- **THEN** the resulting `Message.content` is the string `"ab"` (parts joined)
+
+### Requirement: GeminiClientService.deleteChat removes a conversation
+The `deleteChat(conversationId)` method MUST issue `DELETE /app/api/chat/history/<encoded-conversationId>`. Errors MUST be wrapped in `GeminiAPIError` unless they are already a `GeminiAPIError` or `AuthenticationError`.
+
+#### Scenario: deleteChat issues a DELETE to the history endpoint
+- **WHEN** `deleteChat("conv-1")` is called
+- **THEN** the underlying request is `DELETE https://gemini.google.com/app/api/chat/history/conv-1`
+
+#### Scenario: deleteChat surfaces upstream errors as GeminiAPIError
+- **WHEN** the upstream API responds with a non-2xx status other than 401/403
+- **THEN** the method rejects with a `GeminiAPIError` whose message contains the status code
+
+### Requirement: GeminiClientService.sendMessage returns the model response text
+The `sendMessage(conversationId, message)` method MUST POST `/app/api/chat/<encoded-conversationId>/send` with a URL-encoded form body of `message=<message>`. The response JSON MUST be read, and the method MUST return the value of the `response` field, falling back to the `text` field, falling back to the empty string.
+
+#### Scenario: sendMessage returns the response field
+- **WHEN** the API responds with `{ "response": "Hello!" }`
+- **THEN** the method resolves with the string `Hello!`
+
+#### Scenario: sendMessage falls back to the text field
+- **WHEN** the API responds with `{ "text": "Hi" }` and no `response` field
+- **THEN** the method resolves with the string `Hi`
+
+#### Scenario: sendMessage returns empty string when neither field is present
+- **WHEN** the API responds with `{}`
+- **THEN** the method resolves with the string `""`
+
+### Requirement: GeminiClientService.startNewChat returns response and conversation id
+The `startNewChat(message)` method MUST POST `/app/api/chat/new` with a URL-encoded form body of `message=<message>`. The response MUST be read and a `{ response, conversationId }` object returned, where `response` is `data.response ?? data.text ?? ""` and `conversationId` is `data.cid ?? data.conversation_id ?? ""`. Errors MUST be wrapped in `GeminiAPIError` unless they are already a `GeminiAPIError` or `AuthenticationError`.
+
+#### Scenario: startNewChat returns the new conversation id
+- **WHEN** the API responds with `{ "response": "Hi", "cid": "new-conv" }`
+- **THEN** the method resolves with `{ response: "Hi", conversationId: "new-conv" }`
+
+#### Scenario: startNewChat falls back to conversation_id and text
+- **WHEN** the API responds with `{ "text": "Hello", "conversation_id": "fallback-id" }`
+- **THEN** the method resolves with `{ response: "Hello", conversationId: "fallback-id" }`
+
+#### Scenario: startNewChat returns empty strings when fields are absent
+- **WHEN** the API responds with `{}`
+- **THEN** the method resolves with `{ response: "", conversationId: "" }`
+
+### Requirement: GeminiClientService.listModels returns model display names
+The `listModels()` method MUST GET `/app/api/models` and parse the `models` array. For each entry, the method MUST return `display_name` when present, else `name`. When the response has no `models` field, the method MUST return `[]`.
+
+#### Scenario: listModels returns display names
+- **WHEN** the API responds with `{ "models": [{ "name": "x", "display_name": "Gemini Pro" }, { "name": "y" }] }`
+- **THEN** the method resolves with `["Gemini Pro", "y"]`
+
+#### Scenario: listModels returns empty array when no models field
+- **WHEN** the API responds with `{}`
+- **THEN** the method resolves with `[]`
+
+### Requirement: GeminiClientService.isAuthenticated reports the current session state
+The `isAuthenticated()` method MUST return the value of the internal `authenticated` flag. The flag MUST be initialized based on the constructor config and MUST be reset to `false` whenever a request surfaces a 401/403 response (so subsequent calls to mutating/querying methods throw `AuthenticationError`).
+
+#### Scenario: Returns true after successful construction
+- **WHEN** the service is constructed with a non-empty `secure1psid`
+- **THEN** `isAuthenticated()` returns `true`
+
+#### Scenario: Returns false after a 401/403 response
+- **WHEN** any method issues a request that returns 401 or 403
+- **THEN** the subsequent `isAuthenticated()` call returns `false`
+
+#### Scenario: Mutating methods throw AuthenticationError when not authenticated
+- **WHEN** the service is constructed with an empty `secure1psid` and `deleteChat`, `sendMessage`, or `startNewChat` is called
+- **THEN** the call rejects with an `AuthenticationError` (no network call is made)
