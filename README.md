@@ -10,30 +10,27 @@ Access and manage your Gemini web chats from the command line. GemiTerm bridges 
 
 ## Installation
 
-### Option 1: npm (recommended)
+See [docs/INSTALL.md](docs/INSTALL.md) for the full guide, uninstall instructions, troubleshooting, and build-from-source steps.
 
-```bash
-bun install -g gemiterm   # or: npm install -g gemiterm
+**Windows** (PowerShell 7+):
+
+```powershell
+irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.ps1 | iex
 ```
 
-Then run `gemiterm auth` to authenticate.
-
-### Option 2: bunx (zero-install)
+**Linux / WSL**:
 
 ```bash
-bunx gemiterm auth
+curl -fsSL https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.sh | bash
 ```
 
-### Option 3: Download binary
-
-Download the latest release from [GitHub Releases](https://github.com/Expert-Vision-Software/gemiterm/releases/latest) and run `gemiterm.exe` (Windows) or `GemiTerm` (Linux).
+> **Upgrading from v1.4.1?** Your profiles, cookies, and default profile marker are preserved. The installer replaces the binary in place; it does NOT touch your config dir. See the "Upgrade from v1.4.1" section in [docs/INSTALL.md](docs/INSTALL.md) for details.
 
 ## Quick Start
 
 ```bash
-bun install
-bun run src/cli/index.ts auth        # authenticate with Google
-bun run src/cli/index.ts list        # list your chats
+gemiterm auth          # authenticate with Google
+gemiterm list          # list your chats
 ```
 
 ## Development
@@ -205,8 +202,8 @@ gemiterm -v <command>
 ### Configuration Directory
 
 Default locations:
-- **Windows**: `%APPDATA%\gemiterm\`
-- **Linux/macOS**: `~/.config/gemiterm/`
+- **Binary**: `$env:LOCALAPPDATA\GemiTerm\` (Windows), `~/.local/bin/gemiterm` (Linux/macOS)
+- **Config**: `%APPDATA%\gemiterm\` (Windows), `~/.config/gemiterm/` (Linux/macOS)
 
 Override with:
 ```bash

@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# GemiTerm v2.0.0 installer for Linux/WSL
+#
+# Usage:
+#   curl -fsSL https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.sh | bash
+#   GEMITERM_TAG=v2.0.0-rc.1 bash install.sh
+#   GEMITERM_INSTALL_DIR=~/.local/bin bash install.sh
+#   bash install.sh --uninstall
+#
+# v1.4.1 → v2.0.0 upgrades replace the binary in place; the config dir at
+# ~/.config/gemiterm/ (POSIX) is NEVER deleted by this installer.
+
+set -euo pipefail
+
+REPO="expert-vision-software/GemiTerm"
+INSTALL_DIR="${GEMITERM_INSTALL_DIR:-$HOME/.local/bin}"
+BIN_PATH="$INSTALL_DIR/gemiterm"
+CONFIG_DIR="$HOME/.config/gemiterm"
+ENV_SNIPPET="$CONFIG_DIR/env.sh"
+TAG="${GEMITERM_TAG:-latest}"
+
+remove_source_line() {
+    local rc_file="$1"
+    if [[ -f "$rc_file" ]]; then
+        local tmp
+        tmp=$(mktemp)
+        grep -v 'gemiterm/env.sh' "$rc_file" > "$tmp" || true
+        mv "$tmp" "$rc_file"
+    fi
+}
+
+# --- Detect Python v1.4.1 (task 8.2) ---
+if command -v pip >/dev/null 2>&1 && pip show gemiterm >/dev/null 2>&1; then
+    echo "WARNING: Python v1.4.1 detected. Your config data at ~/.config/gemiterm/ is safe and will be preserved. Please run 'pip uninstall gemiterm' before re-running this installer to complete the v2.0.0 installation."
+    exit 1
+fi
+
+# --- Uninstall (task 3.3) ---
+if [[ "${1:-}" = "--uninstall" ]]; then
+    echo "Removing GemiTerm..."
+    rm -f "$BIN_PATH"
+    rm -f "$ENV_SNIPPET"
+    remove_source_line "$HOME/.bashrc"
+    if [[ -f "$HOME/.zshrc" ]]; then
+        remove_source_line "$HOME/.zshrc"
+    fi
+    echo "GemiTerm uninstalled successfully."
+    exit 0
+fi
+
+# --- Upgrade detection (task 3.4) ---
+if [[ -x "$BIN_PATH" ]]; then
+    echo "Detected existing install at $BIN_PATH; upgrading in place."
+fi
+
+# --- Resolve release (task 3.5) ---
+API_URL="https://api.github.com/repos/$REPO/releases/latest"
+if [[ "$TAG" != "latest" ]]; then
+    API_URL="https://api.github.com/repos/$REPO/releases/tags/$TAG"
+fi
+
+# --- Network check (task 3.11) ---
+if ! curl -fsSI -o /dev/null "$API_URL" 2>/dev/null; then
+    echo "Cannot reach GitHub releases. Check your network connection or use the 'build from source' instructions in docs/INSTALL.md."
+    exit 1
+fi
+
+RELEASE_JSON=$(curl -fsSL "$API_URL")
+
+ASSET_URL=$(echo "$RELEASE_JSON" | grep -oE '"browser_download_url":"[^"]*"' \
+    | sed 's/"browser_download_url":"//;s/"$//' \
+    | grep -E '/GemiTerm$' \
+    | head -n 1)
+
+if [[ -z "$ASSET_URL" ]]; then
+    echo "No GemiTerm binary asset found in release."
+    echo "Build from source:"
+    echo "  git clone https://github.com/$REPO.git && cd GemiTerm && bun install && bun run build"
+    exit 1
+fi
+
+VERSION=$(echo "$RELEASE_JSON" | grep -oE '"tag_name":"[^"]*"' | head -n 1 | sed 's/"tag_name":"//;s/"$//')
+
+# --- Download (task 3.6) ---
+mkdir -p "$INSTALL_DIR"
+
+if ! curl -fSL -o "$BIN_PATH.new" "$ASSET_URL"; then
+    rm -f "$BIN_PATH.new"
+    echo "Download failed."
+    exit 1
+fi
+
+mv "$BIN_PATH.new" "$BIN_PATH"
+chmod +x "$BIN_PATH"
+
+# --- Bootstrap Bun (task 9.2 + 9.3) ---
+if ! command -v bun >/dev/null 2>&1; then
+    echo "Installing Bun..."
+    if ! curl -fsSL https://bun.sh/install | bash; then
+        echo "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
+        exit 1
+    fi
+    export PATH="$HOME/.bun/bin:$PATH"
+fi
+
+if ! bun --version >/dev/null 2>&1; then
+    echo "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
+    exit 1
+fi
+
+# --- Install Chromium (task 3.7) ---
+echo "Installing Chromium browser for Playwright..."
+if ! bunx @playwright/cli install chromium; then
+    echo "Chromium installation failed. Re-run the installer after fixing the issue, or run 'bunx @playwright/cli install chromium' manually."
+    exit 1
+fi
+
+# --- Verify Chromium (task 3.8) ---
+CHROME_PATH=$(find "$HOME/.cache/ms-playwright" -path '*/chromium-*/chrome-linux/chrome' -type f -executable 2>/dev/null | head -n 1)
+if [[ -z "$CHROME_PATH" ]]; then
+    CHROME_PATH=$(find "$HOME/.cache/ms-playwright" -path '*/chromium-*' -name chrome -type f -executable 2>/dev/null | head -n 1)
+fi
+
+if [[ -n "$CHROME_PATH" ]]; then
+    echo "Chromium verified at $CHROME_PATH"
+else
+    echo "Chromium installation verification failed. Re-run the installer after fixing the network, or run 'bunx @playwright/cli install chromium' manually."
+    exit 1
+fi
+
+# --- PATH augmentation (task 3.9) ---
+mkdir -p "$CONFIG_DIR"
+cat > "$ENV_SNIPPET" <<'ENVEOF'
+export PATH="$HOME/.local/bin:$PATH"
+ENVEOF
+
+SOURCE_LINE='[[ -f "$HOME/.config/gemiterm/env.sh" ]] && source "$HOME/.config/gemiterm/env.sh"'
+
+if [[ -f "$HOME/.bashrc" ]] && ! grep -qiF 'gemiterm/env.sh' "$HOME/.bashrc"; then
+    echo "$SOURCE_LINE" >> "$HOME/.bashrc"
+fi
+
+if [[ -f "$HOME/.zshrc" ]] && ! grep -qiF 'gemiterm/env.sh' "$HOME/.zshrc"; then
+    echo "$SOURCE_LINE" >> "$HOME/.zshrc"
+fi
+
+export PATH="$INSTALL_DIR:$PATH"
+
+# --- Success (task 3.10) ---
+echo "GemiTerm ${VERSION:-unknown} installed to $BIN_PATH. Run 'gemiterm status' to verify, then 'gemiterm auth' to authenticate. Restart your shell (or 'source ~/.config/gemiterm/env.sh') to pick up the new PATH."
