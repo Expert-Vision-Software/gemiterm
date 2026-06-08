@@ -19,15 +19,15 @@
     "test:all": "bun test",
     "lint:mediation": "bash scripts/lint-path-mediation.sh",
     "lint:mediation:ps": "pwsh scripts/lint-path-mediation.ps1",
-    "build": "bun build --compile --target=bun --outdir=dist src/cli/index.ts",
-    "build:linux": "bun build --compile --target=bun-linux-x64 --outdir=dist src/cli/index.ts",
-    "build:windows": "bun build --compile --target=bun-windows-x64 --outdir=dist src/cli/index.ts"
+    "build": "bun build --compile --target=bun --outfile dist/gemiterm src/cli/index.ts",
+    "build:linux": "bun build --compile --target=bun-linux-x64 --outfile dist/gemiterm src/cli/index.ts",
+    "build:windows": "bun build --compile --target=bun-windows-x64 --outfile dist/gemiterm.exe src/cli/index.ts",
+    "build:release": "bun build --compile --target=bun --outfile dist/gemiterm --minify src/cli/index.ts"
   },
   "peerDependencies": {
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "chalk": "^5.6.2",
-    "commander": "^15.0.0"
+    "chalk": "^5.6.2"
   }
 }

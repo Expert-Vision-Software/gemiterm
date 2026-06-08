@@ -28,6 +28,35 @@ bun run build:linux      # cross-compile for Linux x64
 bun run build:windows    # cross-compile for Windows x64
 ```
 
+For installing Chromium, use the platform-specific wrapper scripts:
+```bash
+bash scripts/install-browser.sh   # Linux/macOS
+pwsh scripts/install-browser.ps1 # Windows
+```
+
+## Building from source
+
+GemiTerm is built with [Bun](https://bun.sh) 1.3.13 or later.
+
+```bash
+bun run build            # native binary (dist/gemiterm or dist/gemiterm.exe)
+bun run build:linux      # Linux x64 binary (dist/gemiterm)
+bun run build:windows    # Windows x64 binary (dist/gemiterm.exe)
+bun run build:release    # minified release binary (dist/gemiterm)
+```
+
+Output paths:
+- **Linux/macOS**: `dist/gemiterm`
+- **Windows**: `dist/gemiterm.exe`
+
+## Release artifacts
+
+The v2.0.0 release ships the following GitHub Release assets:
+- `GemiTerm` — Linux x64 binary
+- `GemiTerm.exe` — Windows x64 binary
+- `install.sh` — POSIX installer script
+- `install.ps1` — Windows PowerShell installer script
+
 ## Usage
 
 ### Authentication
