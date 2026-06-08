@@ -1,8 +1,5 @@
 #!/usr/bin/env bun
 
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
 import { CommandRegistry } from "./command-registry.ts";
 import { Logger } from "../infrastructure/logger.ts";
 import { Mediator } from "../core/mediator.ts";
@@ -12,6 +9,7 @@ import { CookieStorageService } from "../services/cookie-storage-service.ts";
 import { ProfileAuthManager } from "../services/profile-auth-manager.ts";
 import { CookieStorage, ProfileManager } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles, ensureConfigDir } from "../infrastructure/config.ts";
+import { getPackageJson } from "../infrastructure/path-utils.ts";
 import { AuthenticationError } from "../core/errors.ts";
 import {
   AuthenticateCommandHandler,
@@ -30,9 +28,7 @@ import {
   ListModelsQueryHandler,
 } from "../core/query-handlers.ts";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const pkg = JSON.parse(readFileSync(resolve(__dirname, "..", "..", "package.json"), "utf-8"));
+const pkg = getPackageJson(import.meta.url);
 
 interface GlobalFlags {
   verbose: boolean;

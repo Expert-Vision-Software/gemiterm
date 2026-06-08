@@ -1,7 +1,5 @@
 import chalk from "chalk";
-import { writeFileSync } from "node:fs";
-import { resolve, join, dirname } from "node:path";
-import { mkdirSync } from "node:fs";
+import { resolve, join } from "node:path";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
@@ -14,6 +12,7 @@ import {
   type FetchChatQueryResult,
 } from "../../core/query-handlers.ts";
 import { formatChatAsMarkdown } from "../../infrastructure/formatters.ts";
+import { ensureDir, writeTextFile } from "../../infrastructure/io.ts";
 
 interface ExportAllCommandOptions {
   help: boolean;
@@ -77,7 +76,7 @@ export class ExportAllCommand implements CliCommand {
       console.log("");
 
       const outputDir = resolve(options.outputDir);
-      mkdirSync(outputDir, { recursive: true });
+      ensureDir(outputDir);
 
       const results: ExportResult[] = [];
 
@@ -101,7 +100,7 @@ export class ExportAllCommand implements CliCommand {
             options.includeMetadata,
           );
 
-          writeFileSync(filePath, content, "utf-8");
+          writeTextFile(filePath, content);
 
           results.push({ id: chat.id, title: chat.title, filePath, success: true });
           process.stdout.write(chalk.green(" OK\n"));
@@ -175,7 +174,7 @@ export class ExportAllCommand implements CliCommand {
     }
 
     const indexPath = join(outputDir, "index.md");
-    writeFileSync(indexPath, lines.join("\n"), "utf-8");
+    writeTextFile(indexPath, lines.join("\n"));
   }
 
   private printSummary(results: ExportResult[], outputDir: string): void {

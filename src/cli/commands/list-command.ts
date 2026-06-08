@@ -1,7 +1,5 @@
 import chalk from "chalk";
-import { writeFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { mkdirSync } from "node:fs";
+import { resolve } from "node:path";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
@@ -12,6 +10,7 @@ import {
 } from "../../core/query-handlers.ts";
 import { formatChatList } from "../../infrastructure/formatters.ts";
 import type { ChatInfo } from "../../core/types.ts";
+import { writeTextFile } from "../../infrastructure/io.ts";
 
 interface ListCommandOptions {
   help: boolean;
@@ -137,9 +136,7 @@ export class ListCommand implements CliCommand {
 
   private writeOutput(path: string, content: string): void {
     const resolved = resolve(path);
-    const dir = dirname(resolved);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(resolved, content, "utf-8");
+    writeTextFile(resolved, content);
     console.log(chalk.dim(`Output written to: ${resolved}`));
   }
 
