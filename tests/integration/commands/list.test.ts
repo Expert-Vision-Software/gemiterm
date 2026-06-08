@@ -219,6 +219,58 @@ describe("list command integration", () => {
     });
   });
 
+  describe("--all-profiles flag", () => {
+    test("renders Profile column when --all-profiles is set", async () => {
+      const mockChats = [
+        { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
+        { id: "conv-2", title: "Chat 2", isPinned: false, timestamp: Date.now(), profile: "personal" },
+      ];
+      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+
+      await command.execute(["--all-profiles"], context);
+
+      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(output).toContain("PROFILE");
+      expect(output).toContain("work");
+      expect(output).toContain("personal");
+    });
+
+    test("omits Profile column when --all-profiles is not set", async () => {
+      const mockChats = [
+        { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
+      ];
+      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+
+      await command.execute([], context);
+
+      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(output).not.toContain("PROFILE");
+    });
+
+    test("JSON output includes profile field only when --all-profiles is set", async () => {
+      const mockChatsWithProfile = [
+        { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
+      ];
+      mediatorSendSpy.mockResolvedValue({ chats: mockChatsWithProfile });
+
+      await command.execute(["--all-profiles", "--format", "json"], context);
+      const outputWithFlag = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      const parsedWithFlag = JSON.parse(outputWithFlag);
+      expect(parsedWithFlag.chats[0]).toHaveProperty("profile");
+      expect(parsedWithFlag.chats[0].profile).toBe("work");
+
+      const mockChatsWithoutProfile = [
+        { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now() },
+      ];
+      logSpy.mockClear();
+      mediatorSendSpy.mockResolvedValue({ chats: mockChatsWithoutProfile });
+      await command.execute(["--format", "json"], context);
+      const outputWithoutFlag = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      const parsedWithoutFlag = JSON.parse(outputWithoutFlag);
+      expect(parsedWithoutFlag.chats[0]).not.toHaveProperty("profile");
+    });
+  });
+
   describe("error handling", () => {
     test("propagates mediator errors", async () => {
       mediatorSendSpy.mockRejectedValue(new Error("Network error"));

@@ -43,6 +43,7 @@ export interface SetDefaultProfileCommandResult {
 
 export interface DeleteConversationCommandPayload {
   conversationId: string;
+  profileName?: string;
 }
 
 export interface DeleteConversationCommandResult {
@@ -52,6 +53,7 @@ export interface DeleteConversationCommandResult {
 export interface SendMessageCommandPayload {
   conversationId: string;
   message: string;
+  profileName?: string;
 }
 
 export interface SendMessageCommandResult {
@@ -91,6 +93,8 @@ export interface IGeminiClientService {
   deleteChat(conversationId: string): Promise<void>;
   sendMessage(conversationId: string, message: string): Promise<string>;
   startNewChat(message: string): Promise<{ response: string; conversationId: string }>;
+  profileHasConversation(profileName: string, conversationId: string): Promise<boolean>;
+  forProfile(profileName: string): IGeminiClientService;
 }
 
 export class AuthenticateCommandHandler
@@ -189,8 +193,9 @@ export class DeleteConversationCommandHandler
   async handle(
     command: Command<DeleteConversationCommandPayload>,
   ): Promise<DeleteConversationCommandResult> {
-    const { conversationId } = extractPayload(command);
-    await this.geminiClient.deleteChat(conversationId);
+    const { conversationId, profileName } = extractPayload(command);
+    const client = profileName ? this.geminiClient.forProfile(profileName) : this.geminiClient;
+    await client.deleteChat(conversationId);
     return { success: true };
   }
 }
@@ -206,8 +211,9 @@ export class SendMessageCommandHandler
   }
 
   async handle(command: Command<SendMessageCommandPayload>): Promise<SendMessageCommandResult> {
-    const { conversationId, message } = extractPayload(command);
-    const response = await this.geminiClient.sendMessage(conversationId, message);
+    const { conversationId, message, profileName } = extractPayload(command);
+    const client = profileName ? this.geminiClient.forProfile(profileName) : this.geminiClient;
+    const response = await client.sendMessage(conversationId, message);
     return { response };
   }
 }

@@ -14,7 +14,15 @@ describe("ContinueCommand", () => {
   beforeEach(() => {
     command = new ContinueCommand();
     mediator = new Mediator();
-    context = { verbose: false, mediator };
+    context = {
+      verbose: false,
+      mediator,
+      profileAuthManager: {
+        getActiveProfiles: mock(() => ["default"]),
+        findProfileForConversation: mock(() => null),
+        ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+      } as unknown as CliCommandContext["profileAuthManager"],
+    };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
   });
 

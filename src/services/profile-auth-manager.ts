@@ -3,6 +3,7 @@ import type { Logger } from "../infrastructure/logger.ts";
 import type { ProfileManager } from "../infrastructure/storage.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import type { LoadedCookies } from "./cookie-storage-service.ts";
+import type { IGeminiClientService } from "../core/command-handlers.ts";
 import { AuthenticationError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
@@ -11,17 +12,20 @@ export interface ProfileAuthManagerDeps {
   profileManager: ProfileManager;
   cookieStorageService: CookieStorageService;
   logger: Logger;
+  geminiClient: IGeminiClientService;
 }
 
 export class ProfileAuthManager {
   private readonly profileManager: ProfileManager;
   private readonly cookieStorageService: CookieStorageService;
   private readonly logger: Logger;
+  private readonly geminiClient: IGeminiClientService;
 
   constructor(deps: ProfileAuthManagerDeps) {
     this.profileManager = deps.profileManager;
     this.cookieStorageService = deps.cookieStorageService;
     this.logger = deps.logger;
+    this.geminiClient = deps.geminiClient;
   }
 
   ensureAuthenticated(profileName?: string): LoadedCookies {
@@ -43,12 +47,12 @@ export class ProfileAuthManager {
     return profiles.filter((name) => this.profileManager.hasValidCookies(name));
   }
 
-  findProfileForConversation(conversationId: string): string | null {
+  async findProfileForConversation(conversationId: string): Promise<string | null> {
     const profiles = this.profileManager.list();
     for (const name of profiles) {
       try {
-        const status = this.profileManager.getStatus(name);
-        if (status.isActive) {
+        const hasConversation = await this.geminiClient.profileHasConversation(name, conversationId);
+        if (hasConversation) {
           return name;
         }
       } catch {
