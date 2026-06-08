@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,6 +8,14 @@ import { CookieStorageService } from "../../src/services/cookie-storage-service.
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { ProfileManager as ProfileManagerType } from "../../src/infrastructure/storage.ts";
+import type { IGeminiClientService } from "../../src/core/command-handlers.ts";
+
+/*
+The 8 tests in `describe('findProfileForConversation')` previously asserted the BUGGY
+'first active profile' behavior; they have been updated to assert the CORRECT
+per-profile-lookup behavior. See `openspec/changes/command-spec-conformance/proposal.md`
+for context.
+*/
 
 const TEST_DIR = join(tmpdir(), "gemiterm-test-profile-auth-manager");
 
@@ -67,12 +75,24 @@ function makeExpiredCookies(): Cookie[] {
 
 function createManager(
   profileManager: ProfileManagerType,
+  geminiClient?: IGeminiClientService,
 ): ProfileAuthManager {
   const cookieStorage = new CookieStorageService({
     cookieStorage: new CookieStorage(),
     logger,
   });
-  return new ProfileAuthManager({ profileManager, cookieStorageService: cookieStorage, logger });
+  return new ProfileAuthManager({
+    profileManager,
+    cookieStorageService: cookieStorage,
+    logger,
+    geminiClient: geminiClient ?? {
+      async deleteChat() { return; },
+      async sendMessage() { return ""; },
+      async startNewChat() { return { response: "", conversationId: "" }; },
+      async profileHasConversation() { return false; },
+      forProfile() { return this as unknown as IGeminiClientService; },
+    },
+  });
 }
 
 beforeEach(() => {
@@ -185,40 +205,130 @@ describe("ProfileAuthManager", () => {
   });
 
   describe("findProfileForConversation", () => {
-    test("returns first active profile", () => {
+    test("returns the profile that owns the conversation", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("alpha");
-      manager.create("beta");
-      storage.save("alpha", makeValidCookies());
-      storage.save("beta", makeExpiredCookies());
+      manager.create("work");
+      manager.create("personal");
+      storage.save("work", makeValidCookies());
+      storage.save("personal", makeValidCookies());
 
-      const mgr = createManager(manager);
-      const result = mgr.findProfileForConversation("conv-123");
+      const mockGeminiClient = {
+        async deleteChat() { return; },
+        async sendMessage() { return ""; },
+        async startNewChat() { return { response: "", conversationId: "" }; },
+        async profileHasConversation(profileName: string) {
+          return profileName === "work";
+        },
+        forProfile() { return this as unknown as IGeminiClientService; },
+      };
 
-      expect(result).toBe("alpha");
+      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const result = await mgr.findProfileForConversation("conv-123");
+
+      expect(result).toBe("work");
     });
 
-    test("returns null when no active profiles", () => {
+    test("returns null when no profile owns the conversation", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("p1");
       storage.save("p1", makeExpiredCookies());
 
-      const mgr = createManager(manager);
-      const result = mgr.findProfileForConversation("conv-456");
+      const mockGeminiClient = {
+        async deleteChat() { return; },
+        async sendMessage() { return ""; },
+        async startNewChat() { return { response: "", conversationId: "" }; },
+        async profileHasConversation() { return false; },
+        forProfile() { return this as unknown as IGeminiClientService; },
+      };
+
+      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const result = await mgr.findProfileForConversation("conv-456");
 
       expect(result).toBeNull();
     });
 
-    test("returns null when no profiles exist", () => {
+    test("returns null when no profiles exist", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       const mgr = createManager(manager);
 
-      const result = mgr.findProfileForConversation("conv-789");
+      const result = await mgr.findProfileForConversation("conv-789");
 
       expect(result).toBeNull();
+    });
+
+    test("returns null when conversation is not in any profile", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("work");
+      manager.create("personal");
+      storage.save("work", makeValidCookies());
+      storage.save("personal", makeValidCookies());
+
+      const mockGeminiClient = {
+        async deleteChat() { return; },
+        async sendMessage() { return ""; },
+        async startNewChat() { return { response: "", conversationId: "" }; },
+        async profileHasConversation() { return false; },
+        forProfile() { return this as unknown as IGeminiClientService; },
+      };
+
+      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const result = await mgr.findProfileForConversation("conv-999");
+
+      expect(result).toBeNull();
+    });
+
+    test("returns first profile in list order when multiple profiles report ownership", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("profile1");
+      manager.create("profile2");
+      manager.create("profile3");
+      storage.save("profile1", makeValidCookies());
+      storage.save("profile2", makeValidCookies());
+      storage.save("profile3", makeValidCookies());
+
+      const mockGeminiClient = {
+        async deleteChat() { return; },
+        async sendMessage() { return ""; },
+        async startNewChat() { return { response: "", conversationId: "" }; },
+        async profileHasConversation(profileName: string) {
+          return profileName === "profile1" || profileName === "profile3";
+        },
+        forProfile() { return this as unknown as IGeminiClientService; },
+      };
+
+      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const result = await mgr.findProfileForConversation("conv-shared");
+
+      expect(result).toBe("profile1");
+    });
+
+    test("passes the conversationId argument to the lookup helper", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("work");
+      storage.save("work", makeValidCookies());
+
+      const calls: Array<[string, string]> = [];
+      const mockGeminiClient = {
+        async deleteChat() { return; },
+        async sendMessage() { return ""; },
+        async startNewChat() { return { response: "", conversationId: "" }; },
+        async profileHasConversation(profileName: string, conversationId: string) {
+          calls.push([profileName, conversationId]);
+          return false;
+        },
+        forProfile() { return this as unknown as IGeminiClientService; },
+      };
+
+      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      await mgr.findProfileForConversation("abc-123");
+
+      expect(calls).toContainEqual(["work", "abc-123"]);
     });
   });
 });

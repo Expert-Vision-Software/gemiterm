@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
+import { AuthenticationError } from "../../core/errors.ts";
 import {
   COMMAND_TYPES,
   type DeleteConversationCommandPayload,
@@ -48,6 +49,8 @@ export class DeleteCommand implements CliCommand {
       process.exit(1);
     }
 
+    const profileName = await this.resolveProfile(context, conversationId);
+
     if (!options.force) {
       const confirmed = await this.promptConfirmation(conversationId);
       if (!confirmed) {
@@ -57,7 +60,7 @@ export class DeleteCommand implements CliCommand {
     }
 
     const mediator: Mediator = context.mediator;
-    const payload: DeleteConversationCommandPayload = { conversationId };
+    const payload: DeleteConversationCommandPayload = { conversationId, profileName: profileName ?? undefined };
 
     logger.debug(`Sending delete-conversation command: ${JSON.stringify(payload)}`);
 
@@ -79,6 +82,20 @@ export class DeleteCommand implements CliCommand {
       console.error(chalk.red(`Error: ${message}`));
       process.exit(1);
     }
+  }
+
+  private async resolveProfile(context: CliCommandContext, conversationId: string): Promise<string | null> {
+    const profiles = context.profileAuthManager.getActiveProfiles();
+    if (profiles.length <= 1) {
+      return null;
+    }
+    const profileName = await context.profileAuthManager.findProfileForConversation(conversationId);
+    if (profileName === null) {
+      throw new AuthenticationError(
+        `Could not find a profile that owns conversation '${conversationId}'. Run 'gemiterm list --all-profiles' to see which profile it belongs to, then 'gemiterm delete ${conversationId} --profile <name>' to specify the profile explicitly.`,
+      );
+    }
+    return profileName;
   }
 
   private extractConversationId(args: string[]): string | null {

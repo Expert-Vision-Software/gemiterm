@@ -80,7 +80,7 @@ export class ListCommand implements CliCommand {
     if (options.format === "json") {
       this.outputJson(chats, options.path);
     } else {
-      this.outputText(chats, options.path);
+      this.outputText(chats, options.path, options.allProfiles);
     }
   }
 
@@ -126,8 +126,8 @@ export class ListCommand implements CliCommand {
     }
   }
 
-  private outputText(chats: ChatInfo[], path: string): void {
-    const output = formatChatList(chats);
+  private outputText(chats: ChatInfo[], path: string, allProfiles: boolean): void {
+    const output = formatChatList(chats, { includeProfileColumn: allProfiles });
     if (path) {
       this.writeOutput(path, output);
     } else {
@@ -212,7 +212,7 @@ export class ListCommand implements CliCommand {
       { flag: "--limit, -n N", desc: "Number of results (default: 10)" },
       { flag: "--offset N", desc: "Skip N results (default: 0)" },
       { flag: "--all", desc: "Show all conversations (no limit)" },
-      { flag: "--all-profiles", desc: "Show conversations from all profiles" },
+      { flag: "--all-profiles", desc: "Show conversations from all profiles (with Profile column in text output)" },
       { flag: "--sort <mode>", desc: "Sort order: recent, oldest, alpha (default: recent)" },
       { flag: "--search, -s <query>", desc: "Filter by title search" },
       { flag: "--after <date>", desc: "Only show chats after this date" },

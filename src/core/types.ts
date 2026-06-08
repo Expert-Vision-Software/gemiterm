@@ -11,6 +11,7 @@ export interface ChatInfo {
   title: string;
   isPinned: boolean;
   timestamp: number;
+  profile?: string;
 }
 
 export interface Message {

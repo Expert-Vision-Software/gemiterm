@@ -2,6 +2,7 @@ import type { ChatInfo, Message } from "../core/types.ts";
 import type { IGeminiClientService } from "../core/command-handlers.ts";
 import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
+import type { CookieStorageService } from "./cookie-storage-service.ts";
 import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
 
 const GEMINI_BASE_URL = "https://gemini.google.com";
@@ -16,11 +17,15 @@ export class GeminiClientService
 {
   private readonly logger: Logger;
   private readonly config: GeminiClientConfig;
+  private readonly cookieStorageService?: CookieStorageService;
   private authenticated = false;
+  readonly profileName?: string;
 
-  constructor(config: GeminiClientConfig, logger: Logger) {
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string) {
     this.config = config;
     this.logger = logger;
+    this.cookieStorageService = cookieStorageService;
+    this.profileName = profileName;
     this.authenticated = !!config.secure1psid;
   }
 
@@ -88,6 +93,29 @@ export class GeminiClientService
     return response;
   }
 
+  forProfile(profileName: string): GeminiClientService {
+    if (!this.cookieStorageService) {
+      throw new Error("CookieStorageService is required for forProfile");
+    }
+    const cookies = this.cookieStorageService.loadCookiesForProfile(profileName);
+    return new GeminiClientService(
+      { secure1psid: cookies.secure_1psid, secure1psidts: cookies.secure_1psidts },
+      this.logger,
+      this.cookieStorageService,
+      profileName,
+    );
+  }
+
+  async profileHasConversation(profileName: string, conversationId: string): Promise<boolean> {
+    try {
+      const profileClient = this.forProfile(profileName);
+      const chats = await profileClient.listChats();
+      return chats.some((chat) => chat.id === conversationId);
+    } catch {
+      return false;
+    }
+  }
+
   async listChats(options?: {
     limit?: number;
     offset?: number;
@@ -113,6 +141,7 @@ export class GeminiClientService
           title: chat.title ?? "Untitled",
           isPinned: chat.is_pinned ?? false,
           timestamp: chat.timestamp ?? 0,
+          ...(this.profileName ? { profile: this.profileName } : {}),
         }));
       }
 

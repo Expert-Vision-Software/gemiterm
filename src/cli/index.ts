@@ -8,6 +8,8 @@ import { Logger } from "../infrastructure/logger.ts";
 import { Mediator } from "../core/mediator.ts";
 import { showHelp } from "./commands/help.ts";
 import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
+import { CookieStorageService } from "../services/cookie-storage-service.ts";
+import { ProfileAuthManager } from "../services/profile-auth-manager.ts";
 import { CookieStorage, ProfileManager } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles, ensureConfigDir } from "../infrastructure/config.ts";
 import { AuthenticationError } from "../core/errors.ts";
@@ -61,7 +63,7 @@ function parseGlobalFlags(args: string[]): { flags: GlobalFlags; remaining: stri
   return { flags, remaining };
 }
 
-function setupMediator(mediator: Mediator): void {
+function setupMediator(mediator: Mediator): ProfileAuthManager {
   const logger = new Logger("mediator");
   const cookieStorage = new CookieStorage();
   const profileManager = new ProfileManager(cookieStorage);
@@ -81,6 +83,7 @@ function setupMediator(mediator: Mediator): void {
     },
   };
 
+  const cookieStorageService = new CookieStorageService({ cookieStorage, logger });
   let geminiClient: GeminiClientService | null = null;
 
   function getGeminiClient(): GeminiClientService {
@@ -95,12 +98,17 @@ function setupMediator(mediator: Mediator): void {
       geminiClient = new GeminiClientService(
         { secure1psid: cookieData.secure1psid, secure1psidts: cookieData.secure1psidts },
         logger,
+        cookieStorageService,
+        profileName,
       );
       return geminiClient;
     } catch {
       throw new AuthenticationError();
     }
   }
+
+  const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, cookieStorageService);
+  const profileAuthManager = new ProfileAuthManager({ profileManager, cookieStorageService, logger, geminiClient: factoryClient });
 
   mediator.registerQueryHandler(new GetAuthStatusQueryHandler(profileQueryService));
   mediator.registerQueryHandler(new GetProfileStatusesQueryHandler(profileQueryService));
@@ -127,17 +135,25 @@ function setupMediator(mediator: Mediator): void {
     async deleteChat(id) { return getGeminiClient().deleteChat(id); },
     async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
     async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
+    async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
+    forProfile(name) { return getGeminiClient().forProfile(name); },
   }));
   mediator.registerCommandHandler(new SendMessageCommandHandler({
     async deleteChat(id) { return getGeminiClient().deleteChat(id); },
     async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
     async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
+    async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
+    forProfile(name) { return getGeminiClient().forProfile(name); },
   }));
   mediator.registerCommandHandler(new StartNewChatCommandHandler({
     async deleteChat(id) { return getGeminiClient().deleteChat(id); },
     async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
     async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
+    async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
+    forProfile(name) { return getGeminiClient().forProfile(name); },
   }));
+
+  return profileAuthManager;
 }
 
 async function main(): Promise<void> {
@@ -163,7 +179,7 @@ async function main(): Promise<void> {
   }
 
   const mediator = new Mediator();
-  setupMediator(mediator);
+  const profileAuthManager = setupMediator(mediator);
 
   const subcommand = remaining[0];
   const subcommandArgs = remaining.slice(1);
@@ -182,7 +198,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    await handler.execute(subcommandArgs, { verbose: flags.verbose, mediator });
+    await handler.execute(subcommandArgs, { verbose: flags.verbose, mediator, profileAuthManager });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Command '${subcommand}' failed: ${message}`);

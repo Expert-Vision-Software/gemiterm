@@ -112,7 +112,7 @@ export function formatProfileTable(statuses: ProfileStatus[]): string {
   return lines.join("\n");
 }
 
-export function formatChatList(chats: ChatInfo[]): string {
+export function formatChatList(chats: ChatInfo[], options?: { includeProfileColumn?: boolean }): string {
   if (chats.length === 0) {
     return chalk.dim("No conversations found.");
   }
@@ -123,9 +123,15 @@ export function formatChatList(chats: ChatInfo[]): string {
   const colTitle = 40;
   const colDate = 22;
   const colPin = 6;
+  const colProfile = 14;
 
-  const header =
+  const includeProfile = options?.includeProfileColumn === true;
+
+  let header =
     padColumn("ID", colId) + padColumn("TITLE", colTitle) + padColumn("DATE", colDate) + padColumn("PIN", colPin);
+  if (includeProfile) {
+    header += padColumn("PROFILE", colProfile);
+  }
 
   lines.push(chalk.bold(header));
   lines.push(header.replace(/./g, "\u2500"));
@@ -136,7 +142,11 @@ export function formatChatList(chats: ChatInfo[]): string {
     const date = formatTimestamp(chat.timestamp);
     const pin = chat.isPinned ? chalk.yellow("\uD83D\uDCCC") : "";
 
-    lines.push(padColumn(id, colId) + padColumn(title, colTitle) + padColumn(date, colDate) + padColumn(pin, colPin));
+    let row = padColumn(id, colId) + padColumn(title, colTitle) + padColumn(date, colDate) + padColumn(pin, colPin);
+    if (includeProfile) {
+      row += padColumn(chat.profile ?? "", colProfile);
+    }
+    lines.push(row);
   }
 
   lines.push("");

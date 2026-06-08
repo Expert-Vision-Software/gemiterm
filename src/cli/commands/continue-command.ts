@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
+import { AuthenticationError } from "../../core/errors.ts";
 import {
   COMMAND_TYPES,
   type SendMessageCommandPayload,
@@ -50,9 +51,9 @@ export class ContinueCommand implements CliCommand {
     const mediator: Mediator = context.mediator;
 
     if (message) {
-      await this.sendNonInteractive(mediator, conversationId, message, logger);
+      await this.sendNonInteractive(mediator, conversationId, message, logger, context);
     } else {
-      await this.startInteractive(mediator, conversationId, logger);
+      await this.startInteractive(mediator, conversationId, logger, context);
     }
   }
 
@@ -61,22 +62,40 @@ export class ContinueCommand implements CliCommand {
     conversationId: string,
     message: string,
     logger: Logger,
+    context: CliCommandContext,
   ): Promise<void> {
+    const profileName = await this.resolveProfile(context, conversationId);
     logger.debug(`Sending message to ${conversationId}`);
     const result = await mediator.send<SendMessageCommandResult>({
       type: COMMAND_TYPES.SEND_MESSAGE,
-      payload: { conversationId, message },
+      payload: { conversationId, message, profileName: profileName ?? undefined },
     } as Command<SendMessageCommandPayload>);
 
     console.log(chalk.blue.bold("Model:"));
     console.log(result.response);
   }
 
+  private async resolveProfile(context: CliCommandContext, conversationId: string): Promise<string | null> {
+    const profiles = context.profileAuthManager.getActiveProfiles();
+    if (profiles.length <= 1) {
+      return null;
+    }
+    const profileName = await context.profileAuthManager.findProfileForConversation(conversationId);
+    if (profileName === null) {
+      throw new AuthenticationError(
+        `Could not find a profile that owns conversation '${conversationId}'. Run 'gemiterm list --all-profiles' to see which profile it belongs to, then 'gemiterm continue ${conversationId} <msg> --profile <name>' to specify the profile explicitly.`,
+      );
+    }
+    return profileName;
+  }
+
   private async startInteractive(
     mediator: Mediator,
     conversationId: string,
     logger: Logger,
+    context: CliCommandContext,
   ): Promise<void> {
+    const profileName = await this.resolveProfile(context, conversationId);
     console.log(chalk.dim(`Continuing conversation: ${chalk.cyan(conversationId)}`));
     console.log(chalk.dim("Type your message and press Enter. Type /exit to quit.\n"));
 
@@ -103,7 +122,7 @@ export class ContinueCommand implements CliCommand {
           logger.debug(`Sending message to ${conversationId}`);
           const result = await mediator.send<SendMessageCommandResult>({
             type: COMMAND_TYPES.SEND_MESSAGE,
-            payload: { conversationId, message: trimmed },
+            payload: { conversationId, message: trimmed, profileName: profileName ?? undefined },
           } as Command<SendMessageCommandPayload>);
 
           console.log(chalk.blue.bold("Model:"));
