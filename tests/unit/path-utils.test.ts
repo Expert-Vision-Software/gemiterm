@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { join, resolve } from "node:path";
 import * as os from "node:os";
+import * as fs from "node:fs";
 import {
   resolvePath,
   getConfigDir,
@@ -8,6 +9,9 @@ import {
   getProfilePath,
   getProfileDir,
   getDefaultProfileMarkerPath,
+  isWSL,
+  getProjectRoot,
+  getPackageJson,
   STORAGE_STATE_FILE,
   PROFILES_DIR,
   DEFAULT_PROFILE_MARKER,
@@ -211,6 +215,76 @@ describe("path-utils", () => {
       expect(getDefaultProfileMarkerPath()).toBe(
         join("/tmp/gemiterm", PROFILES_DIR, DEFAULT_PROFILE_MARKER),
       );
+    });
+  });
+
+  describe("isWSL", () => {
+    let originalPlatform: NodeJS.Platform;
+    let originalWslDistro: string | undefined;
+
+    beforeEach(() => {
+      originalPlatform = process.platform;
+      originalWslDistro = process.env.WSL_DISTRO_NAME;
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+      if (originalWslDistro !== undefined) {
+        process.env.WSL_DISTRO_NAME = originalWslDistro;
+      } else {
+        delete process.env.WSL_DISTRO_NAME;
+      }
+    });
+
+    test("returns false on Windows", () => {
+      Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+      delete process.env.WSL_DISTRO_NAME;
+      expect(isWSL()).toBe(false);
+    });
+
+    test("returns false on macOS", () => {
+      Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
+      delete process.env.WSL_DISTRO_NAME;
+      expect(isWSL()).toBe(false);
+    });
+
+    test("returns true on Linux when WSL_DISTRO_NAME is set and non-empty", () => {
+      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+      process.env.WSL_DISTRO_NAME = "Ubuntu";
+      expect(isWSL()).toBe(true);
+    });
+
+    test("returns false on Linux when WSL_DISTRO_NAME is unset and no /proc/version marker", () => {
+      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+      delete process.env.WSL_DISTRO_NAME;
+      const existsSpy = spyOn(fs, "existsSync").mockReturnValue(false);
+      try {
+        expect(isWSL()).toBe(false);
+      } finally {
+        existsSpy.mockRestore();
+      }
+    });
+  });
+
+  describe("getProjectRoot", () => {
+    test("returns the repo root when called from a file under the repo", () => {
+      const root = getProjectRoot(import.meta.url);
+      expect(root).toBeTruthy();
+      expect(fs.existsSync(join(root, "package.json"))).toBe(true);
+    });
+
+    test("is idempotent — multiple calls return the same path", () => {
+      const a = getProjectRoot(import.meta.url);
+      const b = getProjectRoot(import.meta.url);
+      expect(a).toBe(b);
+    });
+  });
+
+  describe("getPackageJson", () => {
+    test("returns the parsed package.json with name and version", () => {
+      const pkg = getPackageJson(import.meta.url);
+      expect(pkg.name).toBe("gemiterm");
+      expect(pkg.version).toBe("2.0.0");
     });
   });
 });
