@@ -36,6 +36,7 @@ export class NewCommand implements CliCommand {
 
     for (const arg of args) {
       if (arg.startsWith("--") || arg.startsWith("-")) continue;
+      if (options.profile && arg === options.profile) continue;
       if (!message) {
         message = arg;
       }

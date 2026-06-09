@@ -232,8 +232,9 @@ export class StartNewChatCommandHandler
   async handle(
     command: Command<StartNewChatCommandPayload>,
   ): Promise<StartNewChatCommandResult> {
-    const { message } = extractPayload(command);
-    const result = await this.geminiClient.startNewChat(message);
+    const { message, profileName } = extractPayload(command);
+    const client = profileName ? this.geminiClient.forProfile(profileName) : this.geminiClient;
+    const result = await client.startNewChat(message);
     return { response: result.response, conversationId: result.conversationId };
   }
 }
