@@ -161,4 +161,4 @@
 - [x] 16.4 Run `bun run build`, `bun run build:linux`, `bun run build:windows`, and `bun run build:release` and confirm all four produce working executables.
 - [x] 16.5 Run `bash scripts/clean-build.sh`, `pwsh scripts/clean-build.ps1`, `bash scripts/install-browser.sh`, and `pwsh scripts/install-browser.ps1` and confirm all four exit 0.
 - [ ] 16.6 Open a draft pull request to confirm the `test.yml` workflow runs against the change, including the lint check. The PR MUST NOT be merged until `test.yml` is green.
-- [ ] 16.7 Push a `v2.0.0-rc.1` tag to confirm `build.yml` and `release.yml` work end-to-end. Delete the tag and the draft release after verification.
+- [ ] 16.7 Push a `v2.0.0-rc.1` tag to confirm `release.yml` work end-to-end. Delete the tag and the draft release after verification.
