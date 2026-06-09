@@ -31,6 +31,7 @@ export class ProfileCommand implements CliCommand {
 
   async execute(args: string[], context: CliCommandContext): Promise<void> {
     const logger = new Logger("profile-command");
+    logger.debug("Executing profile command", args);
 
     if (args.includes("--help") || args.includes("-h")) {
       this.showUsage();
@@ -50,6 +51,8 @@ export class ProfileCommand implements CliCommand {
         `Unknown action '${action}'. Valid actions: ${validActions.join(", ")}`,
       );
     }
+
+    logger.debug("Profile action:", action);
 
     switch (action) {
       case "add":
@@ -77,6 +80,7 @@ export class ProfileCommand implements CliCommand {
     }
 
     validateProfileName(profileName);
+    logger.debug("Adding profile:", profileName);
 
     if (listProfiles().includes(profileName)) {
       throw new GemitermError(`Profile '${profileName}' already exists.`);
@@ -110,6 +114,8 @@ export class ProfileCommand implements CliCommand {
       throw new GemitermError(`Profile '${profileName}' does not exist.`);
     }
 
+    logger.debug("Deleting profile:", profileName);
+
     const confirm = await this.promptInput(`Delete profile '${profileName}'? [y/N]`);
     if (!confirm.toLowerCase().startsWith("y")) {
       console.log(chalk.dim("Cancelled."));
@@ -136,6 +142,7 @@ export class ProfileCommand implements CliCommand {
     }
 
     validateProfileName(newName);
+    logger.debug("Renaming profile:", profileName, "→", newName);
 
     if (profiles.includes(newName)) {
       throw new GemitermError(`Profile '${newName}' already exists.`);
@@ -159,6 +166,8 @@ export class ProfileCommand implements CliCommand {
       throw new GemitermError(`Profile '${profileName}' does not exist.`);
     }
 
+    logger.debug("Setting default profile:", profileName);
+
     const cookieStorage = new CookieStorage();
     const profileManager = new ProfileManager(cookieStorage);
     profileManager.setDefault(profileName);
@@ -168,6 +177,7 @@ export class ProfileCommand implements CliCommand {
   }
 
   private async listProfiles(logger: Logger): Promise<void> {
+    logger.debug("Listing all profiles");
     const profileNames = listProfiles();
     if (profileNames.length === 0) {
       console.log(chalk.dim("No profiles found. Run 'gemiterm login' to create one."));

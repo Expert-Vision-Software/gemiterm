@@ -9,6 +9,7 @@ export class InstallBrowserCommand implements CliCommand {
 
   async execute(_args: string[], _context: CliCommandContext): Promise<void> {
     const logger = new Logger("install-browser-command");
+    logger.debug("Executing install-browser command");
     const service = new InstallBrowserService(logger);
 
     console.log(chalk.dim("Checking browser installation..."));

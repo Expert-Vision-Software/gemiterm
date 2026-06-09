@@ -37,7 +37,11 @@ interface GlobalFlags {
 }
 
 function parseGlobalFlags(args: string[]): { flags: GlobalFlags; remaining: string[] } {
-  const flags: GlobalFlags = { verbose: false, version: false, help: false };
+  const flags: GlobalFlags = {
+    verbose: process.env.GEMITERM_VERBOSE === "true",
+    version: false,
+    help: false,
+  };
   const remaining: string[] = [];
 
   for (const arg of args) {

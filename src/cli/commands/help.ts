@@ -4,7 +4,7 @@ import type { CommandRegistry } from "../command-registry.ts";
 const GLOBAL_OPTIONS = [
   { flag: "--version", description: "Show version number" },
   { flag: "--help, -h", description: "Show this help message" },
-  { flag: "--verbose, -v", description: "Enable verbose output" },
+  { flag: "--verbose, -v", description: "Enable verbose output (also: GEMITERM_VERBOSE=true)" },
 ];
 
 export function showHelp(registry?: CommandRegistry): void {

@@ -11,6 +11,7 @@ export class StatusCommand implements CliCommand {
 
   async execute(args: string[], context: CliCommandContext): Promise<void> {
     const logger = new Logger("status-command");
+    logger.debug("Executing status command", args);
 
     if (args.includes("--help") || args.includes("-h")) {
       console.log("Usage: gemiterm status");
@@ -25,11 +26,13 @@ export class StatusCommand implements CliCommand {
     ensureConfigDir();
 
     const configDir = getConfigDir();
+    logger.debug("Config directory:", configDir);
     console.log(chalk.bold("Configuration"));
     console.log(`  Directory: ${chalk.cyan(configDir)}`);
     console.log("");
 
     const profileNames = listProfiles();
+    logger.debug("Profile scan found:", profileNames);
     if (profileNames.length === 0) {
       console.log(chalk.dim("No profiles found. Run 'gemiterm login' to create one."));
       process.exit(2);

@@ -22,6 +22,8 @@ export class AuthCommand implements CliCommand {
     }
 
     const logger = new Logger("auth-command");
+    logger.debug("Executing auth command", args);
+
     const cookieStorage = new CookieStorage();
     const profileManager = new ProfileManager(cookieStorage);
     const driver = new PlaywrightCliDriver();
@@ -34,13 +36,16 @@ export class AuthCommand implements CliCommand {
     });
 
     const profiles = listProfiles();
+    logger.debug("Found profiles", profiles);
 
     if (profiles.length === 0) {
+      logger.debug("No profiles exist, creating first profile and authenticating");
       await this.authenticateWithProfile(authService, getDefaultProfileName(), profileManager, true);
       return;
     }
 
     if (profiles.length === 1) {
+      logger.debug("Single profile found, authenticating with", profiles[0]);
       await this.authenticateWithProfile(authService, profiles[0], profileManager, false);
       return;
     }
@@ -52,6 +57,7 @@ export class AuthCommand implements CliCommand {
     }
 
     if (selected.type === "auth") {
+      logger.debug("Authenticating with profile", selected.profileName);
       await this.authenticateWithProfile(authService, selected.profileName, profileManager, false);
     }
   }
