@@ -65,7 +65,7 @@ export class GeminiClientService
       id: raw.cid,
       title: raw.title,
       isPinned: raw.is_pinned,
-      timestamp: raw.timestamp,
+      timestamp: raw.timestamp * 1000,
       ...(profileName ? { profile: profileName } : {}),
     };
   }

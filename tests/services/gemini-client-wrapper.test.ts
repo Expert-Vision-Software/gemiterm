@@ -305,6 +305,37 @@ describe("GeminiClientService", () => {
       expect(chats[2].title).toBe("Older");
     });
 
+    test("converts timestamp from seconds to milliseconds", async () => {
+      installGeminiReverseMock({
+        listChats: [
+          createMockChatInfo({ cid: "1", title: "Chat", timestamp: 1700000000 }),
+        ],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+
+      const chats = await service.listChats();
+
+      expect(chats[0].timestamp).toBe(1700000000000);
+    });
+
+    test("timestamp produces valid date (not epoch 1970)", async () => {
+      installGeminiReverseMock({
+        listChats: [
+          createMockChatInfo({ cid: "1", title: "Chat", timestamp: 1700000000 }),
+        ],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+
+      const chats = await service.listChats();
+
+      const chatDate = new Date(chats[0].timestamp);
+      expect(chatDate.getFullYear()).toBeGreaterThan(2000);
+    });
+
     test("attaches profile when forProfile was used", async () => {
       const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
         work: { secure_1psid: "work-sid", secure_1psidts: null },
