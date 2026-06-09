@@ -14,6 +14,9 @@
     Remove GemiTerm binary and PATH entry. Preserves config dir at
     %APPDATA%\gemiterm\.
 
+.PARAMETER WhatIf
+    Show what the installer would do without making any changes.
+
 .PARAMETER InstallDir
     Override the default install directory (default: $env:LOCALAPPDATA\GemiTerm).
 
@@ -21,10 +24,12 @@
     irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.ps1 | iex
     pwsh -File install.ps1 -Tag v2.0.0-rc.1
     pwsh -File install.ps1 -Uninstall
+    pwsh -File install.ps1 -WhatIf
 #>
 param(
     [string]$Tag = 'latest',
     [switch]$Uninstall,
+    [switch]$WhatIf,
     [string]$InstallDir = "$env:LOCALAPPDATA\GemiTerm"
 )
 
@@ -51,20 +56,34 @@ if ($Uninstall) {
     Write-Host "Removing GemiTerm..."
 
     if (Test-Path $ExePath) {
-        Remove-Item $ExePath -Force
-        Write-Host "  Removed $ExePath"
+        if ($WhatIf) {
+            Write-Host "[WhatIf] Would delete $ExePath"
+        } else {
+            Remove-Item $ExePath -Force
+            Write-Host "  Removed $ExePath"
+        }
+    } else {
+        Write-Host "  $ExePath not found (already removed)"
     }
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if ($userPath -and $userPath.ToLower().Contains($InstallDir.ToLower())) {
         $newPath = ($userPath -split ';' | Where-Object { $_ -and $_.ToLower() -ne $InstallDir.ToLower() }) -join ';'
-        [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-        Write-Host "  Removed $InstallDir from PATH"
+        if ($WhatIf) {
+            Write-Host "[WhatIf] Would remove $InstallDir from user PATH"
+        } else {
+            [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+            Write-Host "  Removed $InstallDir from PATH"
+        }
     }
 
-    $env:Path = ($env:Path -split ';' | Where-Object { $_ -and $_.ToLower() -ne $InstallDir.ToLower() }) -join ';'
+    if ($WhatIf) {
+        Write-Host "[WhatIf] Would update current session PATH"
+    } else {
+        $env:Path = ($env:Path -split ';' | Where-Object { $_ -and $_.ToLower() -ne $InstallDir.ToLower() }) -join ';'
+    }
 
-    Write-Host "GemiTerm uninstalled successfully."
+    Write-Host "GemiTerm uninstall review complete. No changes were made." -ForegroundColor Cyan
     exit 0
 }
 
@@ -84,9 +103,14 @@ $V14ConfigDir = Join-Path $env:USERPROFILE '.config\gemiterm'
 $V2ConfigDir = Join-Path $env:APPDATA 'gemiterm'
 if ((Test-Path $V14ConfigDir) -and -not (Test-Path $V2ConfigDir)) {
     Write-Host "Detected v1.4.1 config at $V14ConfigDir; migrating to $V2ConfigDir"
-    New-Item -ItemType Directory -Path $V2ConfigDir -Force | Out-Null
-    Copy-Item -Recurse -Force -Path (Join-Path $V14ConfigDir '*') -Destination $V2ConfigDir
-    Write-Host "v1.4.1 config copied to $V2ConfigDir. The original at $V14ConfigDir is left in place as a backup."
+    if ($WhatIf) {
+        Write-Host "[WhatIf] Would create directory $V2ConfigDir"
+        Write-Host "[WhatIf] Would copy $V14ConfigDir\* to $V2ConfigDir"
+    } else {
+        New-Item -ItemType Directory -Path $V2ConfigDir -Force | Out-Null
+        Copy-Item -Recurse -Force -Path (Join-Path $V14ConfigDir '*') -Destination $V2ConfigDir
+        Write-Host "v1.4.1 config copied to $V2ConfigDir. The original at $V14ConfigDir is left in place as a backup."
+    }
 }
 
 # Determine package-manager executable (prefer bunx over npx)
@@ -140,55 +164,72 @@ $version = $release.tag_name
 
 # --- Download (task 2.5) ---
 if (-not (Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    if ($WhatIf) {
+        Write-Host "[WhatIf] Would create directory $InstallDir"
+    } else {
+        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    }
 }
 
 $tempPath = Join-Path $InstallDir 'GemiTerm.exe.new'
-try {
-    Write-Host "Downloading GemiTerm $version..."
-    Invoke-WebRequest $asset.browser_download_url -OutFile $tempPath
-    Move-Item -Force $tempPath $ExePath
-} catch {
-    if (Test-Path $tempPath) { Remove-Item $tempPath -Force -ErrorAction SilentlyContinue }
-    Write-Host "Download failed: $_"
-    exit 1
+if ($WhatIf) {
+    Write-Host "[WhatIf] Would download GemiTerm $version from $($asset.browser_download_url) to $tempPath"
+    Write-Host "[WhatIf] Would move $tempPath to $ExePath"
+} else {
+    try {
+        Write-Host "Downloading GemiTerm $version..."
+        Invoke-WebRequest $asset.browser_download_url -OutFile $tempPath
+        Move-Item -Force $tempPath $ExePath
+    } catch {
+        if (Test-Path $tempPath) { Remove-Item $tempPath -Force -ErrorAction SilentlyContinue }
+        Write-Host "Download failed: $_"
+        exit 1
+    }
 }
 
 # --- Bootstrap package manager if needed (task 9.1 + 9.3) ---
 if ($PackageManagerX -eq 'bunx' -and -not (Get-Command bun -ErrorAction SilentlyContinue)) {
-    Write-Host "Installing Bun..."
-    try {
-        irm https://bun.sh/install.ps1 | iex
-    } catch {
-        if (Get-Command npm -ErrorAction SilentlyContinue) {
-            Write-Host "Bun installation failed, falling back to npx."
-            $PackageManagerX = 'npx'
-        } else {
-            Write-Host "Bun installation failed and npm is not available. Install Bun from https://bun.sh or npm from https://nodejs.org and re-run this installer."
-            exit 1
+    if ($WhatIf) {
+        Write-Host "[WhatIf] Would install Bun from https://bun.sh/install.ps1"
+    } else {
+        Write-Host "Installing Bun..."
+        try {
+            irm https://bun.sh/install.ps1 | iex
+        } catch {
+            if (Get-Command npm -ErrorAction SilentlyContinue) {
+                Write-Host "Bun installation failed, falling back to npx."
+                $PackageManagerX = 'npx'
+            } else {
+                Write-Host "Bun installation failed and npm is not available. Install Bun from https://bun.sh or npm from https://nodejs.org and re-run this installer."
+                exit 1
+            }
         }
-    }
-    if ($PackageManagerX -eq 'bunx' -and -not (Get-Command bun -ErrorAction SilentlyContinue)) {
-        if (Get-Command npm -ErrorAction SilentlyContinue) {
-            Write-Host "Bun installation failed, falling back to npx."
-            $PackageManagerX = 'npx'
-        } else {
-            Write-Host "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
-            exit 1
+        if ($PackageManagerX -eq 'bunx' -and -not (Get-Command bun -ErrorAction SilentlyContinue)) {
+            if (Get-Command npm -ErrorAction SilentlyContinue) {
+                Write-Host "Bun installation failed, falling back to npx."
+                $PackageManagerX = 'npx'
+            } else {
+                Write-Host "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
+                exit 1
+            }
         }
     }
 }
 
 # --- Install Chromium (task 2.6) ---
-Write-Host "Installing Chromium browser for Playwright..."
-try {
-    & $PackageManagerX @playwright/cli install chromium
-    if ($LASTEXITCODE -ne 0) {
-        throw "$PackageManagerX exited with code $LASTEXITCODE"
+if ($WhatIf) {
+    Write-Host "[WhatIf] Would run: $PackageManagerX @playwright/cli install chromium"
+} else {
+    Write-Host "Installing Chromium browser for Playwright..."
+    try {
+        & $PackageManagerX @playwright/cli install chromium
+        if ($LASTEXITCODE -ne 0) {
+            throw "$PackageManagerX exited with code $LASTEXITCODE"
+        }
+    } catch {
+        Write-Host "Chromium installation failed. Re-run the installer after fixing the issue, or run '$PackageManagerX @playwright/cli install chromium' manually."
+        exit 1
     }
-} catch {
-    Write-Host "Chromium installation failed. Re-run the installer after fixing the issue, or run '$PackageManagerX @playwright/cli install chromium' manually."
-    exit 1
 }
 
 # --- Verify Chromium (task 2.7) ---
@@ -203,10 +244,21 @@ if ($chromeExe) {
 # --- PATH augmentation (task 2.8) ---
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 if ($userPath -and -not $userPath.ToLower().Contains($InstallDir.ToLower())) {
-    [Environment]::SetEnvironmentVariable('Path', "$userPath;$InstallDir", 'User')
-    $env:Path = "$env:Path;$InstallDir"
-    Write-Host "Added $InstallDir to PATH"
+    if ($WhatIf) {
+        Write-Host "[WhatIf] Would add $InstallDir to user PATH"
+    } else {
+        [Environment]::SetEnvironmentVariable('Path', "$userPath;$InstallDir", 'User')
+        $env:Path = "$env:Path;$InstallDir"
+        Write-Host "Added $InstallDir to PATH"
+    }
 }
 
 # --- Success (task 2.9) ---
-Write-Host "GemiTerm $version installed to $ExePath. Run 'gemiterm status' to verify, then 'gemiterm auth' to authenticate."
+if ($WhatIf) {
+    Write-Host ""
+    Write-Host "WhatIf review complete. No changes were made." -ForegroundColor Cyan
+    Write-Host "GemiTerm $version would be installed to $ExePath using $($PackageManagerX).Chromium."
+    Write-Host "Run without -WhatIf to apply."
+} else {
+    Write-Host "GemiTerm $version installed to $ExePath. Run 'gemiterm status' to verify, then 'gemiterm auth' to authenticate."
+}
