@@ -5,7 +5,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Expert-Vision-Software/gemiterm.git"
+    "url": "git+https://github.com/Expert-Vision-Software/gemiterm.git"
   },
   "homepage": "https://github.com/Expert-Vision-Software/gemiterm#readme",
   "bugs": {
@@ -29,10 +29,10 @@
     "test:all": "bun test",
     "lint:mediation": "bash scripts/lint-path-mediation.sh",
     "lint:mediation:ps": "pwsh scripts/lint-path-mediation.ps1",
-    "build": "bun build --compile --target=bun --outfile dist/gemiterm src/cli/index.ts",
-    "build:linux": "bun build --compile --target=bun-linux-x64 --outfile dist/gemiterm src/cli/index.ts",
-    "build:windows": "bun build --compile --target=bun-windows-x64 --outfile dist/gemiterm.exe src/cli/index.ts",
-    "build:release": "bun build --compile --target=bun --outfile dist/gemiterm --minify src/cli/index.ts"
+    "build": "bun run scripts/build.ts",
+    "build:linux": "bun run scripts/build.ts linux",
+    "build:windows": "bun run scripts/build.ts windows",
+    "build:release": "bun run scripts/build.ts release"
   },
   "peerDependencies": {
     "typescript": "^6.0.3"

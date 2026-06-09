@@ -101,7 +101,30 @@ interface PackageJson {
 
 const PACKAGE_JSON_FALLBACK: PackageJson = { name: "gemiterm", version: "unknown" };
 
+// Build-time constants injected by `scripts/build.ts` via Bun.build `define`.
+// In dev/test runs they are ambient identifiers that resolve to `undefined`.
+// The dead-code branch below (returning PACKAGE_JSON_FALLBACK) is what
+// guarantees `typeof X === "string"` is false at runtime when no define was
+// injected, and also keeps the dist binary small because Bun's bundler
+// tree-shakes the unused literal when `__GEMITERM_VERSION__` is constant-folded.
+declare const __GEMITERM_VERSION__: string | undefined;
+declare const __GEMITERM_NAME__: string | undefined;
+
+const BUILD_TIME_PACKAGE: PackageJson | null =
+  typeof __GEMITERM_VERSION__ === "string" && __GEMITERM_VERSION__.length > 0
+    ? {
+        name: typeof __GEMITERM_NAME__ === "string" && __GEMITERM_NAME__.length > 0
+          ? __GEMITERM_NAME__
+          : PACKAGE_JSON_FALLBACK.name,
+        version: __GEMITERM_VERSION__,
+      }
+    : null;
+
 function getPackageJson(importMetaUrl?: string): PackageJson {
+  if (BUILD_TIME_PACKAGE !== null) {
+    return BUILD_TIME_PACKAGE;
+  }
+
   try {
     const root = getProjectRoot(importMetaUrl);
     const raw = readFileSync(join(root, "package.json"), "utf-8");
