@@ -205,6 +205,7 @@ async function main(): Promise<void> {
     logger.error(`Command '${subcommand}' failed: ${message}`);
     process.exit(1);
   }
+  process.exit(0);
 }
 
 main().catch((error) => {
