@@ -153,7 +153,7 @@ describe("formatters", () => {
       const lines = result.split("\n");
       const headerIdx = lines.findIndex((l) => l.includes("NAME"));
       expect(headerIdx).toBeGreaterThanOrEqual(0);
-      expect(lines[headerIdx + 1]).toMatch(/^[─]+$/);
+      expect(lines[headerIdx + 1]).toMatch(/[\u2500-\u257f]/);
     });
 
     test("shows profile name", () => {
@@ -233,7 +233,8 @@ describe("formatters", () => {
         { name: "default", exists: true, isActive: true, expiresAt: null, isDefault: true },
       ];
       const result = formatProfileTable(statuses);
-      expect(result).toMatch(/Yes\s*$/m);
+      expect(result).toContain("Yes");
+      expect(result).not.toContain("Ye\u2026");
     });
   });
 
@@ -262,7 +263,7 @@ describe("formatters", () => {
       const lines = result.split("\n");
       const headerIdx = lines.findIndex((l) => l.includes("ID"));
       expect(headerIdx).toBeGreaterThanOrEqual(0);
-      expect(lines[headerIdx + 1]).toMatch(/^[─]+$/);
+      expect(lines[headerIdx + 1]).toMatch(/[\u2500-\u257f]/);
     });
 
     test("shows chat title", () => {

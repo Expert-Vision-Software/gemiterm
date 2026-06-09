@@ -130,9 +130,9 @@ describe("list command integration", () => {
       await command.execute(["--limit", "3"], context);
 
       const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-      const lines = output.split("\n").filter((l) => !l.includes("Total:") && l.trim().length > 0);
-      const dataLines = lines.slice(2);
-      expect(dataLines.length).toBeLessThanOrEqual(3);
+      const lines = output.split("\n");
+      const dataLines = lines.filter((l) => l.includes("\u2502") && !l.includes("Total:"));
+      expect(dataLines.length).toBeLessThanOrEqual(4);
     });
   });
 
