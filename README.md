@@ -1,5 +1,14 @@
 # GemiTerm
 
+> **This Python package is deprecated.** GemiTerm has moved to a native Bun binary.
+> Install it with
+> `irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.ps1 | iex`
+> (Windows) or
+> `curl -fsSL https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.sh | bash`
+> (Linux/WSL). Your existing profiles and cookies are preserved.
+> This is the final Python release (v1.5.0). See the
+> [current release](https://github.com/expert-vision-software/GemiTerm/releases/latest) for v2.0.0.
+
 Access and manage your Gemini web chats from the command line. GemiTerm bridges Playwright-based Google authentication to let you list, fetch, export, and continue conversations trapped in the Gemini web interface — without a standard API.
 
 ## Installation

@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gemiterm"
-version = "1.4.1"
-description = "A Python CLI tool that bridges Playwright-based Google authentication with the gemini-webapi library"
-readme = "README.md"
+version = "1.5.0"
+description = "Deprecated — GemiTerm has moved to a native Bun binary. See https://github.com/expert-vision-software/GemiTerm for v2.0.0."
+readme = "DEPRECATED.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["gemini", "cli", "google", "playwright", "chatbot"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 7 - Inactive",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -34,6 +34,10 @@ dev = [
     "pytest",
     "ruff",
 ]
+
+[project.urls]
+"Current Release" = "https://github.com/expert-vision-software/GemiTerm/releases/latest"
+"Source" = "https://github.com/expert-vision-software/GemiTerm"
 
 [project.scripts]
 gemiterm = "gemiterm.__main__:cli"
