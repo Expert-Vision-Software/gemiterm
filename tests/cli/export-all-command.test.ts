@@ -3,8 +3,8 @@ import { ExportAllCommand } from "../../src/cli/commands/export-all-command.ts";
 import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
 import { QUERY_TYPES } from "../../src/core/query-handlers.ts";
-import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const SAMPLE_CHATS = [
@@ -16,6 +16,20 @@ const SAMPLE_MESSAGES = [
   { role: "user" as const, content: "Hello" },
   { role: "model" as const, content: "Hi there!" },
 ];
+
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_RE, "");
+}
+
+function capturedLog(spy: ReturnType<typeof spyOn>): string {
+  return stripAnsi(spy.mock.calls.map((c) => c[0]).join("\n"));
+}
+
+function capturedStdout(spy: ReturnType<typeof spyOn>): string {
+  return stripAnsi(spy.mock.calls.map((c) => c[0]).join(""));
+}
 
 describe("ExportAllCommand", () => {
   let command: ExportAllCommand;
@@ -51,7 +65,7 @@ describe("ExportAllCommand", () => {
 
   test("shows help with --help flag", async () => {
     await command.execute(["--help"], context);
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    const output = capturedLog(logSpy);
     expect(output).toContain("Usage: gemiterm export-all");
     expect(output).toContain("--output-dir");
     expect(output).toContain("--since");
@@ -109,7 +123,7 @@ describe("ExportAllCommand", () => {
 
     await command.execute(["--output-dir", tempDir], context);
 
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    const output = capturedLog(logSpy);
     expect(output).toContain("No conversations found");
   });
 
@@ -172,9 +186,9 @@ describe("ExportAllCommand", () => {
 
     await command.execute(["--output-dir", tempDir], context);
 
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Exported: 1");
-    expect(output).toContain("Failed:  1");
+    const output = capturedLog(logSpy);
+    expect(output).toMatch(/Exported:\s+1/);
+    expect(output).toMatch(/Failed:\s+1/);
 
     const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
     expect(indexContent).toContain("Failed Exports");
@@ -195,7 +209,7 @@ describe("ExportAllCommand", () => {
 
     await command.execute(["--output-dir", tempDir], context);
 
-    const progressOutput = writeSpy.mock.calls.map((c) => c[0]).join("");
+    const progressOutput = capturedStdout(writeSpy);
     expect(progressOutput).toContain("[1/2]");
     expect(progressOutput).toContain("[2/2]");
   });
@@ -227,7 +241,135 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
 
     await command.execute([], context);
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    const output = capturedLog(logSpy);
     expect(output).toContain("No conversations found");
+  });
+
+  test("handles all exports failing", async () => {
+    const listHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    const fetchHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => {
+        throw new Error("boom");
+      }),
+    };
+    mediator.registerQueryHandler(listHandler as any);
+    mediator.registerQueryHandler(fetchHandler as any);
+
+    await command.execute(["--output-dir", tempDir], context);
+
+    const output = capturedLog(logSpy);
+    expect(output).toMatch(/Exported:\s+0/);
+    expect(output).toMatch(/Failed:\s+2/);
+    expect(output).toMatch(/Index:/);
+
+    const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
+    expect(indexContent).toContain("Failed Exports");
+    expect(indexContent).toContain("Python tips");
+    expect(indexContent).toContain("Bun setup");
+    expect(indexContent).toContain("boom");
+  });
+
+  test("preserves non-Error throw values in failure output", async () => {
+    const listHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: [SAMPLE_CHATS[0]] })),
+    };
+    const fetchHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => {
+        throw "string-failure";
+      }),
+    };
+    mediator.registerQueryHandler(listHandler as any);
+    mediator.registerQueryHandler(fetchHandler as any);
+
+    await command.execute(["--output-dir", tempDir], context);
+
+    const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
+    expect(indexContent).toContain("string-failure");
+  });
+
+  test("creates the output directory when it does not exist", async () => {
+    const nested = join(tempDir, "deep", "nested", "out");
+    const listHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    const fetchHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
+    };
+    mediator.registerQueryHandler(listHandler as any);
+    mediator.registerQueryHandler(fetchHandler as any);
+
+    await command.execute(["--output-dir", nested], context);
+
+    expect(existsSync(nested)).toBeTrue();
+    expect(existsSync(join(nested, "index.md"))).toBeTrue();
+  });
+
+  test("accepts -a short form for --all-profiles", async () => {
+    const listHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    const fetchHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
+    };
+    mediator.registerQueryHandler(listHandler as any);
+    mediator.registerQueryHandler(fetchHandler as any);
+
+    await command.execute(["-a", "--output-dir", tempDir], context);
+
+    expect(listHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ allProfiles: true }),
+      }),
+    );
+  });
+
+  test("ignores invalid --since date and exports all chats", async () => {
+    const listHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    const fetchHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
+    };
+    mediator.registerQueryHandler(listHandler as any);
+    mediator.registerQueryHandler(fetchHandler as any);
+
+    await command.execute(["--since", "not-a-date", "--output-dir", tempDir], context);
+
+    const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
+    expect(indexContent).toContain("Python tips");
+    expect(indexContent).toContain("Bun setup");
+  });
+
+  test("filters out chats older than --since date", async () => {
+    const oldChat = { id: "old1", title: "Old chat", isPinned: false, timestamp: 1577836800000 };
+    const newChat = { id: "new1", title: "New chat", isPinned: false, timestamp: 1717200000000 };
+    const listHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: [oldChat, newChat] })),
+    };
+    const fetchHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
+    };
+    mediator.registerQueryHandler(listHandler as any);
+    mediator.registerQueryHandler(fetchHandler as any);
+
+    await command.execute(["--since", "2024-01-01", "--output-dir", tempDir], context);
+
+    const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
+    expect(indexContent).toContain("New chat");
+    expect(indexContent).not.toContain("Old chat");
   });
 });
