@@ -1,0 +1,28 @@
+name: Manual Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit hash, branch, or tag to build'
+        required: true
+        type: string
+      draft:
+        description: 'Create a draft release (recommended for testing)'
+        required: true
+        type: boolean
+        default: true
+      publish:
+        description: 'Publish to npm (DANGEROUS — only enable if you mean it)'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/release.yml
+    with:
+      ref: ${{ inputs.ref }}
+      tag_name: manual-${{ inputs.ref }}-${{ github.run_id }}
+      publish: ${{ inputs.publish }}
+      draft: ${{ inputs.draft }}
