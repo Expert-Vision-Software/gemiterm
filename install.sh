@@ -65,6 +65,15 @@ if [[ -d "$V14_CONFIG_DIR" && ! -d "$CONFIG_DIR" ]]; then
     echo "v1.4.1 config copied to $CONFIG_DIR. The original at $V14_CONFIG_DIR is left in place as a backup."
 fi
 
+# Determine package-manager executable (prefer bunx over npx)
+if command -v bun >/dev/null 2>&1; then
+    PACKAGE_MANAGER_X="bunx"
+elif command -v npm >/dev/null 2>&1; then
+    PACKAGE_MANAGER_X="npx"
+else
+    PACKAGE_MANAGER_X="bunx"   # will be bootstrapped below
+fi
+
 # --- Package-manager prompt (task 11.2) ---
 # If bun or npm is on PATH, recommend installing via the package manager
 # (npm: `npm i -g gemiterm`; bun: `bun i -g gemiterm`) instead of this
@@ -124,25 +133,36 @@ fi
 mv "$BIN_PATH.new" "$BIN_PATH"
 chmod +x "$BIN_PATH"
 
-# --- Bootstrap Bun (task 9.2 + 9.3) ---
-if ! command -v bun >/dev/null 2>&1; then
+# --- Bootstrap package manager if needed (task 9.2 + 9.3) ---
+if [[ "$PACKAGE_MANAGER_X" = "bunx" ]] && ! command -v bun >/dev/null 2>&1; then
     echo "Installing Bun..."
     if ! curl -fsSL https://bun.sh/install | bash; then
-        echo "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
-        exit 1
+        if command -v npm >/dev/null 2>&1; then
+            echo "Bun installation failed, falling back to npx."
+            PACKAGE_MANAGER_X="npx"
+        else
+            echo "Bun installation failed and npm is not available. Install Bun from https://bun.sh or npm from https://nodejs.org and re-run this installer."
+            exit 1
+        fi
     fi
-    export PATH="$HOME/.bun/bin:$PATH"
-fi
-
-if ! bun --version >/dev/null 2>&1; then
-    echo "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
-    exit 1
+    if [[ "$PACKAGE_MANAGER_X" = "bunx" ]]; then
+        export PATH="$HOME/.bun/bin:$PATH"
+        if ! command -v bun >/dev/null 2>&1; then
+            if command -v npm >/dev/null 2>&1; then
+                echo "Bun installation failed, falling back to npx."
+                PACKAGE_MANAGER_X="npx"
+            else
+                echo "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
+                exit 1
+            fi
+        fi
+    fi
 fi
 
 # --- Install Chromium (task 3.7) ---
 echo "Installing Chromium browser for Playwright..."
-if ! bunx @playwright/cli install chromium; then
-    echo "Chromium installation failed. Re-run the installer after fixing the issue, or run 'bunx @playwright/cli install chromium' manually."
+if ! $PACKAGE_MANAGER_X @playwright/cli install chromium; then
+    echo "Chromium installation failed. Re-run the installer after fixing the issue, or run '${PACKAGE_MANAGER_X} @playwright/cli install chromium' manually."
     exit 1
 fi
 
@@ -155,7 +175,7 @@ fi
 if [[ -n "$CHROME_PATH" ]]; then
     echo "Chromium verified at $CHROME_PATH"
 else
-    echo "Chromium installation verification failed. Re-run the installer after fixing the network, or run 'bunx @playwright/cli install chromium' manually."
+    echo "Chromium installation verification failed. Re-run the installer after fixing the network, or run '${PACKAGE_MANAGER_X} @playwright/cli install chromium' manually."
     exit 1
 fi
 

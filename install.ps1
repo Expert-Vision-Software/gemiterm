@@ -89,6 +89,9 @@ if ((Test-Path $V14ConfigDir) -and -not (Test-Path $V2ConfigDir)) {
     Write-Host "v1.4.1 config copied to $V2ConfigDir. The original at $V14ConfigDir is left in place as a backup."
 }
 
+# Determine package-manager executable (prefer bunx over npx)
+$PackageManagerX = if (Get-Command bun -ErrorAction SilentlyContinue) { 'bunx' } elseif (Get-Command npm -ErrorAction SilentlyContinue) { 'npx' } else { 'bunx' }
+
 # --- Package-manager prompt (task 11.2) ---
 # If bun or npm is on PATH, recommend installing via the package manager
 # (npm: `npm i -g gemiterm`; bun: `bun i -g gemiterm`) instead of this
@@ -151,30 +154,40 @@ try {
     exit 1
 }
 
-# --- Bootstrap Bun if needed (task 9.1 + 9.3) ---
-if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
+# --- Bootstrap package manager if needed (task 9.1 + 9.3) ---
+if ($PackageManagerX -eq 'bunx' -and -not (Get-Command bun -ErrorAction SilentlyContinue)) {
     Write-Host "Installing Bun..."
     try {
         irm https://bun.sh/install.ps1 | iex
     } catch {
-        Write-Host "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
-        exit 1
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            Write-Host "Bun installation failed, falling back to npx."
+            $PackageManagerX = 'npx'
+        } else {
+            Write-Host "Bun installation failed and npm is not available. Install Bun from https://bun.sh or npm from https://nodejs.org and re-run this installer."
+            exit 1
+        }
     }
-    if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
-        Write-Host "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
-        exit 1
+    if ($PackageManagerX -eq 'bunx' -and -not (Get-Command bun -ErrorAction SilentlyContinue)) {
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            Write-Host "Bun installation failed, falling back to npx."
+            $PackageManagerX = 'npx'
+        } else {
+            Write-Host "Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."
+            exit 1
+        }
     }
 }
 
 # --- Install Chromium (task 2.6) ---
 Write-Host "Installing Chromium browser for Playwright..."
 try {
-    & bunx @playwright/cli install chromium
+    & $PackageManagerX @playwright/cli install chromium
     if ($LASTEXITCODE -ne 0) {
-        throw "bunx exited with code $LASTEXITCODE"
+        throw "$PackageManagerX exited with code $LASTEXITCODE"
     }
 } catch {
-    Write-Host "Chromium installation failed. Re-run the installer after fixing the issue, or run 'bunx @playwright/cli install chromium' manually."
+    Write-Host "Chromium installation failed. Re-run the installer after fixing the issue, or run '$PackageManagerX @playwright/cli install chromium' manually."
     exit 1
 }
 
@@ -183,7 +196,7 @@ $chromeExe = Get-ChildItem "$env:LOCALAPPDATA\ms-playwright\chromium-*\chrome.ex
 if ($chromeExe) {
     Write-Host "Chromium verified at $($chromeExe.FullName)"
 } else {
-    Write-Host "Chromium installation verification failed. Re-run the installer after fixing the network, or run 'bunx @playwright/cli install chromium' manually."
+    Write-Host "Chromium installation verification failed. Re-run the installer after fixing the network, or run '$PackageManagerX @playwright/cli install chromium' manually."
     exit 1
 }
 
