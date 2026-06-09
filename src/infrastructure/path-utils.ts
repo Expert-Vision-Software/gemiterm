@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { homedir, platform } from "node:os";
+import { homedir, platform, tmpdir } from "node:os";
 
 const STORAGE_STATE_FILE = "storage_state.json";
 const PROFILES_DIR = "profiles";
@@ -48,6 +48,11 @@ function getProfileDir(name: string): string {
 
 function getDefaultProfileMarkerPath(): string {
   return join(getProfilesDir(), DEFAULT_PROFILE_MARKER);
+}
+
+function getTempFilePath(prefix: string, extension = ".tmp"): string {
+  const unique = `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return join(tmpdir(), `${unique}${extension}`);
 }
 
 function isWSL(): boolean {
@@ -119,6 +124,7 @@ export {
   getProfilePath,
   getProfileDir,
   getDefaultProfileMarkerPath,
+  getTempFilePath,
   isWSL,
   getProjectRoot,
   getPackageJson,

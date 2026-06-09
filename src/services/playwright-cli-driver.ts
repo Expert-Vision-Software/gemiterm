@@ -1,4 +1,5 @@
-import { getProfileDir } from "../infrastructure/path-utils.ts";
+import { getProfileDir, getTempFilePath } from "../infrastructure/path-utils.ts";
+import { readJsonFile, removeDir } from "../infrastructure/io.ts";
 import type { Cookie } from "../core/types.ts";
 
 const CLI_BIN_DIRECT = "playwright-cli";
@@ -136,6 +137,20 @@ export class PlaywrightCliDriver {
   async cookieList(session: string): Promise<Cookie[]> {
     const raw = await this.runCli(this.withSession(session, ["cookie-list", "--json"]));
     return this.parseCookieListOutput(raw);
+  }
+
+  async cookieListFromState(session: string): Promise<Cookie[]> {
+    const tempPath = getTempFilePath("gemiterm-state", ".json");
+    try {
+      await this.stateSave(session, tempPath);
+      const state = readJsonFile<{ cookies?: unknown[] }>(tempPath);
+      const cookies = Array.isArray(state.cookies) ? state.cookies : [];
+      return cookies
+        .filter((c): c is Record<string, unknown> => c !== null && typeof c === "object")
+        .map((c) => this.cookieFromObject(c));
+    } finally {
+      removeDir(tempPath);
+    }
   }
 
   async stateSave(session: string, path: string): Promise<void> {

@@ -9,7 +9,7 @@ import type { Cookie } from "../../src/core/types.ts";
 function createMockDriver() {
   return {
     evalJs: mock(async (_session: string, _expression: string) => "false"),
-    cookieList: mock(async (_session: string) => [] as Cookie[]),
+    cookieListFromState: mock(async (_session: string) => [] as Cookie[]),
   };
 }
 
@@ -92,7 +92,7 @@ describe("CookieMonitor", () => {
 
   describe("checkCookies", () => {
     test("returns auth cookies when both required cookies present", async () => {
-      driver.cookieList.mockResolvedValueOnce(authCookies);
+      driver.cookieListFromState.mockResolvedValueOnce(authCookies);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const result = await monitor.checkCookies("sess1");
@@ -101,7 +101,7 @@ describe("CookieMonitor", () => {
     });
 
     test("returns empty array when only one cookie present", async () => {
-      driver.cookieList.mockResolvedValueOnce([authCookies[0]!]);
+      driver.cookieListFromState.mockResolvedValueOnce([authCookies[0]!]);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const result = await monitor.checkCookies("sess1");
@@ -109,15 +109,15 @@ describe("CookieMonitor", () => {
     });
 
     test("returns empty array when no cookies present", async () => {
-      driver.cookieList.mockResolvedValueOnce([]);
+      driver.cookieListFromState.mockResolvedValueOnce([]);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const result = await monitor.checkCookies("sess1");
       expect(result).toEqual([]);
     });
 
-    test("returns empty array when cookieList throws", async () => {
-      driver.cookieList.mockRejectedValueOnce(new Error("session error"));
+    test("returns empty array when cookieListFromState throws", async () => {
+      driver.cookieListFromState.mockRejectedValueOnce(new Error("session error"));
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const result = await monitor.checkCookies("sess1");
@@ -128,7 +128,7 @@ describe("CookieMonitor", () => {
   describe("start / stop lifecycle", () => {
     test("calls onCookiesFound once interval ticks", async () => {
       driver.evalJs.mockResolvedValue("true");
-      driver.cookieList.mockResolvedValue(authCookies);
+      driver.cookieListFromState.mockResolvedValue(authCookies);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const callback = mock((_cookies: Cookie[]) => {});
@@ -177,7 +177,7 @@ describe("CookieMonitor", () => {
 
     test("does not call driver.evalJs immediately at start", async () => {
       driver.evalJs.mockResolvedValue("false");
-      driver.cookieList.mockResolvedValue([]);
+      driver.cookieListFromState.mockResolvedValue([]);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const callback = mock((_cookies: Cookie[]) => {});
@@ -189,7 +189,7 @@ describe("CookieMonitor", () => {
 
     test("calls driver.evalJs once after POLL_INTERVAL_MS", async () => {
       driver.evalJs.mockResolvedValue("false");
-      driver.cookieList.mockResolvedValue([]);
+      driver.cookieListFromState.mockResolvedValue([]);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const callback = mock((_cookies: Cookie[]) => {});
@@ -202,7 +202,7 @@ describe("CookieMonitor", () => {
 
     test("swallows repeated eval throws without rejecting", async () => {
       driver.evalJs.mockRejectedValue(new Error("session gone"));
-      driver.cookieList.mockResolvedValue([]);
+      driver.cookieListFromState.mockResolvedValue([]);
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const callback = mock((_cookies: Cookie[]) => {});
@@ -213,9 +213,9 @@ describe("CookieMonitor", () => {
       monitor.stop();
     });
 
-    test("swallows repeated cookieList throws without rejecting", async () => {
+    test("swallows repeated cookieListFromState throws without rejecting", async () => {
       driver.evalJs.mockResolvedValue("true");
-      driver.cookieList.mockRejectedValue(new Error("cookies unreachable"));
+      driver.cookieListFromState.mockRejectedValue(new Error("cookies unreachable"));
 
       const monitor = new CookieMonitor({ driver: driver as never, logger });
       const callback = mock((_cookies: Cookie[]) => {});

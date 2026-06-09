@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, mock } from "bun:test";
+import { writeFileSync } from "node:fs";
 import {
   PlaywrightCliDriver,
   PlaywrightCliError,
@@ -303,6 +304,104 @@ describe("PlaywrightCliDriver", () => {
 
       await d.stateLoad("sess1", "/tmp/state.json");
       expect(runner._run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("cookieListFromState", () => {
+    test("invokes state-save with session, parses JSON file, and returns cookies with expires", async () => {
+      const storageState = {
+        cookies: [
+          {
+            name: "__Secure-1PSID",
+            value: "abc",
+            domain: ".google.com",
+            path: "/",
+            expires: 1893456000,
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+          },
+          {
+            name: "__Secure-1PSIDTS",
+            value: "xyz",
+            domain: ".google.com",
+            path: "/",
+            expires: 1893456000.5,
+            httpOnly: true,
+            secure: true,
+            sameSite: "Lax",
+          },
+        ],
+        origins: [],
+      };
+
+      let savedPath = "";
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
+        const stateIdx = args.indexOf("state-save");
+        savedPath = args[stateIdx + 1] ?? "";
+        writeFileSync(savedPath, JSON.stringify(storageState), "utf-8");
+        return { exitCode: 0, stdout: "", stderr: "" };
+      });
+      const d = new PlaywrightCliDriver({ runner });
+
+      const cookies = await d.cookieListFromState("sess1");
+
+      expect(runner._run).toHaveBeenCalledTimes(1);
+      const calledArgs = runner._run.mock.calls[0]![0] as string[];
+      expect(calledArgs[0]).toBe("-s=sess1");
+      expect(calledArgs[1]).toBe("state-save");
+      expect(typeof savedPath).toBe("string");
+      expect(savedPath.length).toBeGreaterThan(0);
+
+      expect(cookies).toHaveLength(2);
+      expect(cookies[0]!.name).toBe("__Secure-1PSID");
+      expect(cookies[0]!.expires).toBe(1893456000);
+      expect(cookies[1]!.name).toBe("__Secure-1PSIDTS");
+      expect(cookies[1]!.expires).toBe(1893456000.5);
+    });
+
+    test("returns empty array when storage state has no cookies", async () => {
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
+        const stateIdx = args.indexOf("state-save");
+        const savedPath = args[stateIdx + 1] ?? "";
+        writeFileSync(savedPath, JSON.stringify({ cookies: [], origins: [] }), "utf-8");
+        return { exitCode: 0, stdout: "", stderr: "" };
+      });
+      const d = new PlaywrightCliDriver({ runner });
+
+      const cookies = await d.cookieListFromState("sess1");
+      expect(cookies).toEqual([]);
+    });
+
+    test("cleans up the temp file even on read errors", async () => {
+      let savedPath = "";
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
+        savedPath = args[args.indexOf("state-save") + 1] ?? "";
+        writeFileSync(savedPath, "{not valid json", "utf-8");
+        return { exitCode: 0, stdout: "", stderr: "" };
+      });
+      const d = new PlaywrightCliDriver({ runner });
+
+      await expect(d.cookieListFromState("sess1")).rejects.toThrow();
+      let stillExists = true;
+      try {
+        const { existsSync } = await import("node:fs");
+        stillExists = existsSync(savedPath);
+      } catch {
+        stillExists = false;
+      }
+      expect(stillExists).toBe(false);
+    });
+
+    test("propagates state-save failures", async () => {
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "save failed" });
+      const d = new PlaywrightCliDriver({ runner });
+
+      await expect(d.cookieListFromState("sess1")).rejects.toBeInstanceOf(PlaywrightCliError);
     });
   });
 

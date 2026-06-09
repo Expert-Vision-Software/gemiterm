@@ -106,7 +106,7 @@ export class CookieMonitor {
 
   async checkCookies(session: string): Promise<Cookie[]> {
     try {
-      const cookies = await this.driver.cookieList(session);
+      const cookies = await this.driver.cookieListFromState(session);
       const authCookies = cookies.filter((c) => REQUIRED_COOKIES.has(c.name));
 
       if (authCookies.length === REQUIRED_COOKIES.size) {
@@ -143,7 +143,7 @@ export class CookieMonitor {
 
     let cookies: Cookie[];
     try {
-      cookies = await this.driver.cookieList(session);
+      cookies = await this.driver.cookieListFromState(session);
     } catch {
       return;
     }
