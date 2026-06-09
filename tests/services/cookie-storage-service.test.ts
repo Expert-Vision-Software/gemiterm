@@ -184,8 +184,30 @@ describe("CookieStorageService", () => {
       expect(service.checkCookieFreshness(makeStaleCookies())).toBe(false);
     });
 
-    test("returns false when no expiry timestamp exists", () => {
-      expect(service.checkCookieFreshness(makePartialCookies())).toBe(false);
+    test("returns true when 1PSIDTS is a session cookie (expires: -1)", () => {
+      const sessionCookies: Cookie[] = [
+        {
+          name: "__Secure-1PSID",
+          value: "sid",
+          domain: ".google.com",
+          path: "/",
+          expires: -1,
+          httpOnly: true,
+          secure: true,
+          sameSite: "Lax",
+        },
+        {
+          name: "__Secure-1PSIDTS",
+          value: "sidts",
+          domain: ".google.com",
+          path: "/",
+          expires: -1,
+          httpOnly: true,
+          secure: true,
+          sameSite: "Lax",
+        },
+      ];
+      expect(service.checkCookieFreshness(sessionCookies)).toBe(true);
     });
   });
 

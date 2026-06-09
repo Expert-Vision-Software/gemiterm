@@ -32,10 +32,13 @@ function getCookieExpiryTimestamp(cookies: Cookie[]): number | null {
 }
 
 function checkCookieFreshness(cookies: Cookie[]): boolean {
-  const expiresMs = getCookieExpiryTimestamp(cookies);
-  if (expiresMs === null) return false;
-  const threshold = Date.now() + COOKIE_EXPIRY_THRESHOLD_MS;
-  return expiresMs > threshold;
+  for (const cookie of cookies) {
+    if (cookie.name === "__Secure-1PSIDTS" && cookie.expires > 0) {
+      const threshold = Date.now() + COOKIE_EXPIRY_THRESHOLD_MS;
+      if (cookie.expires * 1000 < threshold) return false;
+    }
+  }
+  return true;
 }
 
 export class CookieStorage {

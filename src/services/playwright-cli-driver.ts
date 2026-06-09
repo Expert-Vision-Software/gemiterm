@@ -191,19 +191,28 @@ export class PlaywrightCliDriver {
   }
 
   private parseCookieListOutput(raw: string): Cookie[] {
-    let text = raw;
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         return parsed.map((c: Record<string, unknown>) => this.cookieFromObject(c));
       }
       if (parsed && typeof parsed === "object" && typeof (parsed as { result?: unknown }).result === "string") {
-        text = (parsed as { result: string }).result;
+        const inner = (parsed as { result: string }).result;
+        if (inner === "No cookies found") return [];
+        try {
+          const innerParsed = JSON.parse(inner);
+          if (Array.isArray(innerParsed)) {
+            return innerParsed.map((c: Record<string, unknown>) => this.cookieFromObject(c));
+          }
+        } catch {
+          // inner was not a JSON array — fall through to the plain-text parser
+        }
+        return this.parseCookieListText(inner);
       }
     } catch {
       // not JSON; treat raw as plain text
     }
-    return this.parseCookieListText(text);
+    return this.parseCookieListText(raw);
   }
 
   private parseCookieListText(text: string): Cookie[] {

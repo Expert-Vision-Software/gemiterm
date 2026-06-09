@@ -232,6 +232,39 @@ describe("ProfileManager", () => {
     expect(status.isActive).toBe(false);
   });
 
+  test("getStatus returns active for session cookies (expires: -1)", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    const sessionCookies: Cookie[] = [
+      {
+        name: "__Secure-1PSID",
+        value: "psid",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__Secure-1PSIDTS",
+        value: "psidts",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ];
+    storage.save("session", sessionCookies);
+
+    const status = mgr.getStatus("session");
+    expect(status.exists).toBe(true);
+    expect(status.isActive).toBe(true);
+    expect(status.expiresAt).toBeNull();
+  });
+
   test("getStatus returns not exists for missing profile", () => {
     const status = manager.getStatus("missing");
     expect(status.exists).toBe(false);

@@ -48,10 +48,13 @@ export class CookieStorageService {
   }
 
   checkCookieFreshness(cookies: Cookie[]): boolean {
-    const expiresMs = this.getCookieExpiryMs(cookies);
-    if (expiresMs === null) return false;
-    const threshold = Date.now() + COOKIE_EXPIRY_THRESHOLD_MS;
-    return expiresMs > threshold;
+    for (const cookie of cookies) {
+      if (cookie.name === "__Secure-1PSIDTS" && cookie.expires > 0) {
+        const threshold = Date.now() + COOKIE_EXPIRY_THRESHOLD_MS;
+        if (cookie.expires * 1000 < threshold) return false;
+      }
+    }
+    return true;
   }
 
   getCookieExpiry(cookies: Cookie[]): Date | null {

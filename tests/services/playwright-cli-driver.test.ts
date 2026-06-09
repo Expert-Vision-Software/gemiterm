@@ -211,6 +211,52 @@ describe("PlaywrightCliDriver", () => {
       expect(cookies).toEqual([]);
     });
 
+    test("parses envelope { result: '<json-string>' } shape", async () => {
+      const innerArray = [
+        {
+          name: "__Secure-1PSID",
+          value: "abc123",
+          domain: ".google.com",
+          path: "/",
+          expires: 1893456000,
+          httpOnly: true,
+          secure: true,
+          sameSite: "None",
+        },
+        {
+          name: "__Secure-1PSIDTS",
+          value: "xyz789",
+          domain: ".google.com",
+          path: "/",
+          expires: 1893456000,
+          httpOnly: true,
+          secure: true,
+          sameSite: "Lax",
+        },
+      ];
+      const envelope = JSON.stringify({ result: JSON.stringify(innerArray), raw: "{}" });
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 0, stdout: envelope, stderr: "" });
+      const d = new PlaywrightCliDriver({ runner });
+
+      const cookies = await d.cookieList("sess1");
+      expect(cookies).toHaveLength(2);
+      expect(cookies[0].name).toBe("__Secure-1PSID");
+      expect(cookies[0].value).toBe("abc123");
+      expect(cookies[0].secure).toBe(true);
+      expect(cookies[1].sameSite).toBe("Lax");
+    });
+
+    test("returns empty array for envelope with 'No cookies found'", async () => {
+      const envelope = JSON.stringify({ result: "No cookies found", raw: "No cookies found" });
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 0, stdout: envelope, stderr: "" });
+      const d = new PlaywrightCliDriver({ runner });
+
+      const cookies = await d.cookieList("sess1");
+      expect(cookies).toEqual([]);
+    });
+
     test("handles cookies missing fields with defaults", async () => {
       const runner = createMockRunner();
       runner._run.mockResolvedValueOnce({
