@@ -174,9 +174,18 @@ describe("formatters", () => {
       expect(result).toContain("* = default profile");
     });
 
-    test("shows N/A for expiresAt when null", () => {
+    test("shows 'Session' for active profile with null expiresAt (session cookie)", () => {
       const statuses: ProfileStatus[] = [
         { name: "default", exists: true, isActive: true, expiresAt: null, isDefault: false },
+      ];
+      const result = formatProfileTable(statuses);
+      expect(result).toContain("Session");
+      expect(result).not.toContain("N/A");
+    });
+
+    test("shows N/A for expiresAt when inactive and null", () => {
+      const statuses: ProfileStatus[] = [
+        { name: "default", exists: true, isActive: false, expiresAt: null, isDefault: false },
       ];
       const result = formatProfileTable(statuses);
       expect(result).toContain("N/A");
@@ -208,6 +217,23 @@ describe("formatters", () => {
       ];
       const result = formatProfileTable(statuses);
       expect(result).toContain("2026");
+    });
+
+    test("does not truncate short default profile name (chalk-aware width)", () => {
+      const statuses: ProfileStatus[] = [
+        { name: "default", exists: true, isActive: true, expiresAt: null, isDefault: true },
+      ];
+      const result = formatProfileTable(statuses);
+      expect(result).toContain("default *");
+      expect(result).not.toContain("defaul\u2026");
+    });
+
+    test("does not truncate 'Yes' in DEFAULT column for default profile", () => {
+      const statuses: ProfileStatus[] = [
+        { name: "default", exists: true, isActive: true, expiresAt: null, isDefault: true },
+      ];
+      const result = formatProfileTable(statuses);
+      expect(result).toMatch(/Yes\s*$/m);
     });
   });
 

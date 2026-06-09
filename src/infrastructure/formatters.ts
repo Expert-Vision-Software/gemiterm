@@ -23,13 +23,60 @@ function formatTimestamp(ts: number): string {
   });
 }
 
+function visibleLength(str: string): number {
+  let len = 0;
+  let inEscape = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i]!;
+    if (inEscape) {
+      if ((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z")) {
+        inEscape = false;
+      }
+      continue;
+    }
+    if (ch === "\u001b" && str[i + 1] === "[") {
+      inEscape = true;
+      i++;
+      continue;
+    }
+    len++;
+  }
+  return len;
+}
+
 function truncate(str: string, maxLen: number): string {
-  if (str.length <= maxLen) return str;
-  return str.slice(0, maxLen - 1) + "\u2026";
+  if (visibleLength(str) <= maxLen) return str;
+  let out = "";
+  let vis = 0;
+  let inEscape = false;
+  let i = 0;
+  while (i < str.length && vis < maxLen - 1) {
+    const ch = str[i]!;
+    if (inEscape) {
+      out += ch;
+      if ((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z")) {
+        inEscape = false;
+      }
+      i++;
+      continue;
+    }
+    if (ch === "\u001b" && str[i + 1] === "[") {
+      out += ch + "[";
+      inEscape = true;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    vis++;
+    i++;
+  }
+  return out + "\u2026";
 }
 
 function padColumn(value: string, width: number): string {
-  return truncate(value, width).padEnd(width);
+  const truncated = truncate(value, width);
+  const pad = Math.max(0, width - visibleLength(truncated));
+  return truncated + " ".repeat(pad);
 }
 
 export function formatChatAsMarkdown(
@@ -95,7 +142,14 @@ export function formatProfileTable(statuses: ProfileStatus[]): string {
       : status.exists
         ? chalk.red("\u2717 No")
         : chalk.dim("\u2014");
-    const expires = status.expiresAt ? formatTimestamp(new Date(status.expiresAt).getTime()) : chalk.dim("N/A");
+    let expires: string;
+    if (status.expiresAt) {
+      expires = formatTimestamp(new Date(status.expiresAt).getTime());
+    } else if (status.isActive) {
+      expires = chalk.dim("Session");
+    } else {
+      expires = chalk.dim("N/A");
+    }
     const defaultStr = status.isDefault ? chalk.green("Yes") : "";
 
     lines.push(
