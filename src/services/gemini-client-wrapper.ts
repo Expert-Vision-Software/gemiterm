@@ -1,11 +1,26 @@
+import {
+  type ChatInfo as RawChatInfo,
+  type ChatHistory,
+  type ChatSession,
+  type AvailableModel as RawAvailableModel,
+  type InitOptions,
+  type StartChatOptions,
+  type SendMessageOptions,
+  GeminiClient,
+  AuthError,
+  APIError,
+  TimeoutError,
+  UsageLimitExceeded,
+  ModelInvalid,
+  TemporarilyBlocked,
+  GeminiError,
+} from "gemini-reverse";
 import type { ChatInfo, Message } from "../core/types.ts";
 import type { IGeminiClientService } from "../core/command-handlers.ts";
 import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
-
-const GEMINI_BASE_URL = "https://gemini.google.com";
 
 interface GeminiClientConfig {
   secure1psid: string;
@@ -15,82 +30,87 @@ interface GeminiClientConfig {
 export class GeminiClientService
   implements IGeminiClientService, IGeminiClientQueryService
 {
-  private readonly logger: Logger;
-  private readonly config: GeminiClientConfig;
-  private readonly cookieStorageService?: CookieStorageService;
-  private authenticated = false;
+  private client: GeminiClient | null = null;
+  private initPromise: Promise<void> | null = null;
+  private initialized = false;
+  readonly logger: Logger;
+  readonly cookieStorageService?: CookieStorageService;
   readonly profileName?: string;
 
   constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string) {
-    this.config = config;
     this.logger = logger;
     this.cookieStorageService = cookieStorageService;
     this.profileName = profileName;
-    this.authenticated = !!config.secure1psid;
-  }
-
-  private buildHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    };
-
-    if (this.config.secure1psid) {
-      headers["Cookie"] = this.buildCookieHeader();
-    }
-
-    return headers;
-  }
-
-  private buildCookieHeader(): string {
-    const parts: string[] = [
-      `__Secure-1PSID=${this.config.secure1psid}`,
-    ];
-    if (this.config.secure1psidts) {
-      parts.push(`__Secure-1PSIDTS=${this.config.secure1psidts}`);
-    }
-    return parts.join("; ");
-  }
-
-  private ensureAuthenticated(): void {
-    if (!this.authenticated || !this.config.secure1psid) {
-      throw new AuthenticationError();
-    }
-  }
-
-  private async requestApi(
-    endpoint: string,
-    options?: RequestInit,
-  ): Promise<Response> {
-    this.ensureAuthenticated();
-    const url = `${GEMINI_BASE_URL}${endpoint}`;
-    const headers = this.buildHeaders();
-
-    this.logger.debug(`API request: ${options?.method ?? "GET"} ${url}`);
-
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...headers,
-        ...(options?.headers as Record<string, string> | undefined),
-      },
+    this.client = new GeminiClient({
+      secure_1psid: config.secure1psid,
+      secure_1psidts: config.secure1psidts ?? null,
     });
+  }
 
-    if (response.status === 401 || response.status === 403) {
-      this.authenticated = false;
-      throw new AuthenticationError(
+  async init(): Promise<void> {
+    if (this.initialized) return;
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = this.client!.init({
+      timeout: 300_000,
+      autoClose: false,
+      autoRefresh: true,
+      refreshInterval: 540_000,
+    });
+    await this.initPromise;
+    this.initialized = true;
+  }
+
+  private toDomainChatInfo(raw: RawChatInfo, profileName?: string): ChatInfo {
+    return {
+      id: raw.cid,
+      title: raw.title,
+      isPinned: raw.is_pinned,
+      timestamp: raw.timestamp,
+      ...(profileName ? { profile: profileName } : {}),
+    };
+  }
+
+  private toDomainMessages(history: ChatHistory, conversationId: string): Message[] {
+    return history.turns.map((turn) => ({
+      role: turn.role,
+      content: turn.text,
+      conversationId,
+    }));
+  }
+
+  private toDomainModelName(model: RawAvailableModel): string {
+    return model.display_name || model.model_name || model.model_id;
+  }
+
+  private translateError(e: unknown): GeminiAPIError | AuthenticationError {
+    if (e instanceof AuthError) {
+      return new AuthenticationError(
         "Session expired or invalid. Please run 'gemiterm login' again.",
       );
     }
-
-    if (!response.ok) {
-      throw new GeminiAPIError(
-        `Gemini API returned ${response.status}: ${response.statusText}`,
-      );
+    if (e instanceof TimeoutError) {
+      return new GeminiAPIError("Request to Gemini timed out");
     }
-
-    return response;
+    if (e instanceof UsageLimitExceeded) {
+      return new GeminiAPIError("Gemini usage limit reached; try again later or switch model");
+    }
+    if (e instanceof TemporarilyBlocked) {
+      return new GeminiAPIError("Temporarily blocked by Gemini; try a proxy or wait");
+    }
+    if (e instanceof ModelInvalid) {
+      return new GeminiAPIError("Model is invalid or unavailable");
+    }
+    if (e instanceof APIError) {
+      const err = new GeminiAPIError(e.message);
+      err.cause = e;
+      return err;
+    }
+    if (e instanceof GeminiError) {
+      const err = new GeminiAPIError(e.message);
+      err.cause = e;
+      return err;
+    }
+    return new GeminiAPIError("Unexpected error: " + String(e));
   }
 
   forProfile(profileName: string): GeminiClientService {
@@ -121,29 +141,10 @@ export class GeminiClientService
     offset?: number;
     search?: string;
   }): Promise<ChatInfo[]> {
+    await this.init();
     try {
-      const response = await this.requestApi("/app/api/chat/history");
-
-      const data = await response.json() as {
-        chats?: Array<{
-          cid: string;
-          title: string;
-          is_pinned?: boolean;
-          timestamp?: number;
-        }>;
-      };
-
-      let chats: ChatInfo[] = [];
-
-      if (data.chats) {
-        chats = data.chats.map((chat) => ({
-          id: chat.cid,
-          title: chat.title ?? "Untitled",
-          isPinned: chat.is_pinned ?? false,
-          timestamp: chat.timestamp ?? 0,
-          ...(this.profileName ? { profile: this.profileName } : {}),
-        }));
-      }
+      const raw = this.client!.listChats();
+      let chats: ChatInfo[] = (raw ?? []).map((c) => this.toDomainChatInfo(c, this.profileName));
 
       if (options?.search) {
         const query = options.search.toLowerCase();
@@ -160,145 +161,79 @@ export class GeminiClientService
       }
 
       return chats;
-    } catch (error) {
-      if (error instanceof GeminiAPIError || error instanceof AuthenticationError) {
-        throw error;
-      }
-      this.logger.debug(`listChats failed: ${error}`);
-      throw new GeminiAPIError(`Failed to list chats: ${error}`);
+    } catch (e) {
+      const err = this.translateError(e);
+      this.logger.debug(`listChats failed: ${e}`);
+      throw err;
     }
   }
 
   async fetchChat(conversationId: string): Promise<Message[]> {
+    await this.init();
     try {
-      const response = await this.requestApi(
-        `/app/api/chat/history/${encodeURIComponent(conversationId)}`,
-      );
-
-      const data = await response.json() as {
-        turns?: Array<{
-          role: string;
-          text?: string;
-          parts?: Array<{ text?: string }>;
-        }>;
-      };
-
-      const messages: Message[] = [];
-
-      if (data.turns) {
-        for (const turn of data.turns) {
-          const content =
-            turn.text ??
-            turn.parts?.map((p) => p.text ?? "").join("") ??
-            "";
-          messages.push({
-            role: turn.role === "user" ? "user" : "model",
-            content,
-            conversationId,
-          });
-        }
-      }
-
-      return messages;
-    } catch (error) {
-      if (error instanceof GeminiAPIError || error instanceof AuthenticationError) {
-        throw error;
-      }
-      this.logger.debug(`fetchChat failed: ${error}`);
-      throw new GeminiAPIError(`Failed to fetch chat: ${error}`);
+      const history = await this.client!.readChat(conversationId);
+      if (!history) return [];
+      return this.toDomainMessages(history, conversationId);
+    } catch (e) {
+      const err = this.translateError(e);
+      this.logger.debug(`fetchChat failed: ${e}`);
+      throw err;
     }
   }
 
   async deleteChat(conversationId: string): Promise<void> {
+    await this.init();
     try {
-      await this.requestApi(
-        `/app/api/chat/history/${encodeURIComponent(conversationId)}`,
-        { method: "DELETE" },
-      );
-    } catch (error) {
-      if (error instanceof GeminiAPIError || error instanceof AuthenticationError) {
-        throw error;
-      }
-      this.logger.debug(`deleteChat failed: ${error}`);
-      throw new GeminiAPIError(`Failed to delete chat: ${error}`);
+      await this.client!.deleteChat(conversationId);
+    } catch (e) {
+      const err = this.translateError(e);
+      this.logger.debug(`deleteChat failed: ${e}`);
+      throw err;
     }
   }
 
   async sendMessage(conversationId: string, message: string): Promise<string> {
+    await this.init();
     try {
-      const response = await this.requestApi(
-        `/app/api/chat/${encodeURIComponent(conversationId)}/send`,
-        {
-          method: "POST",
-          body: new URLSearchParams({ message }).toString(),
-        },
-      );
-
-      const data = await response.json() as {
-        response?: string;
-        text?: string;
-      };
-
-      return data.response ?? data.text ?? "";
-    } catch (error) {
-      if (error instanceof GeminiAPIError || error instanceof AuthenticationError) {
-        throw error;
-      }
-      this.logger.debug(`sendMessage failed: ${error}`);
-      throw new GeminiAPIError(`Failed to send message: ${error}`);
+      const session = this.client!.startChat({ cid: conversationId });
+      const output = await session.sendMessage({ prompt: message });
+      return output.text.toString();
+    } catch (e) {
+      const err = this.translateError(e);
+      this.logger.debug(`sendMessage failed: ${e}`);
+      throw err;
     }
   }
 
-  async startNewChat(
-    message: string,
-  ): Promise<{ response: string; conversationId: string }> {
+  async startNewChat(message: string): Promise<{ response: string; conversationId: string }> {
+    await this.init();
     try {
-      const response = await this.requestApi("/app/api/chat/new", {
-        method: "POST",
-        body: new URLSearchParams({ message }).toString(),
-      });
-
-      const data = await response.json() as {
-        response?: string;
-        text?: string;
-        cid?: string;
-        conversation_id?: string;
+      const session = this.client!.startChat();
+      const output = await session.sendMessage({ prompt: message });
+      return {
+        response: output.text.toString(),
+        conversationId: session.cid,
       };
-
-      const conversationId = data.cid ?? data.conversation_id ?? "";
-      const responseText = data.response ?? data.text ?? "";
-
-      return { response: responseText, conversationId };
-    } catch (error) {
-      if (error instanceof GeminiAPIError || error instanceof AuthenticationError) {
-        throw error;
-      }
-      this.logger.debug(`startNewChat failed: ${error}`);
-      throw new GeminiAPIError(`Failed to start new chat: ${error}`);
+    } catch (e) {
+      const err = this.translateError(e);
+      this.logger.debug(`startNewChat failed: ${e}`);
+      throw err;
     }
   }
 
   async listModels(): Promise<string[]> {
+    await this.init();
     try {
-      const response = await this.requestApi("/app/api/models");
-
-      const data = await response.json() as {
-        models?: Array<{ name: string; display_name?: string }>;
-      };
-
-      if (!data.models) return [];
-
-      return data.models.map((m) => m.display_name ?? m.name);
-    } catch (error) {
-      if (error instanceof GeminiAPIError || error instanceof AuthenticationError) {
-        throw error;
-      }
-      this.logger.debug(`listModels failed: ${error}`);
-      throw new GeminiAPIError(`Failed to list models: ${error}`);
+      const raw = this.client!.listModels();
+      return (raw ?? []).map((m) => this.toDomainModelName(m));
+    } catch (e) {
+      const err = this.translateError(e);
+      this.logger.debug(`listModels failed: ${e}`);
+      throw err;
     }
   }
 
   isAuthenticated(): boolean {
-    return this.authenticated;
+    return this.initialized;
   }
 }
