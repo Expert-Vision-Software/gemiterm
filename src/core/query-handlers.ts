@@ -1,5 +1,6 @@
 import type { Query, QueryHandler } from "./mediator.ts";
 import type { ChatInfo, Message, ProfileStatus } from "./types.ts";
+import type { IGeminiClientService } from "./command-handlers.ts";
 
 function extractPayload<T>(query: Query<T>): T {
   return query.payload;
@@ -68,15 +69,30 @@ export class ListChatsQueryHandler
   implements QueryHandler<ListChatsQueryPayload, ListChatsQueryResult>
 {
   readonly queryType = QUERY_TYPES.LIST_CHATS;
-  private readonly geminiClient: IGeminiClientQueryService;
+  private readonly getGeminiClient: () => IGeminiClientService;
+  private readonly listProfiles: () => string[];
 
-  constructor(geminiClient: IGeminiClientQueryService) {
-    this.geminiClient = geminiClient;
+  constructor(getGeminiClient: () => IGeminiClientService, listProfiles: () => string[]) {
+    this.getGeminiClient = getGeminiClient;
+    this.listProfiles = listProfiles;
   }
 
   async handle(query: Query<ListChatsQueryPayload>): Promise<ListChatsQueryResult> {
-    const { limit, offset, search } = extractPayload(query);
-    const chats = await this.geminiClient.listChats({ limit, offset, search });
+    const { limit, offset, search, allProfiles } = extractPayload(query);
+    const options = { limit, offset, search };
+    const client = this.getGeminiClient();
+
+    let chats: ChatInfo[];
+    if (allProfiles) {
+      const profileNames = this.listProfiles();
+      const results = await Promise.all(
+        profileNames.map((name) => client.forProfile(name).listChats(options)),
+      );
+      chats = results.flat();
+      chats.sort((a, b) => b.timestamp - a.timestamp);
+    } else {
+      chats = await client.listChats(options);
+    }
     return { chats };
   }
 }

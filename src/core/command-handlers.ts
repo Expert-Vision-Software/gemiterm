@@ -1,5 +1,5 @@
 import type { Command, CommandHandler } from "./mediator.ts";
-import type { AuthResult } from "./types.ts";
+import type { AuthResult, ChatInfo } from "./types.ts";
 import { AuthenticationError } from "./errors.ts";
 
 function extractPayload<T>(command: Command<T>): T {
@@ -95,6 +95,7 @@ export interface IGeminiClientService {
   startNewChat(message: string): Promise<{ response: string; conversationId: string }>;
   profileHasConversation(profileName: string, conversationId: string): Promise<boolean>;
   forProfile(profileName: string): IGeminiClientService;
+  listChats(options?: { limit?: number; offset?: number; search?: string }): Promise<ChatInfo[]>;
 }
 
 export class AuthenticateCommandHandler

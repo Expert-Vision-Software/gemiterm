@@ -113,11 +113,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
 
   mediator.registerQueryHandler(new GetAuthStatusQueryHandler(profileQueryService));
   mediator.registerQueryHandler(new GetProfileStatusesQueryHandler(profileQueryService));
-  mediator.registerQueryHandler(new ListChatsQueryHandler({
-    async listChats(options) { return getGeminiClient().listChats(options); },
-    async fetchChat(id) { return getGeminiClient().fetchChat(id); },
-    async listModels() { return getGeminiClient().listModels(); },
-  }));
+  mediator.registerQueryHandler(new ListChatsQueryHandler(getGeminiClient, listProfiles));
   mediator.registerQueryHandler(new FetchChatQueryHandler({
     async listChats(options) { return getGeminiClient().listChats(options); },
     async fetchChat(id) { return getGeminiClient().fetchChat(id); },
@@ -138,6 +134,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
     async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
     async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
     forProfile(name) { return getGeminiClient().forProfile(name); },
+    async listChats(options) { return getGeminiClient().listChats(options); },
   }));
   mediator.registerCommandHandler(new SendMessageCommandHandler({
     async deleteChat(id) { return getGeminiClient().deleteChat(id); },
@@ -145,6 +142,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
     async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
     async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
     forProfile(name) { return getGeminiClient().forProfile(name); },
+    async listChats(options) { return getGeminiClient().listChats(options); },
   }));
   mediator.registerCommandHandler(new StartNewChatCommandHandler({
     async deleteChat(id) { return getGeminiClient().deleteChat(id); },
@@ -152,6 +150,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
     async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
     async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
     forProfile(name) { return getGeminiClient().forProfile(name); },
+    async listChats(options) { return getGeminiClient().listChats(options); },
   }));
 
   return profileAuthManager;

@@ -15,18 +15,19 @@ function makeQuery<T>(type: string, payload: T): Query<T> {
 }
 
 describe("ListChatsQueryHandler", () => {
-  let mockClient: IGeminiClientQueryService;
+  let mockClient: IGeminiClientQueryService & { forProfile: (name: string) => IGeminiClientQueryService };
 
   beforeEach(() => {
     mockClient = {
       listChats: mock(() => Promise.resolve([])),
       fetchChat: mock(() => Promise.resolve([])),
       listModels: mock(() => Promise.resolve([])),
+      forProfile: (name: string) => mockClient,
     };
   });
 
   test("has correct queryType", () => {
-    const handler = new ListChatsQueryHandler(mockClient);
+    const handler = new ListChatsQueryHandler(() => mockClient as any, () => []);
     expect(handler.queryType).toBe(QUERY_TYPES.LIST_CHATS);
   });
 
@@ -37,7 +38,7 @@ describe("ListChatsQueryHandler", () => {
     ];
     mockClient.listChats = mock(() => Promise.resolve(chats));
 
-    const handler = new ListChatsQueryHandler(mockClient);
+    const handler = new ListChatsQueryHandler(() => mockClient as any, () => []);
     const result = await handler.handle(makeQuery(QUERY_TYPES.LIST_CHATS, {}));
     expect(result.chats).toEqual(chats);
   });
@@ -48,7 +49,7 @@ describe("ListChatsQueryHandler", () => {
       return Promise.resolve([]);
     });
 
-    const handler = new ListChatsQueryHandler(mockClient);
+    const handler = new ListChatsQueryHandler(() => mockClient as any, () => []);
     await handler.handle(
       makeQuery(QUERY_TYPES.LIST_CHATS, { limit: 10, offset: 5, search: "hello" }),
     );
