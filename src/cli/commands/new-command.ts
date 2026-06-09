@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import { createInterface } from "node:readline";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
@@ -8,6 +7,7 @@ import {
   type StartNewChatCommandPayload,
   type StartNewChatCommandResult,
 } from "../../core/command-handlers.ts";
+import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 
 interface NewCommandOptions {
   help: boolean;
@@ -77,71 +77,31 @@ export class NewCommand implements CliCommand {
     profileName: string | null,
     logger: Logger,
   ): Promise<void> {
-    const profileLabel = profileName ?? "default";
-    console.log(chalk.dim(`Starting new chat session (profile: ${chalk.cyan(profileLabel)})`));
-    console.log(chalk.dim("Type your message and press Enter. Type /exit to quit.\n"));
-
-    const rl = createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
     let conversationId: string | null = null;
 
-    const prompt = (): void => {
-      rl.question(chalk.green.bold("You: "), async (input) => {
-        const trimmed = input.trim();
+    const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
+      const payload: StartNewChatCommandPayload = { message };
+      if (profileName) {
+        payload.profileName = profileName;
+      }
 
-        if (trimmed === "/exit" || trimmed === "/quit") {
-          rl.close();
-          return;
-        }
+      const result = await mediator.send<StartNewChatCommandResult>({
+        type: COMMAND_TYPES.START_NEW_CHAT,
+        payload,
+      } as Command<StartNewChatCommandPayload>);
 
-        if (!trimmed) {
-          prompt();
-          return;
-        }
+      const isFirst = !conversationId;
+      if (isFirst) {
+        conversationId = result.conversationId;
+        console.log(chalk.dim(`Conversation started: ${chalk.cyan(conversationId)}`));
+      } else {
+        console.log(chalk.dim(`Response from: ${chalk.cyan(result.conversationId)}`));
+      }
 
-        try {
-          const payload: StartNewChatCommandPayload = { message: trimmed };
-          if (profileName) {
-            payload.profileName = profileName;
-          }
-
-          const isFirst = !conversationId;
-          const result = await mediator.send<StartNewChatCommandResult>({
-            type: COMMAND_TYPES.START_NEW_CHAT,
-            payload,
-          } as Command<StartNewChatCommandPayload>);
-
-          if (isFirst) {
-            conversationId = result.conversationId;
-            console.log(chalk.dim(`Conversation started: ${chalk.cyan(conversationId)}`));
-          } else {
-            console.log(chalk.dim(`Response from: ${chalk.cyan(result.conversationId)}`));
-          }
-
-          console.log(chalk.blue.bold("Model:"));
-          console.log(result.response);
-          console.log("");
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(chalk.red(`Error: ${message}`));
-          console.log("");
-        }
-
-        prompt();
-      });
+      return { response: result.response };
     };
 
-    prompt();
-
-    await new Promise<void>((resolve) => {
-      rl.on("close", () => {
-        console.log(chalk.dim("\nGoodbye."));
-        resolve();
-      });
-    });
+    await runInteractiveLoop(messageHandler, { profileName });
   }
 
   private parseArgs(args: string[]): NewCommandOptions {

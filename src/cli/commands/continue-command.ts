@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import { createInterface } from "node:readline";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
@@ -9,6 +8,7 @@ import {
   type SendMessageCommandPayload,
   type SendMessageCommandResult,
 } from "../../core/command-handlers.ts";
+import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 
 interface ContinueCommandOptions {
   help: boolean;
@@ -96,56 +96,18 @@ export class ContinueCommand implements CliCommand {
     context: CliCommandContext,
   ): Promise<void> {
     const profileName = await this.resolveProfile(context, conversationId);
-    console.log(chalk.dim(`Continuing conversation: ${chalk.cyan(conversationId)}`));
-    console.log(chalk.dim("Type your message and press Enter. Type /exit to quit.\n"));
 
-    const rl = createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
+    const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
+      logger.debug(`Sending message to ${conversationId}`);
+      const result = await mediator.send<SendMessageCommandResult>({
+        type: COMMAND_TYPES.SEND_MESSAGE,
+        payload: { conversationId, message, profileName: profileName ?? undefined },
+      } as Command<SendMessageCommandPayload>);
 
-    const prompt = (): void => {
-      rl.question(chalk.green.bold("You: "), async (input) => {
-        const trimmed = input.trim();
-
-        if (trimmed === "/exit" || trimmed === "/quit") {
-          rl.close();
-          return;
-        }
-
-        if (!trimmed) {
-          prompt();
-          return;
-        }
-
-        try {
-          logger.debug(`Sending message to ${conversationId}`);
-          const result = await mediator.send<SendMessageCommandResult>({
-            type: COMMAND_TYPES.SEND_MESSAGE,
-            payload: { conversationId, message: trimmed, profileName: profileName ?? undefined },
-          } as Command<SendMessageCommandPayload>);
-
-          console.log(chalk.blue.bold("Model:"));
-          console.log(result.response);
-          console.log("");
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          console.error(chalk.red(`Error: ${message}`));
-          console.log("");
-        }
-
-        prompt();
-      });
+      return { response: result.response };
     };
 
-    prompt();
-
-    await new Promise<void>((resolve) => {
-      rl.on("close", () => {
-        console.log(chalk.dim("\nGoodbye."));
-        resolve();
-      });
-    });
+    await runInteractiveLoop(messageHandler, { profileName });
   }
 
   private async invokeListCommand(context: CliCommandContext): Promise<void> {
