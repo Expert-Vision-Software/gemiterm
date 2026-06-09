@@ -24,18 +24,18 @@ On Windows (`process.platform === "win32"`), when the env override is not set, t
 
 #### Scenario: Windows without APPDATA falls back to homedir
 - **WHEN** `process.platform === "win32"` and `APPDATA` is not set
-- **THEN** `getConfigDir()` returns `<homedir>/.config/gemiterm` (the Linux/macOS-style default)
+- **THEN** `getConfigDir()` returns `<homedir>/gemiterm` (the Linux/macOS-style default)
 
 ### Requirement: Linux and macOS Config Path
-On Linux and macOS (`process.platform` is `"linux"` or `"darwin"`), when the env override is not set, the system MUST use `~/.config/gemiterm` (i.e. `<homedir>/.config/gemiterm`).
+On Linux and macOS (`process.platform` is `"linux"` or `"darwin"`), when the env override is not set, the system MUST use `~/gemiterm` (i.e. `<homedir>/gemiterm`; no `.config` intermediary).
 
 #### Scenario: Linux platform
 - **WHEN** `process.platform === "linux"` and the env override is not set
-- **THEN** `getConfigDir()` returns `<homedir>/.config/gemiterm`
+- **THEN** `getConfigDir()` returns `<homedir>/gemiterm`
 
 #### Scenario: macOS platform
 - **WHEN** `process.platform === "darwin"` and the env override is not set
-- **THEN** `getConfigDir()` returns `<homedir>/.config/gemiterm`
+- **THEN** `getConfigDir()` returns `<homedir>/gemiterm`
 
 ### Requirement: Profiles Subdirectory Layout
 The system MUST expose a `getProfilesDir()` function that returns `<configDir>/profiles`. The profiles subdirectory is the parent of every per-profile directory.

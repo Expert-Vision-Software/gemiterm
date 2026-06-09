@@ -94,23 +94,23 @@ describe("path-utils", () => {
       platformSpy.mockRestore();
     });
 
-    test("on win32 without APPDATA, falls back to homedir/.config/gemiterm", () => {
+    test("on win32 without APPDATA, falls back to homedir/gemiterm", () => {
       const platformSpy = spyOn(os, "platform").mockReturnValue("win32");
       delete process.env.APPDATA;
-      expect(getConfigDir()).toBe(join(os.homedir(), ".config", "gemiterm"));
+      expect(getConfigDir()).toBe(join(os.homedir(), "gemiterm"));
       platformSpy.mockRestore();
     });
 
-    test("on linux, returns homedir/.config/gemiterm", () => {
+    test("on linux, returns homedir/gemiterm", () => {
       const platformSpy = spyOn(os, "platform").mockReturnValue("linux");
       delete process.env.APPDATA;
-      expect(getConfigDir()).toBe(join(os.homedir(), ".config", "gemiterm"));
+      expect(getConfigDir()).toBe(join(os.homedir(), "gemiterm"));
       platformSpy.mockRestore();
     });
 
-    test("on darwin, returns homedir/.config/gemiterm", () => {
+    test("on darwin, returns homedir/gemiterm", () => {
       const platformSpy = spyOn(os, "platform").mockReturnValue("darwin");
-      expect(getConfigDir()).toBe(join(os.homedir(), ".config", "gemiterm"));
+      expect(getConfigDir()).toBe(join(os.homedir(), "gemiterm"));
       platformSpy.mockRestore();
     });
 

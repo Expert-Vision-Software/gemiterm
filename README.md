@@ -203,7 +203,7 @@ gemiterm -v <command>
 
 Default locations:
 - **Binary**: `$env:LOCALAPPDATA\GemiTerm\` (Windows), `~/.local/bin/gemiterm` (Linux/macOS)
-- **Config**: `%APPDATA%\gemiterm\` (Windows), `~/.config/gemiterm/` (Linux/macOS)
+- **Config**: `%APPDATA%\gemiterm\` (Windows), `~/gemiterm/` (Linux/macOS)
 
 Override with:
 ```bash

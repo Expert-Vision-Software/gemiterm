@@ -37,7 +37,7 @@ Standing design intent (does not change session to session):
   its own browser selection (`--browser=chromium|chrome|msedge|firefox|webkit`),
   and its own CDP attach (`--cdp=`).
 - **Seamless v1.4.1 → v2.0.0 upgrade** is required: the v2.0.0 binary must
-  read the existing `%APPDATA%\gemiterm\` (Windows) / `~/.config/gemiterm/`
+  read the existing `%APPDATA%\gemiterm\` (Windows) / `~/gemiterm/`
   (POSIX) config dir unchanged, and the new `install.ps1`/`install.sh` must
   replace the v1.4.1 installer in place. This is captured in the
   `v2-install-migration` OpenSpec change.
@@ -133,14 +133,4 @@ These items are tracked in the `cross-platform-build-and-ci` change's tasks:
 - `bun run build` is broken on Bun 1.3.x (`--compile` no longer accepts
   `--outdir`).
 
-## Queued changes (not yet applied to code)
 
-- `cross-platform-build-and-ci` — CI/CD, build script fix, platform detection
-  module, cleanup. 36 tasks. The proposal/design/specs are on disk; the code
-  is not.
-- `v2-install-migration` — `install.ps1`/`install.sh` for v2.0.0, `INSTALL.md`,
-  README upgrade notes. Requires Python v1.4.1 CLI on PATH for parity
-  validation. Currently deferred.
-- `command-spec-conformance` — bug fixes for profile routing in
-  `findProfileForConversation` and the `list --all-profiles` profile column.
-  Currently deferred.

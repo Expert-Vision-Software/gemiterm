@@ -73,6 +73,39 @@ if (Test-Path $ExePath) {
     Write-Host "Detected existing install at $ExePath; upgrading in place."
 }
 
+# --- v1.4.1 → v2.0.0 config migration (task 11.1) ---
+# v1.4.1 wrote config to $env:USERPROFILE\.config\gemiterm\ on Windows
+# (Python config.py:14 has no Windows branch; Path.home() returns the
+# user profile and the literal ".config/gemiterm" is appended). v2.0.0
+# reads from $env:APPDATA\gemiterm\. If the old path exists and the new
+# one does not, copy the tree forward. The v1.4.1 directory is left in
+# place as a safety net; the user can delete it manually.
+$V14ConfigDir = Join-Path $env:USERPROFILE '.config\gemiterm'
+$V2ConfigDir = Join-Path $env:APPDATA 'gemiterm'
+if ((Test-Path $V14ConfigDir) -and -not (Test-Path $V2ConfigDir)) {
+    Write-Host "Detected v1.4.1 config at $V14ConfigDir; migrating to $V2ConfigDir"
+    New-Item -ItemType Directory -Path $V2ConfigDir -Force | Out-Null
+    Copy-Item -Recurse -Force -Path (Join-Path $V14ConfigDir '*') -Destination $V2ConfigDir
+    Write-Host "v1.4.1 config copied to $V2ConfigDir. The original at $V14ConfigDir is left in place as a backup."
+}
+
+# --- Package-manager prompt (task 11.2) ---
+# If bun or npm is on PATH, recommend installing via the package manager
+# (npm: `npm i -g gemiterm`; bun: `bun i -g gemiterm`) instead of this
+# binary drop. The prompt is skipped when stdin is not a TTY (e.g. the
+# `irm | iex` one-liner flow runs unattended and must not block).
+if (((Get-Command bun -ErrorAction SilentlyContinue) -or (Get-Command npm -ErrorAction SilentlyContinue)) -and [Console]::IsInputRedirected -eq $false) {
+    Write-Host ""
+    Write-Host "It is recommended to install via bun or npm package manager."
+    Write-Host "Are you sure you want to continue with binary install? [y/N]"
+    $reply = Read-Host
+    if ($reply -notmatch '^[yY]([eE][sS])?$') {
+        $pm = if (Get-Command bun -ErrorAction SilentlyContinue) { 'bun i -g gemiterm' } else { 'npm i -g gemiterm' }
+        Write-Host "Aborted. Install via: $pm"
+        exit 0
+    }
+}
+
 # --- Resolve release (task 2.4 + 2.10) ---
 $ApiUrl = if ($Tag -eq 'latest') {
     "https://api.github.com/repos/$Repo/releases/latest"

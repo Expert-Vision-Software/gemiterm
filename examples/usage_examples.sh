@@ -183,7 +183,7 @@ section5() {
 
     # View config location
     echo "3. Default config location:"
-    echo "   ~/.config/gemiterm/"
+    echo "   ~/gemiterm/"
     echo "   Contains:"
     echo "   - storage_state.json (cookies)"
     echo "   - config (future use)"

@@ -8,14 +8,14 @@
 #   bash install.sh --uninstall
 #
 # v1.4.1 → v2.0.0 upgrades replace the binary in place; the config dir at
-# ~/.config/gemiterm/ (POSIX) is NEVER deleted by this installer.
+# ~/gemiterm/ (POSIX) is NEVER deleted by this installer.
 
 set -euo pipefail
 
 REPO="expert-vision-software/GemiTerm"
 INSTALL_DIR="${GEMITERM_INSTALL_DIR:-$HOME/.local/bin}"
 BIN_PATH="$INSTALL_DIR/gemiterm"
-CONFIG_DIR="$HOME/.config/gemiterm"
+CONFIG_DIR="$HOME/gemiterm"
 ENV_SNIPPET="$CONFIG_DIR/env.sh"
 TAG="${GEMITERM_TAG:-latest}"
 
@@ -31,7 +31,7 @@ remove_source_line() {
 
 # --- Detect Python v1.4.1 (task 8.2) ---
 if command -v pip >/dev/null 2>&1 && pip show gemiterm >/dev/null 2>&1; then
-    echo "WARNING: Python v1.4.1 detected. Your config data at ~/.config/gemiterm/ is safe and will be preserved. Please run 'pip uninstall gemiterm' before re-running this installer to complete the v2.0.0 installation."
+    echo "WARNING: Python v1.4.1 detected. Your config data at ~/gemiterm/ is safe and will be preserved. Please run 'pip uninstall gemiterm' before re-running this installer to complete the v2.0.0 installation."
     exit 1
 fi
 
@@ -51,6 +51,37 @@ fi
 # --- Upgrade detection (task 3.4) ---
 if [[ -x "$BIN_PATH" ]]; then
     echo "Detected existing install at $BIN_PATH; upgrading in place."
+fi
+
+# --- v1.4.1 → v2.0.0 config migration (task 11.1) ---
+# v1.4.1 wrote config to $HOME/.config/gemiterm/ on POSIX. v2.0.0 reads from
+# $HOME/gemiterm/. If the old path exists and the new one does not, copy the
+# tree forward. The v1.4.1 directory is left in place as a safety net.
+V14_CONFIG_DIR="$HOME/.config/gemiterm"
+if [[ -d "$V14_CONFIG_DIR" && ! -d "$CONFIG_DIR" ]]; then
+    echo "Detected v1.4.1 config at $V14_CONFIG_DIR; migrating to $CONFIG_DIR"
+    mkdir -p "$CONFIG_DIR"
+    cp -R "$V14_CONFIG_DIR/." "$CONFIG_DIR/"
+    echo "v1.4.1 config copied to $CONFIG_DIR. The original at $V14_CONFIG_DIR is left in place as a backup."
+fi
+
+# --- Package-manager prompt (task 11.2) ---
+# If bun or npm is on PATH, recommend installing via the package manager
+# (npm: `npm i -g gemiterm`; bun: `bun i -g gemiterm`) instead of this
+# binary drop. The prompt is skipped when stdin is not a TTY (e.g. the
+# `curl | bash` one-liner flow runs unattended and must not block).
+if { command -v bun >/dev/null 2>&1 || command -v npm >/dev/null 2>&1; } && [[ -t 0 ]]; then
+    echo ""
+    echo "It is recommended to install via bun or npm package manager."
+    echo "Are you sure you want to continue with binary install? [y/N]"
+    read -r REPLY
+    case "$REPLY" in
+        [yY]|[yY][eE][sS]) ;;
+        *)
+            echo "Aborted. Install via: $(command -v bun >/dev/null 2>&1 && echo 'bun i -g gemiterm' || echo 'npm i -g gemiterm')"
+            exit 0
+            ;;
+    esac
 fi
 
 # --- Resolve release (task 3.5) ---
@@ -134,7 +165,7 @@ cat > "$ENV_SNIPPET" <<'ENVEOF'
 export PATH="$HOME/.local/bin:$PATH"
 ENVEOF
 
-SOURCE_LINE='[[ -f "$HOME/.config/gemiterm/env.sh" ]] && source "$HOME/.config/gemiterm/env.sh"'
+SOURCE_LINE='[[ -f "$HOME/gemiterm/env.sh" ]] && source "$HOME/gemiterm/env.sh"'
 
 if [[ -f "$HOME/.bashrc" ]] && ! grep -qiF 'gemiterm/env.sh' "$HOME/.bashrc"; then
     echo "$SOURCE_LINE" >> "$HOME/.bashrc"
@@ -147,4 +178,4 @@ fi
 export PATH="$INSTALL_DIR:$PATH"
 
 # --- Success (task 3.10) ---
-echo "GemiTerm ${VERSION:-unknown} installed to $BIN_PATH. Run 'gemiterm status' to verify, then 'gemiterm auth' to authenticate. Restart your shell (or 'source ~/.config/gemiterm/env.sh') to pick up the new PATH."
+echo "GemiTerm ${VERSION:-unknown} installed to $BIN_PATH. Run 'gemiterm status' to verify, then 'gemiterm auth' to authenticate. Restart your shell (or 'source ~/gemiterm/env.sh') to pick up the new PATH."

@@ -4,7 +4,9 @@ GemiTerm v1.4.1 shipped a PowerShell installer (`install.ps1` at the repo root) 
 
 The v1.4.1 reference installer at `C:\dev\projects\github\webgemini-cli\install.ps1` (read-only) establishes the v1.4.1 contract: it does a `Invoke-RestMethod` against `api.github.com/repos/expert-vision-software/GemiTerm/releases/latest`, downloads `GemiTerm.exe` from the matched release asset, runs `& $exePath install-browser`, verifies Chromium at `$env:LOCALAPPDATA\ms-playwright\chromium-*\chrome.exe`, and idempotently augments user `PATH` with `$env:LOCALAPPDATA\GemiTerm` (note: **capital G** for the install dir, matching the v1.4.1 directory). Its `--uninstall` path deletes the binary and removes the `PATH` entry but leaves the user's `%APPDATA%\gemiterm\` config dir intact.
 
-Verified by reading `src/infrastructure/path-utils.ts:8-18`: the v2.0.0 binary reads its config from the same `%APPDATA%\gemiterm\` (Windows) and `~/.config/gemiterm/` (POSIX) locations, with the same `GEMITERM_CONFIG_DIR` env-var override. The `.default` marker file and `profiles/<name>/storage_state.json` shape (`path-utils.ts:4-6`) are unchanged. This is what makes the v1.4.1 → v2.0.0 upgrade a true **in-place, no-transform** migration: the config dir keeps working, the install dir keeps the same path, and `install-browser` is idempotent (the 5 unit tests in `tests/services/install-browser-service.test.ts` and 3 in `tests/cli/install-browser-command.test.ts` are the regression gate).
+Verified by reading `src/infrastructure/path-utils.ts:8-18`: the v2.0.0 binary reads its config from the same `%APPDATA%\gemiterm\` (Windows) and `~/gemiterm/` (POSIX) locations, with the same `GEMITERM_CONFIG_DIR` env-var override. The `.default` marker file and `profiles/<name>/storage_state.json` shape (`path-utils.ts:4-6`) are unchanged.
+
+**Path-contract clarification (amended 2026-06-09).** The v1.4.1 Python installer wrote its config to `~/.config/gemiterm/` on every platform (Python `src/gemiterm/config.py:14` returns `Path.home() / ".config/gemiterm"` and has no Windows branch). v2.0.0 reads from `%APPDATA%\gemiterm\` on Windows and `~/gemiterm/` on POSIX — neither of which matches the v1.4.1 path on Windows. The v1.4.1 → v2.0.0 upgrade is therefore **not** a pure in-place upgrade on Windows (and would not be on POSIX either, since the new path drops the `.config` intermediary). The installer performs a **one-time copy-forward** of the v1.4.1 tree to the v2.0.0 location; the v1.4.1 directory is left in place as a safety net. This is the migration promise the installer makes. `install-browser` is idempotent (the 5 unit tests in `tests/services/install-browser-service.test.ts` and 3 in `tests/cli/install-browser-command.test.ts` are the regression gate).
 
 Constraints:
 - **PowerShell Core 7+** for `install.ps1`; the v1.4.1 script was Windows PowerShell 5-only syntax. The v2 script must use PowerShell Core syntax (e.g. `Split-Path -Parent $PSCommandPath` for self-locating) because GitHub Actions Windows runners ship only `pwsh`.
@@ -21,7 +23,7 @@ Stakeholders: end users (install/upgrade/uninstall), maintainer (releases), secu
 **Goals:**
 - Ship `install.ps1` (PowerShell Core) and `install.sh` (POSIX bash) at the repo root that install, upgrade, and uninstall GemiTerm v2.0.0.
 - Mirror the v1.4.1 contract for the **directory and asset names** (`$env:LOCALAPPDATA\GemiTerm\GemiTerm.exe`, `~/.local/bin/gemiterm`) so existing `PATH` entries and shell history keep working across the upgrade.
-- Preserve v1.4.1 user data on upgrade: `%APPDATA%\gemiterm\` (Windows) and `~/.config/gemiterm/` (POSIX) are never deleted by the installer.
+- Preserve v1.4.1 user data on upgrade: `%APPDATA%\gemiterm\` (Windows) and `~/gemiterm/` (POSIX) are never deleted by the installer. The v1.4.1 source dir (`~/.config/gemiterm/`) is copied forward on first v2.0.0 install and left in place as a safety net.
 - Make `PATH` augmentation **idempotent** on both platforms (no duplicate entries, case-insensitive comparison on Windows).
 - Support tag override for canary/R installs (`-Tag v2.0.0-rc.1` for PowerShell, `GEMITERM_TAG=v2.0.0-rc.1` for bash).
 - Run `gemiterm install-browser` as part of install; fail loud if Chromium is not verified after the install-browser step.
@@ -50,7 +52,7 @@ Each script is hand-written for its target shell. They share the **contract** (w
 
 ### D2. `~/.local/bin/gemiterm` on Linux/WSL, not `/usr/local/bin` or `~/bin`
 
-`~/.local/bin` is the XDG user-dir standard (`XDG_BIN_HOME` per the XDG Base Directory Specification). It is writable without `sudo` on every modern Linux distro, and is on `PATH` by default on Debian 12+, Ubuntu 23.04+, Fedora 38+, and Arch. On distros where it isn't, the user gets a clear remediation (`export PATH="$HOME/.local/bin:$PATH"` written to `~/.config/gemiterm/env.sh`).
+`~/.local/bin` is the XDG user-dir standard (`XDG_BIN_HOME` per the XDG Base Directory Specification). It is writable without `sudo` on every modern Linux distro, and is on `PATH` by default on Debian 12+, Ubuntu 23.04+, Fedora 38+, and Arch. On distros where it isn't, the user gets a clear remediation (`export PATH="$HOME/.local/bin:$PATH"` written to `~/gemiterm/env.sh`).
 
 - **`/usr/local/bin`**: requires `sudo`, breaks the per-user install model, and surprises users when they uninstall and the file persists.
 - **`~/.bin`**: non-standard; not on `PATH` by default on any major distro.
@@ -61,17 +63,17 @@ The install path is `~/.local/bin/gemiterm` (no extension; the Bun binary has no
 **Alternative considered:** `/opt/gemiterm/gemiterm`. Rejected: requires `sudo` and is unusual for a per-user CLI tool.
 **Alternative considered:** Symlink the binary into `~/.local/bin` from a versioned install dir at `~/.local/share/gemiterm/`. Rejected: complicates the upgrade flow (atomic replace of the binary, vs. a symlink that needs `ln -sf`); a single binary at `~/.local/bin/gemiterm` is the v1.4.1-equivalent shape.
 
-### D3. Shell snippet at `~/.config/gemiterm/env.sh` sourced from `~/.bashrc`, not a symlink in `PATH`
+### D3. Shell snippet at `~/gemiterm/env.sh` sourced from `~/.bashrc`, not a symlink in `PATH`
 
 After installing to `~/.local/bin/gemiterm`, the binary is on `PATH` for **new shell sessions** but not for the **current** shell. Two ways to make it discoverable in the current shell:
 
 1. **Symlink** approach: `install.sh` would put the binary in `~/.local/bin/gemiterm` and the user's shell would pick it up the next time they open a terminal. No current-shell update.
-2. **Shell snippet** approach: `install.sh` writes a 1-line `export PATH="$HOME/.local/bin:$PATH"` to `~/.config/gemiterm/env.sh` and appends `[[ -f ~/.config/gemiterm/env.sh ]] && source ~/.config/gemiterm/env.sh` to `~/.bashrc` (and `~/.zshrc` if present). The user can `source ~/.config/gemiterm/env.sh` in the current shell for an immediate update.
+2. **Shell snippet** approach: `install.sh` writes a 1-line `export PATH="$HOME/.local/bin:$PATH"` to `~/gemiterm/env.sh` and appends `[[ -f ~/gemiterm/env.sh ]] && source ~/gemiterm/env.sh` to `~/.bashrc` (and `~/.zshrc` if present). The user can `source ~/gemiterm/env.sh` in the current shell for an immediate update.
 
 The shell-snippet approach is chosen because:
-- **Discoverability**: `~/.config/gemiterm/env.sh` is owned by GemiTerm; the user can `cat` it and see exactly what GemiTerm added to their shell environment. A symlink in `PATH` is invisible.
+- **Discoverability**: `~/gemiterm/env.sh` is owned by GemiTerm; the user can `cat` it and see exactly what GemiTerm added to their shell environment. A symlink in `PATH` is invisible.
 - **Idempotency**: appending a `source` line to `~/.bashrc` is a one-liner that's easy to check for duplication. A symlink farm is harder to audit.
-- **Per-user isolation**: `~/.config/gemiterm/` is the same XDG-config root the v2.0.0 binary uses for its own data. Co-locating the env snippet in the config dir means `gemiterm config-dir` (if added later) prints a path the user already understands.
+- **Per-user isolation**: `~/gemiterm/` is the same root the v2.0.0 binary uses for its own data (profiles, cookies, `.default` marker). Co-locating the env snippet in the config dir means `gemiterm config-dir` (if added later) prints a path the user already understands.
 
 The snippet is **only** appended if the line is not already present (case-insensitive substring check). The uninstall flow removes the snippet and the `source` line.
 
@@ -80,7 +82,7 @@ The snippet is **only** appended if the line is not already present (case-insens
 
 ### D4. Upgrade flow is "overwrite in place" — never "uninstall then install"
 
-The v1.4.1 → v2.0.0 upgrade must not touch the config dir. The binary at `$env:LOCALAPPDATA\GemiTerm\GemiTerm.exe` (Windows) or `~/.local/bin/gemiterm` (POSIX) is replaced atomically (write to a `.new` sibling, then `Move-Item -Force` / `mv` to overwrite). The config dir at `%APPDATA%\gemiterm\` (Windows) or `~/.config/gemiterm/` (POSIX) is left untouched. `install-browser` is idempotent: re-running it on a system that already has Chromium is a no-op (verified by reading the 5 unit tests in `tests/services/install-browser-service.test.ts`).
+The v1.4.1 → v2.0.0 upgrade must not touch the v2.0.0 config dir. The binary at `$env:LOCALAPPDATA\GemiTerm\GemiTerm.exe` (Windows) or `~/.local/bin/gemiterm` (POSIX) is replaced atomically (write to a `.new` sibling, then `Move-Item -Force` / `mv` to overwrite). The v2.0.0 config dir at `%APPDATA%\gemiterm\` (Windows) or `~/gemiterm/` (POSIX) is left untouched. **If the v1.4.1 config dir at `~/.config/gemiterm/` exists and the v2.0.0 dir does not, the installer copies the v1.4.1 tree forward to the v2.0.0 location and leaves the v1.4.1 dir in place as a safety net.** `install-browser` is idempotent: re-running it on a system that already has Chromium is a no-op (verified by reading the 5 unit tests in `tests/services/install-browser-service.test.ts`).
 
 The "Detected existing install at …; upgrading in place." message tells the user this is a v1.4.1 → v2.0.0 (or v2.x → v2.y) upgrade, **not** a fresh install, and that their data is preserved. This matches the v1.4.1 installer's behavior of always overwriting in place (the v1.4.1 script has no uninstall step on upgrade — it just downloads and overwrites).
 
@@ -144,6 +146,34 @@ The `install-browser` step itself is non-deterministic in duration (~100 MB Chro
 **Alternative considered:** Skip the verification and trust `install-browser`'s exit code. Rejected: `install-browser` can exit 0 on a partial install (e.g. network blip during download) and the user discovers the failure on first `gemiterm auth`. The glob check is cheap (a single directory traversal) and gives a clear "Chromium not found" error.
 **Alternative considered:** Bundle Chromium with the binary. Rejected: the v1.4.1 model (download on first install via Playwright) is established and works; bundling doubles the release asset size and breaks the Playwright upgrade path.
 
+### D10. v1.4.1 config copy-forward (Windows + POSIX)
+
+The v1.4.1 Python installer wrote its config to `~/.config/gemiterm/` on every platform. v2.0.0 reads from `%APPDATA%\gemiterm\` (Windows) or `~/gemiterm/` (POSIX). On Windows these are two different directories (`%USERPROFILE%\.config\gemiterm\` vs `%APPDATA%\gemiterm\`); on POSIX the new path drops the `.config` intermediary. A naive "overwrite in place" upgrade would leave the user with cookies in the old path and a v2.0.0 binary that does not see them.
+
+The installer therefore performs a **one-time copy-forward**: if `~/.config/gemiterm/` exists and the v2.0.0 target dir does not, copy the tree forward. The v1.4.1 source dir is left in place as a safety net. The copy is non-destructive on both sides:
+- The v1.4.1 dir is never read again by v2.0.0; the user can `rm -rf` it after verifying `gemiterm status` shows the expected profiles.
+- The v2.0.0 dir is never overwritten by the copy; if the user has already created v2.0.0 profiles manually, those are preserved.
+
+**Alternative considered:** Symbolic link from the v2.0.0 location to the v1.4.1 location. Rejected: a symlink in the user's config dir is a one-off hack that does not generalize (e.g. a v2.0.0 → v2.0.0-rc.1 test would write to the symlink target, polluting the v1.4.1 dir). A copy is the cleanest, and the v1.4.1 dir is small (< 50 KB per profile).
+**Alternative considered:** Print a "your v1.4.1 config is at X, please run `gemiterm migrate` to copy it" message and require the user to run a second command. Rejected: the user already has to run the installer; making them run a second command is hostile. The copy is idempotent and re-runnable; if the v2.0.0 dir already exists, the copy is a no-op.
+
+### D11. Package-manager install prompt (added 2026-06-09)
+
+Both `install.ps1` and `install.sh` detect whether `bun` or `npm` is on `PATH`. If either is present, the installer prints:
+
+```
+It is recommended to install via bun or npm package manager.
+Are you sure you want to continue with binary install? [y/N]
+```
+
+The default is **N**. The user must type `y` or `yes` to proceed with the binary drop. If the user declines, the installer prints `Aborted. Install via: bun i -g gemiterm` (or `npm i -g gemiterm`, whichever is on PATH) and exits 0. If stdin is not a TTY (the `irm | iex` and `curl | bash` one-liners are unattended), the prompt is suppressed and the installer proceeds.
+
+The rationale: gemiterm will be published to npm as `gemiterm`; the package-manager install is the cleaner long-term path because it gives the user a normal `npm update -g gemiterm` / `bun update -g gemiterm` upgrade story. The binary-drop installer is the bootstrap path for users who don't yet have Node.js / Bun. The prompt nudges the user toward the package manager without blocking them.
+
+**Alternative considered:** Hard-fail if a package manager is on PATH. Rejected: too aggressive. The binary install is legitimate for air-gapped installs, CI environments with no Node.js, and users who explicitly want the binary. A prompt is the right balance.
+**Alternative considered:** Always print the package-manager hint as informational text and proceed with the binary. Rejected: passive text is easy to ignore; a `y/N` prompt forces a conscious decision.
+**Alternative considered:** Detect `winget` / `brew` / `apt` and recommend those instead. Rejected: the maintainer does not ship to those channels in v2.0.0 (per the design's "Non-Goals" list); bun/npm is the only first-party package manager install.
+
 ## Risks / Trade-offs
 
 - **Risk:** The installer reaches the network (`api.github.com`, `objects.githubusercontent.com`); an offline install is impossible. → **Mitigation:** document the "build from source" fallback in `docs/INSTALL.md`. The fallback uses `git clone` + `bun run build` and produces the same `GemiTerm.exe` / `GemiTerm` artifact. The installer also prints a clear "Cannot reach GitHub releases. Check your network connection or use the 'build from source' instructions in docs/INSTALL.md." message on network failure.
@@ -156,7 +186,7 @@ The `install-browser` step itself is non-deterministic in duration (~100 MB Chro
 
 - **Risk:** The Windows binary is unsigned. A MITM on `releases/download/...` could substitute a malicious binary. → **Mitigation:** TLS only (`Invoke-WebRequest` / `curl -fSL` enforce HTTPS); pin the release tag (not a floating "latest" URL on the download step — only the API step resolves "latest"). Future: code-signing is in the deferred work list (see `cross-platform-build-and-ci/design.md:41`).
 
-- **Risk:** A v1.4.1 user with a corrupted `%APPDATA%\gemiterm\` may want to start fresh, but the installer never deletes the config dir. → **Mitigation:** `docs/INSTALL.md` documents the manual cleanup path ("`rmdir /s /q %APPDATA%\gemiterm`" on Windows, "`rm -rf ~/.config/gemiterm`" on POSIX). The installer itself is intentionally non-destructive to the config dir.
+- **Risk:** A v1.4.1 user with a corrupted `%APPDATA%\gemiterm\` (or `~/gemiterm/`) may want to start fresh, but the installer never deletes the config dir. → **Mitigation:** `docs/INSTALL.md` documents the manual cleanup path ("`rmdir /s /q %APPDATA%\gemiterm`" on Windows, "`rm -rf ~/gemiterm`" on POSIX). The installer itself is intentionally non-destructive to the v2.0.0 config dir. The v1.4.1 source dir at `~/.config/gemiterm/` is left in place as a safety net; the user can `rm -rf` it after verifying the migration.
 
 - **Risk:** The `~/.bashrc` append is bash-only; fish and nushell users won't pick up the `PATH` change. → **Mitigation:** the `docs/INSTALL.md` troubleshooting section calls out "fish/nushell: add `set -gx PATH ~/.local/bin $PATH` to your config.fish / `~/.config/nushell/config.nu`". Out of scope to write per-shell snippets.
 
@@ -200,7 +230,7 @@ The change is purely additive — new files at the repo root, one new doc, one R
 
 - **Q4:** Should `install.sh` also `chmod +x` the binary explicitly, or trust the `mv` from the temp file to preserve the executable bit? **Decision:** explicit `chmod +x`. The temp-file write may not preserve the bit (depends on the `umask`), and the user-facing command is `gemiterm`, not `./gemiterm` — a non-executable binary is a confusing failure.
 
-- **Q5:** Should the uninstall flow also remove the `~/.config/gemiterm/env.sh` snippet, or leave it for the user to clean up? **Decision:** remove it. The env snippet is owned by the install (not by the user), and leaving it on uninstall is a half-state that confuses re-installs. The config dir (`profiles/`, `.default`) is **not** removed.
+- **Q5:** Should the uninstall flow also remove the `~/gemiterm/env.sh` snippet, or leave it for the user to clean up? **Decision:** remove it. The env snippet is owned by the install (not by the user), and leaving it on uninstall is a half-state that confuses re-installs. The config dir (`profiles/`, `.default`) is **not** removed.
 
 - **Q6:** Should the PowerShell uninstall also revoke the persistent `PATH` change in the Windows registry (`HKCU\Environment`), or only the current session's `PATH`? **Decision:** revoke the persistent change via `[Environment]::SetEnvironmentVariable('Path', $newPath, 'User')` — this is the registry write. The v1.4.1 uninstall did this and the v2.0.0 uninstall must match.
 

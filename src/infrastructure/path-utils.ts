@@ -15,7 +15,7 @@ function _getConfigDir(): string {
     if (appData) return join(appData, "gemiterm");
   }
 
-  return join(homedir(), ".config", "gemiterm");
+  return join(homedir(), "gemiterm");
 }
 
 function resolvePath(...parts: string[]): string {

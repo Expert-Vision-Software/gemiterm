@@ -16,9 +16,19 @@ irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/
 curl -fsSL https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.sh | bash
 ```
 
+> **Recommended install via package manager.** If you have `bun` or `npm` on PATH, the installer will detect it and prompt: "It is recommended to install via bun or npm package manager. Are you sure you want to continue with binary install?" Answer `y` to proceed with the binary drop, or install via:
+> - `bun i -g gemiterm`
+> - `npm i -g gemiterm`
+>
+> The prompt is suppressed when stdin is not a TTY (e.g. the `curl | bash` one-liner flow), so unattended installs proceed.
+
 ## Upgrade from v1.4.1
 
-Your profiles, cookies, and default-profile marker are preserved. The installer replaces the binary in place; it does **NOT** touch `%APPDATA%\gemiterm\` (Windows) or `~/.config/gemiterm/` (POSIX). This is verified by the path-resolution logic in `src/infrastructure/path-utils.ts` — the v2.0.0 binary reads from the same config directory that v1.4.1 wrote to.
+Your profiles, cookies, and default-profile marker are preserved. The installer replaces the binary in place; it does **NOT** touch `%APPDATA%\gemiterm\` (Windows) or `~/gemiterm/` (POSIX). This is verified by the path-resolution logic in `src/infrastructure/path-utils.ts` — the v2.0.0 binary reads from the same config directory that v1.4.1 wrote to.
+
+On Windows, the v1.4.1 Python config lived at `%USERPROFILE%\.config\gemiterm\` (Python's `Path.home() / ".config/gemiterm"` has no Windows branch). When the installer detects a v1.4.1 config at that path and no v2.0.0 config at `%APPDATA%\gemiterm\`, it copies the tree forward automatically. The v1.4.1 directory is left in place as a safety net — you can delete it manually after verifying the migration.
+
+On POSIX, the v1.4.1 Python config lived at `~/.config/gemiterm/`. v2.0.0 reads from `~/gemiterm/`. The installer performs the same one-time copy-forward when it detects the old path.
 
 If you have the Python v1.4.1 version installed via `pip`, the installer will detect it and ask you to run `pip uninstall gemiterm` first. Your config data is safe and will be preserved through the uninstall/reinstall cycle.
 
@@ -43,7 +53,7 @@ Uninstall removes the binary and PATH entry but **preserves** your config direct
 | Path | Windows | Linux / WSL |
 |------|---------|-------------|
 | **Binary** | `$env:LOCALAPPDATA\GemiTerm\GemiTerm.exe` | `~/.local/bin/gemiterm` |
-| **Config** | `%APPDATA%\gemiterm\` | `~/.config/gemiterm/` |
+| **Config** | `%APPDATA%\gemiterm\` | `~/gemiterm/` |
 | **Chromium cache** | `$env:LOCALAPPDATA\ms-playwright\` | `~/.cache/ms-playwright/` |
 
 > **Note:** On Windows, the install directory is **capital G** (`GemiTerm`) while the config directory is **lowercase** (`gemiterm`). This matches the v1.4.1 convention and is intentional.
@@ -96,7 +106,7 @@ Or open a new terminal.
 **Linux / WSL** — source the env snippet:
 
 ```bash
-source ~/.config/gemiterm/env.sh
+source ~/gemiterm/env.sh
 gemiterm --version
 ```
 

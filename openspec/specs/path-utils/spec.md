@@ -35,7 +35,7 @@ The system MUST export a `getConfigDir()` function. The function MUST first chec
 - **THEN** `getConfigDir()` returns `"/override/path"`
 
 ### Requirement: getConfigDir Platform Default
-When `GEMITERM_CONFIG_DIR` is unset, `getConfigDir()` MUST return a platform-appropriate default: on `process.platform === "win32"` with `APPDATA` set it MUST return `<APPDATA>/gemiterm`; on Windows without `APPDATA` and on `linux` / `darwin` it MUST return `<homedir>/.config/gemiterm`.
+When `GEMITERM_CONFIG_DIR` is unset, `getConfigDir()` MUST return a platform-appropriate default: on `process.platform === "win32"` with `APPDATA` set it MUST return `<APPDATA>/gemiterm`; on Windows without `APPDATA` and on `linux` / `darwin` it MUST return `<homedir>/gemiterm` (no `.config` intermediary).
 
 #### Scenario: Windows with APPDATA
 - **WHEN** the env override is unset, `process.platform === "win32"`, and `APPDATA` is set
@@ -43,15 +43,15 @@ When `GEMITERM_CONFIG_DIR` is unset, `getConfigDir()` MUST return a platform-app
 
 #### Scenario: Windows without APPDATA
 - **WHEN** the env override is unset, `process.platform === "win32"`, and `APPDATA` is not set
-- **THEN** `getConfigDir()` returns `<homedir>/.config/gemiterm`
+- **THEN** `getConfigDir()` returns `<homedir>/gemiterm`
 
 #### Scenario: Linux
 - **WHEN** the env override is unset and `process.platform === "linux"`
-- **THEN** `getConfigDir()` returns `<homedir>/.config/gemiterm`
+- **THEN** `getConfigDir()` returns `<homedir>/gemiterm`
 
 #### Scenario: macOS
 - **WHEN** the env override is unset and `process.platform === "darwin"`
-- **THEN** `getConfigDir()` returns `<homedir>/.config/gemiterm`
+- **THEN** `getConfigDir()` returns `<homedir>/gemiterm`
 
 ### Requirement: getProfilesDir
 The system MUST export a `getProfilesDir()` function that returns `<configDir>/profiles`, where `configDir` is the result of `getConfigDir()`. The function MUST always return the same result on a given invocation as `path.join(getConfigDir(), "profiles")`.
