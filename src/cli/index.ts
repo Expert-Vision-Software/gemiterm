@@ -63,7 +63,7 @@ function parseGlobalFlags(args: string[]): { flags: GlobalFlags; remaining: stri
   return { flags, remaining };
 }
 
-function setupMediator(mediator: Mediator): ProfileAuthManager {
+async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
   const logger = new Logger("mediator");
   const cookieStorage = new CookieStorage();
   const profileManager = new ProfileManager(cookieStorage);
@@ -108,6 +108,7 @@ function setupMediator(mediator: Mediator): ProfileAuthManager {
   }
 
   const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, cookieStorageService);
+  try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
   const profileAuthManager = new ProfileAuthManager({ profileManager, cookieStorageService, logger, geminiClient: factoryClient });
 
   mediator.registerQueryHandler(new GetAuthStatusQueryHandler(profileQueryService));
@@ -179,7 +180,7 @@ async function main(): Promise<void> {
   }
 
   const mediator = new Mediator();
-  const profileAuthManager = setupMediator(mediator);
+  const profileAuthManager = await setupMediator(mediator);
 
   const subcommand = remaining[0];
   const subcommandArgs = remaining.slice(1);
