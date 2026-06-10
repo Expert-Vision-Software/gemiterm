@@ -72,13 +72,14 @@ jobs:
       - name: Verify binary
         run: Test-Path dist/gemiterm.exe
       - name: Fail if binary < 20MB
+        shell: pwsh
         run: |
           $size = (Get-Item dist/gemiterm.exe).Length
           $minsize = 20 * 1024 * 1024
           if ($size -lt $minsize) {
             Write-Host "Binary too small: $size bytes (expected at least 20MB)"
             exit 1
-          fi
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: GemiTerm-windows
