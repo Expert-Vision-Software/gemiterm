@@ -21,6 +21,10 @@ on:
         description: 'Whether to create the release as a draft'
         type: string
         default: 'false'
+      prerelease:
+        description: 'Whether to mark the release as a pre-release'
+        type: string
+        default: 'true'
 
 concurrency:
   group: release
@@ -103,26 +107,34 @@ jobs:
           path: dist
       - name: Make Linux binary executable
         run: chmod +x dist/gemiterm
+      - name: Extract CHANGELOG entry for release
+        run: |
+          TAG="${{ inputs.tag_name }}"
+          VERSION="${TAG#v}"
+          sed -n "/## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '$ d' > release_body.md
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag_name }}
-          generate_release_notes: true
+          body_path: release_body.md
           draft: ${{ inputs.draft == 'true' }}
+          prerelease: ${{ inputs.prerelease == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload Linux binary
         run: |
-          gh release upload '${{ inputs.tag_name }}' dist/gemiterm \
-            --name 'GemiTerm' \
-            --label 'GemiTerm ${{ inputs.tag_name }} — Linux x64 binary'
+          TAG="${{ inputs.tag_name }}"
+          gh release upload "$TAG" dist/gemiterm --clobber
+          ASSET_ID=$(gh release view "$TAG" --json assets -q '.assets[] | select(.name == "gemiterm") | .id')
+          gh api -X PATCH /repos/${{ github.repository }}/releases/assets/$ASSET_ID -f name='GemiTerm' -f label="GemiTerm $TAG - Linux x64 binary"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload Windows binary
         run: |
-          gh release upload '${{ inputs.tag_name }}' dist/gemiterm.exe \
-            --name 'GemiTerm' \
-            --label 'GemiTerm ${{ inputs.tag_name }} — Windows x64 binary'
+          TAG="${{ inputs.tag_name }}"
+          gh release upload "$TAG" dist/gemiterm.exe --clobber
+          ASSET_ID=$(gh release view "$TAG" --json assets -q '.assets[] | select(.name == "gemiterm.exe") | .id')
+          gh api -X PATCH /repos/${{ github.repository }}/releases/assets/$ASSET_ID -f name='GemiTerm' -f label="GemiTerm $TAG - Windows x64 binary"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

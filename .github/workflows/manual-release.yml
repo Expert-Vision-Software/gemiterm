@@ -12,6 +12,11 @@ on:
         required: true
         type: boolean
         default: true
+      pre_release:
+        description: 'Mark as pre-release'
+        required: true
+        type: boolean
+        default: true
       publish:
         description: 'Publish to npm (DANGEROUS — only enable if you mean it)'
         required: true
@@ -26,3 +31,4 @@ jobs:
       tag_name: manual-${{ inputs.ref }}-${{ github.run_id }}
       publish: ${{ inputs.publish }}
       draft: ${{ inputs.draft }}
+      prerelease: ${{ inputs.pre_release }}
