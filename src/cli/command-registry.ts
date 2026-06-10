@@ -11,6 +11,7 @@ import { DeleteCommand } from "./commands/delete-command.ts";
 import { ExportCommand } from "./commands/export-command.ts";
 import { ExportAllCommand } from "./commands/export-all-command.ts";
 import { InstallBrowserCommand } from "./commands/install-browser-command.ts";
+import { InstallSkillsCommand } from "./commands/install-skills-command.ts";
 
 export interface CliCommandContext {
   verbose: boolean;
@@ -58,5 +59,6 @@ export class CommandRegistry {
     this.register("export", new ExportCommand());
     this.register("export-all", new ExportAllCommand());
     this.register("install-browser", new InstallBrowserCommand());
+    this.register("install-skills", new InstallSkillsCommand());
   }
 }
