@@ -124,17 +124,25 @@ jobs:
       - name: Upload Linux binary
         run: |
           TAG="${{ inputs.tag_name }}"
-          gh release upload "$TAG" dist/gemiterm --clobber
+          gh release upload "$TAG" dist/gemiterm --clobber || true
           ASSET_ID=$(gh release view "$TAG" --json assets -q '.assets[] | select(.name == "gemiterm") | .id')
-          gh api -X PATCH /repos/${{ github.repository }}/releases/assets/$ASSET_ID -f name='GemiTerm' -f label="GemiTerm $TAG - Linux x64 binary"
+          if [[ -n "$ASSET_ID" ]]; then
+            gh api -X PATCH /repos/${{ github.repository }}/releases/assets/$ASSET_ID \
+              -f name='GemiTerm' \
+              -f label="GemiTerm $TAG - Linux x64 binary" || true
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload Windows binary
         run: |
           TAG="${{ inputs.tag_name }}"
-          gh release upload "$TAG" dist/gemiterm.exe --clobber
+          gh release upload "$TAG" dist/gemiterm.exe --clobber || true
           ASSET_ID=$(gh release view "$TAG" --json assets -q '.assets[] | select(.name == "gemiterm.exe") | .id')
-          gh api -X PATCH /repos/${{ github.repository }}/releases/assets/$ASSET_ID -f name='GemiTerm' -f label="GemiTerm $TAG - Windows x64 binary"
+          if [[ -n "$ASSET_ID" ]]; then
+            gh api -X PATCH /repos/${{ github.repository }}/releases/assets/$ASSET_ID \
+              -f name='GemiTerm' \
+              -f label="GemiTerm $TAG - Windows x64 binary" || true
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

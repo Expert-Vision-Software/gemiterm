@@ -8,9 +8,18 @@ const shPath = resolve(root, "install.sh");
 
 describe("installer script shape", () => {
   test("install.ps1 parses without errors", () => {
-    const hasPwsh = spawnSync("pwsh", ["-NoProfile", "-Command", "exit 0"], {
-      timeout: 5000,
-    });
+    let hasPwsh;
+    try {
+      hasPwsh = spawnSync("pwsh", ["-NoProfile", "-Command", "exit 0"], {
+        timeout: 5000,
+      });
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        console.log("Skipping install.ps1 parse test: pwsh not found on PATH");
+        return;
+      }
+      throw err;
+    }
 
     if (hasPwsh.status !== 0) {
       console.log("Skipping install.ps1 parse test: pwsh not found on PATH");
