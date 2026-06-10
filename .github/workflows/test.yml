@@ -24,5 +24,6 @@ jobs:
         run: |
           ! grep -rn --include='*.ts' "from \"node:\\(fs\\|path\\|os\\)\"" src/ \
             | grep -v "src/infrastructure/path-utils.ts" \
+            | grep -v "src/infrastructure/io.ts" \
             | grep -v "src/services/install-browser-service.ts" \
             | grep -q .
