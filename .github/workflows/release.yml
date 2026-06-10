@@ -108,17 +108,39 @@ jobs:
       - name: Make Linux binary executable
         run: chmod +x dist/gemiterm
       - name: Extract CHANGELOG entry for release
+        id: changelog
         run: |
-          TAG="${{ inputs.tag_name || github.ref_name }}"
-          VERSION="${TAG#v}"
-          sed -n "/## \[$VERSION\]/,/^## \[/p" CHANGELOG.md | sed '$ d' > release_body.md
+          node -e "
+            const version = '${TAG}'.replace(/^v/, '');
+            const fs = require('fs');
+            const content = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const sections = content.split(/(?=^## )/m);
+            let found = false;
+            let notes = '';
+            for (const section of sections) {
+              const m = section.match(/^## \[([^\]]+)\].*?-\s*(\d{4}-\d{2}-\d{2})/s);
+              if (m && m[1].replace(/^v/, '') === version) {
+                notes = section.replace(/^## \[[^\]]+\].*?-\s*\d{4}-\d{2}-\d{2}\n/, '').trim();
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              console.error('No changelog section found for version:', version);
+              process.exit(1);
+            }
+            fs.writeFileSync('release_body.md', notes);
+            console.log('Extracted', notes.split('\n').length, 'lines for version', version);
+          "
+        env:
+          TAG: ${{ inputs.tag_name || github.ref_name }}
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag_name || github.ref_name }}
           body_path: release_body.md
-          draft: ${{ inputs.draft == 'true' }}
-          prerelease: ${{ inputs.prerelease == 'true' }}
+          draft: false
+          prerelease: ${{ contains(inputs.tag_name || github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload Linux binary
