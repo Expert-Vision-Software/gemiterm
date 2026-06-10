@@ -109,11 +109,28 @@ jobs:
           tag_name: ${{ inputs.tag_name }}
           generate_release_notes: true
           draft: ${{ inputs.draft == 'true' }}
-          files: |
-            dist/gemiterm
-            dist/gemiterm.exe
-            install.sh
-            install.ps1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Linux binary
+        run: |
+          gh release upload '${{ inputs.tag_name }}' dist/gemiterm \
+            --name 'GemiTerm' \
+            --label 'GemiTerm ${{ inputs.tag_name }} — Linux x64 binary'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Windows binary
+        run: |
+          gh release upload '${{ inputs.tag_name }}' dist/gemiterm.exe \
+            --name 'GemiTerm' \
+            --label 'GemiTerm ${{ inputs.tag_name }} — Windows x64 binary'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload installer scripts
+        run: |
+          gh release upload '${{ inputs.tag_name }}' install.sh \
+            --label 'Linux/macOS installer script'
+          gh release upload '${{ inputs.tag_name }}' install.ps1 \
+            --label 'Windows installer script'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

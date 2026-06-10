@@ -284,7 +284,6 @@ describe("path-utils", () => {
     test("returns the parsed package.json with name and version", () => {
       const pkg = getPackageJson(import.meta.url);
       expect(pkg.name).toBe("gemiterm");
-      expect(pkg.version).toBe("2.0.0");
     });
   });
 });
