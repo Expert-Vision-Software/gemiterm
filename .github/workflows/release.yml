@@ -125,14 +125,7 @@ jobs:
             --label 'GemiTerm ${{ inputs.tag_name }} — Windows x64 binary'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload installer scripts
-        run: |
-          gh release upload '${{ inputs.tag_name }}' install.sh \
-            --label 'Linux/macOS installer script'
-          gh release upload '${{ inputs.tag_name }}' install.ps1 \
-            --label 'Windows installer script'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   publish:
     name: Publish to npm

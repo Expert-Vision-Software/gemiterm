@@ -154,9 +154,9 @@ if (-not $release -or -not $release.assets) {
     exit 1
 }
 
-$asset = $release.assets | Where-Object { $_.name -eq 'GemiTerm.exe' }
+$asset = $release.assets | Where-Object { $_.name -eq 'gemiterm.exe' }
 if (-not $asset) {
-    Write-Host "No GemiTerm.exe asset found in release."
+    Write-Host "No gemiterm.exe asset found in release."
     exit 1
 }
 

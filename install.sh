@@ -141,11 +141,11 @@ RELEASE_JSON=$(curl -fsSL "$API_URL")
 
 ASSET_URL=$(echo "$RELEASE_JSON" | grep -oE '"browser_download_url":"[^"]*"' \
     | sed 's/"browser_download_url":"//;s/"$//' \
-    | grep -E '/GemiTerm$' \
+    | grep -E '/gemiterm$' \
     | head -n 1)
 
 if [[ -z "$ASSET_URL" ]]; then
-    echo "No GemiTerm binary asset found in release."
+    echo "No gemiterm binary asset found in release."
     echo "Build from source:"
     echo "  git clone https://github.com/$REPO.git && cd GemiTerm && bun install && bun run build"
     exit 1
