@@ -3,13 +3,13 @@
 import { CommandRegistry } from "./command-registry.ts";
 import { Logger } from "../infrastructure/logger.ts";
 import { Mediator } from "../core/mediator.ts";
-import { showHelp } from "./commands/help.ts";
 import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import { CookieStorageService } from "../services/cookie-storage-service.ts";
 import { ProfileAuthManager } from "../services/profile-auth-manager.ts";
 import { CookieStorage, ProfileManager } from "../infrastructure/storage.ts";
-import { getDefaultProfileName, listProfiles, ensureConfigDir } from "../infrastructure/config.ts";
+import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts";
 import { getPackageJson } from "../infrastructure/path-utils.ts";
+import { parseGlobalArgs, printVersion, printHelp } from "../infrastructure/cli-parser.ts";
 import { AuthenticationError } from "../core/errors.ts";
 import {
   AuthenticateCommandHandler,
@@ -29,39 +29,6 @@ import {
 } from "../core/query-handlers.ts";
 
 const pkg = getPackageJson(import.meta.url);
-
-interface GlobalFlags {
-  verbose: boolean;
-  version: boolean;
-  help: boolean;
-}
-
-function parseGlobalFlags(args: string[]): { flags: GlobalFlags; remaining: string[] } {
-  const flags: GlobalFlags = {
-    verbose: process.env.GEMITERM_VERBOSE === "true",
-    version: false,
-    help: false,
-  };
-  const remaining: string[] = [];
-
-  for (const arg of args) {
-    if (arg === "--verbose" || arg === "-v") {
-      flags.verbose = true;
-    } else if (arg === "--version") {
-      flags.version = true;
-    } else if (arg === "--help" || arg === "-h") {
-      if (remaining.length === 0) {
-        flags.help = true;
-      } else {
-        remaining.push(arg);
-      }
-    } else {
-      remaining.push(arg);
-    }
-  }
-
-  return { flags, remaining };
-}
 
 async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
   const logger = new Logger("mediator");
@@ -159,30 +126,38 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const logger = new Logger("cli");
-  const { flags, remaining } = parseGlobalFlags(args);
 
-  if (flags.verbose) {
+  let flags: ReturnType<typeof parseGlobalArgs>["flags"];
+  let subcommand: string | null;
+  let subcommandArgs: string[];
+  try {
+    ({ flags, subcommand, subcommandArgs } = parseGlobalArgs(args));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    process.exit(1);
+  }
+
+  const verbose = flags.verbose || process.env.GEMITERM_VERBOSE === "true";
+  if (verbose) {
     Logger.setVerbose(true);
   }
 
   if (flags.version) {
-    console.log(`gemiterm v${pkg.version}`);
+    printVersion(pkg.version);
     process.exit(0);
   }
 
   const registry = new CommandRegistry();
   registry.registerAllCommands();
 
-  if (remaining.length === 0) {
-    showHelp(registry);
+  if (!subcommand) {
+    printHelp(registry);
     process.exit(0);
   }
 
   const mediator = new Mediator();
   const profileAuthManager = await setupMediator(mediator);
-
-  const subcommand = remaining[0];
-  const subcommandArgs = remaining.slice(1);
 
   const handler = registry.getHandler(subcommand);
   if (!handler) {
@@ -198,7 +173,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    await handler.execute(subcommandArgs, { verbose: flags.verbose, mediator, profileAuthManager });
+    await handler.execute(subcommandArgs, { verbose, mediator, profileAuthManager });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Command '${subcommand}' failed: ${message}`);

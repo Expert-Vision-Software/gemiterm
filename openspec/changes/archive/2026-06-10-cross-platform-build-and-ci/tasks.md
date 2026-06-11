@@ -143,7 +143,7 @@
 
 - [x] 14.1 Remove the orphan file literally named `{` at the repo root.
 - [x] 14.2 Edit `.gitignore:23` and remove the bare `{` line. Leave a blank line for readability.
-- [x] 14.3 In `package.json`, remove the `"commander": "^15.0.0"` entry. Run `bun install` to regenerate `bun.lock` and confirm `commander` is no longer listed.
+- [x] 14.3 In `package.json`, remove the `"commander": "^15.0.0"` entry. Run `bun install` to regenerate `bun.lock` and confirm `commander` is no longer listed. **Superseded by `commander-cli-parser` (2026-06-11)**: `commander@^15.0.0` is now an active runtime dependency wrapped by `src/infrastructure/cli-parser.ts`; it must NOT be removed.
 - [x] 14.4 Remove the `src/commands/` directory and its `.gitkeep` file.
 - [x] 14.5 Run `git status` and confirm only the intended files are staged.
 
