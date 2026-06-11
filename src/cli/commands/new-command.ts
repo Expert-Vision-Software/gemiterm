@@ -8,6 +8,7 @@ import {
   type StartNewChatCommandResult,
 } from "../../core/command-handlers.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
+import { checkArgLength } from "../utils/long-arg-guard.ts";
 
 interface NewCommandOptions {
   help: boolean;
@@ -45,6 +46,11 @@ export class NewCommand implements CliCommand {
     const mediator: Mediator = context.mediator;
 
     if (message) {
+      const guard = checkArgLength(message);
+      if (!guard.safe) {
+        console.error(chalk.red(`Error: ${guard.suggestion}`));
+        process.exit(1);
+      }
       await this.sendNonInteractive(mediator, message, options.profile, logger);
     } else {
       await this.startInteractive(mediator, options.profile, logger);
