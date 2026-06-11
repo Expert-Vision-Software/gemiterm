@@ -218,7 +218,7 @@ gemiterm -v <command>
 
 ## Skills
 
-GemiTerm has an associated skills repository for AI coding agents (Copilot, Claude, etc.) that provides domain-specific instructions for working with **gemiterm** and automating common workflows. There's also a fun `debate-with-gemini` skill that created an interactive turn-based conversation between your agent and gemini. See [opencode-gemiterm-skills](https://github.com/Expert-Vision-Software/opencode-gemiterm-skills).
+GemiTerm has an associated skills repository for AI coding agents (Copilot, Claude, etc.) that provides domain-specific instructions for working with **gemiterm** and automating common workflows. There's also a fun `debate-with-gemini` skill that created an interactive turn-based conversation between your agent and gemini. See [opencode-gemiterm-skills](https://www.npmjs.com/package/opencode-gemiterm-skills).
 
 ## Configuration
 
