@@ -78,6 +78,7 @@ describe("long-arg-guard (bunx Windows 2048 UTF-16 code unit limit)", () => {
       if (!result.safe) {
         expect(result.suggestion.toLowerCase()).toContain("stdin");
         expect(result.suggestion).toContain("--prompt-file");
+        expect(result.suggestion).not.toContain("if available for your gemiterm version");
       }
     });
 

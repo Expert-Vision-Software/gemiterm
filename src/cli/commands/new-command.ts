@@ -9,15 +9,18 @@ import {
 } from "../../core/command-handlers.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 import { checkArgLength } from "../utils/long-arg-guard.ts";
+import { loadPromptFromFile } from "../utils/prompt-file.ts";
 
 interface NewCommandOptions {
   help: boolean;
   profile: string | null;
+  promptFile: string | null;
 }
 
 const DEFAULT_OPTIONS: NewCommandOptions = {
   help: false,
   profile: null,
+  promptFile: null,
 };
 
 export class NewCommand implements CliCommand {
@@ -38,18 +41,39 @@ export class NewCommand implements CliCommand {
     for (const arg of args) {
       if (arg.startsWith("--") || arg.startsWith("-")) continue;
       if (options.profile && arg === options.profile) continue;
+      if (options.promptFile && arg === options.promptFile) continue;
       if (!message) {
         message = arg;
+      }
+    }
+
+    if (options.promptFile) {
+      if (message) {
+        console.error(
+          chalk.red(
+            `Error: cannot use --prompt-file together with a positional message argument. ` +
+              `Use one or the other, not both.`,
+          ),
+        );
+        process.exit(1);
+      }
+      try {
+        message = await loadPromptFromFile(options.promptFile);
+      } catch (err) {
+        console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+        process.exit(1);
       }
     }
 
     const mediator: Mediator = context.mediator;
 
     if (message) {
-      const guard = checkArgLength(message);
-      if (!guard.safe) {
-        console.error(chalk.red(`Error: ${guard.suggestion}`));
-        process.exit(1);
+      if (!options.promptFile) {
+        const guard = checkArgLength(message);
+        if (!guard.safe) {
+          console.error(chalk.red(`Error: ${guard.suggestion}`));
+          process.exit(1);
+        }
       }
       await this.sendNonInteractive(mediator, message, options.profile, logger);
     } else {
@@ -127,6 +151,15 @@ export class NewCommand implements CliCommand {
           console.error(chalk.red(`Error: --profile requires a profile name`));
           process.exit(1);
         }
+      } else if (arg === "--prompt-file" || arg === "-f") {
+        const next = args[i + 1];
+        if (next && !next.startsWith("-")) {
+          options.promptFile = next;
+          i++;
+        } else {
+          console.error(chalk.red(`Error: --prompt-file requires a path`));
+          process.exit(1);
+        }
       }
     }
 
@@ -144,6 +177,9 @@ export class NewCommand implements CliCommand {
     console.log(chalk.bold("Options:"));
     console.log(
       `  ${chalk.cyan("--profile, -p <name>".padEnd(22))}${chalk.dim("Use a specific profile (default profile used if omitted)")}`,
+    );
+    console.log(
+      `  ${chalk.cyan("--prompt-file, -f <path>".padEnd(22))}${chalk.dim("Read the message from a file (bypasses the 2048 code unit arg limit)")}`,
     );
     console.log(`  ${chalk.cyan("--help, -h".padEnd(22))}${chalk.dim("Show this help message")}`);
     console.log("");

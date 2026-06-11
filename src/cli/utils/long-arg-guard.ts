@@ -19,7 +19,7 @@ export function checkArgLength(arg: string): LongArgGuardResult {
       `code unit limit imposed by Bun's Windows process spawn path (appendWindowsArgument in ` +
       `Bun's run_command.zig panics with "index out of bounds" when this limit is exceeded). ` +
       `Pipe the message via stdin (e.g. \`echo "..." | gemiterm new\`) or save it to a file and ` +
-      `pass it with \`--prompt-file <path>\` (if available for your gemiterm version).`,
+      `pass it with \`--prompt-file <path>\`.`,
   };
 }
 
