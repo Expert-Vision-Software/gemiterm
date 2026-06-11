@@ -23,10 +23,10 @@
 
 ## 5. Verify
 
-- [ ] 5.1 Run `bun run test` and confirm the test count is at least 502 (current baseline) + new cli-parser tests. The one pre-existing `Smoke Tests > status runs without crashing` failure remains (unrelated).
-- [ ] 5.2 Run `bun run typecheck` and confirm clean.
-- [ ] 5.3 Run `bun run lint:mediation:ps` and confirm clean (no new `node:fs` / `node:path` / `node:os` imports introduced).
-- [ ] 5.4 Manual smoke: `bun run src/cli/index.ts --version` prints `gemiterm v2.0.0` and exits 0; `bun run src/cli/index.ts --help` prints the existing help screen; `bun run src/cli/index.ts --bogus` exits 1 with a `gemiterm: ...` message; `bun run src/cli/index.ts status` runs the status command end-to-end against `.gemiterm/profiles/default/storage_state.json`.
+- [x] 5.1 Run `bun run test` and confirm the test count is at least 502 (current baseline) + new cli-parser tests. The one pre-existing `Smoke Tests > status runs without crashing` failure remains (unrelated).
+- [x] 5.2 Run `bun run typecheck` and confirm clean.
+- [x] 5.3 Run `bun run lint:mediation:ps` and confirm clean (no new `node:fs` / `node:path` / `node:os` imports introduced).
+- [x] 5.4 Manual smoke: `bun run src/cli/index.ts --version` prints `gemiterm v2.0.0` and exits 0; `bun run src/cli/index.ts --help` prints the existing help screen; `bun run src/cli/index.ts --bogus` exits 1 with a `gemiterm: ...` message; `bun run src/cli/index.ts status` runs the status command end-to-end against `.gemiterm/profiles/default/storage_state.json`.
 
 ## 6. Cross-cutting cleanup
 
