@@ -4,13 +4,37 @@ Access and manage your Gemini web chats from the command line. GemiTerm bridges 
 
 ## Prerequisites
 
-- **[Bun](https://bun.sh)** runtime
+- **[Bun](https://bun.sh)** runtime ≥ 1.0.0
 - **Chromium Browser** — GemiTerm uses your system Chrome/Edge if available, otherwise installs Playwright's Chromium automatically
 - **Google Account** with access to [Gemini](https://gemini.google.com)
 
+## Quick Start (no install)
+
+Use `bunx` to run GemiTerm directly — no install step needed:
+
+```bash
+bunx gemiterm auth          # authenticate with Google
+bunx gemiterm list          # list your chats
+```
+
 ## Installation
 
-See [docs/INSTALL.md](docs/INSTALL.md) for the full guide, uninstall instructions, troubleshooting, and build-from-source steps.
+### Global install (recommended for daily use)
+
+```bash
+bun install gemiterm -g
+```
+
+Then use from anywhere:
+
+```bash
+gemiterm auth
+gemiterm list
+```
+
+### Install scripts (binary drop)
+
+For systems without Bun — the script auto-bootstraps Bun if needed.
 
 **Windows** (PowerShell 7+):
 
@@ -24,14 +48,9 @@ irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/
 curl -fsSL https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.sh | bash
 ```
 
-> **Upgrading from v1.4.1?** Your profiles, cookies, and default profile marker are preserved. The installer replaces the binary in place; it does NOT touch your config dir. See the "Upgrade from v1.4.1" section in [docs/INSTALL.md](docs/INSTALL.md) for details.
+See [docs/INSTALL.md](docs/INSTALL.md) for the full guide, uninstall instructions, troubleshooting, and build-from-source steps.
 
-## Quick Start
-
-```bash
-gemiterm auth          # authenticate with Google
-gemiterm list          # list your chats
-```
+> **Upgrading from v1.4.1?** Your profiles, cookies, and default profile marker are preserved. See the "Upgrade from v1.4.1" section in [docs/INSTALL.md](docs/INSTALL.md) for details.
 
 ## Development
 
@@ -196,6 +215,10 @@ Checks for system Chrome/Edge first, falls back to installing Playwright's Chrom
 ```bash
 gemiterm -v <command>
 ```
+
+## Skills
+
+GemiTerm has an associated skills repository for AI coding agents (Copilot, Claude, etc.) that provides domain-specific instructions for working with **gemiterm** and automating common workflows. There's also a fun `debate-with-gemini` skill that created an interactive turn-based conversation between your agent and gemini. See [opencode-gemiterm-skills](https://www.npmjs.com/package/opencode-gemiterm-skills).
 
 ## Configuration
 

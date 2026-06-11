@@ -1,8 +1,65 @@
 # Installation Guide
 
-The installer scripts are attached to every GitHub release by the `release.yml` workflow. If you see a 404 on the one-liner URL, the release pipeline (owned by the `cross-platform-build-and-ci` change) may not have attached the scripts; check the GitHub release page directly.
+GemiTerm is a Bun-native CLI. The fastest way to get started is `bunx` — no install required.
 
-## Install
+## Quick reference
+
+| Method | Command | When to use |
+|--------|---------|-------------|
+| **Run without install** | `bunx gemiterm <command>` | Quick or occasional use |
+| **Global install** | `bun install gemiterm -g` | Daily use, permanent `gemiterm` on PATH |
+| **Install script** | `irm ... \| iex` / `curl \| bash` | Systems without Bun (Bun is auto-bootstrapped) |
+| **Build from source** | `bun run build` | Development or offline |
+
+---
+
+## Run without install
+
+If you have [Bun](https://bun.sh) installed, use `bunx` to run any command directly:
+
+```bash
+bunx gemiterm auth
+bunx gemiterm list
+bunx gemiterm fetch <conversation_id>
+```
+
+No files are installed — GemiTerm runs from the npm package cache. Ideal for quick or occasional use.
+
+## Global install via Bun
+
+For daily use, install globally so `gemiterm` is always on PATH:
+
+```bash
+bun install gemiterm -g
+```
+
+Then use from anywhere:
+
+```bash
+gemiterm auth
+gemiterm list
+gemiterm status
+```
+
+To update:
+
+```bash
+bun update gemiterm -g
+```
+
+To uninstall:
+
+```bash
+bun remove gemiterm -g
+```
+
+## Install via install scripts
+
+The install scripts download a pre-built standalone binary — **no Bun, Node, or npm required**. Bun is auto-bootstrapped if not found.
+
+> **Note:** If `bun` is on PATH, the installer will prompt recommending `bun install gemiterm -g` or `bunx` instead. Answer `y` to proceed with the binary drop anyway.
+
+The installer scripts are attached to every GitHub release by the `release.yml` workflow. If you see a 404 on the one-liner URL, check the [GitHub release page](https://github.com/Expert-Vision-Software/GemiTerm/releases) directly.
 
 **Windows** (PowerShell 7+):
 
@@ -15,12 +72,6 @@ irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/
 ```bash
 curl -fsSL https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.sh | bash
 ```
-
-> **Recommended install via package manager.** If you have `bun` or `npm` on PATH, the installer will detect it and prompt: "It is recommended to install via bun or npm package manager. Are you sure you want to continue with binary install?" Answer `y` to proceed with the binary drop, or install via:
-> - `bun i -g gemiterm`
-> - `npm i -g gemiterm`
->
-> The prompt is suppressed when stdin is not a TTY (e.g. the `curl | bash` one-liner flow), so unattended installs proceed.
 
 ## Upgrade from v1.4.1
 
