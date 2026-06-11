@@ -48,7 +48,9 @@ export class CommandRegistry {
   }
 
   registerAllCommands(): void {
-    this.register("auth", new AuthCommand());
+    const authCommand = new AuthCommand();
+    this.register("auth", authCommand);
+    this.register("login", authCommand);
     this.register("profile", new ProfileCommand());
     this.register("status", new StatusCommand());
     this.register("list", new ListCommand());

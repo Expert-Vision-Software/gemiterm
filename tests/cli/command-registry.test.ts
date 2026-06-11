@@ -64,4 +64,14 @@ describe("CommandRegistry", () => {
     expect(executeMock).toHaveBeenCalledWith(["--name", "World"], ctx);
     expect(executeMock).toHaveBeenCalledTimes(1);
   });
+
+  test("aliases resolve to the same handler instance", () => {
+    const handler = new FakeCommand("auth", "Authenticate", async () => {});
+    registry.register("auth", handler);
+    registry.register("login", handler);
+
+    expect(registry.getHandler("auth")).toBe(handler);
+    expect(registry.getHandler("login")).toBe(handler);
+    expect(registry.getHandler("auth")).toBe(registry.getHandler("login"));
+  });
 });
