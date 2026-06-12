@@ -4,7 +4,7 @@ This capability defines the interactive prompt loop utility used by CLI chat com
 
 **Status:** TBD
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Interactive prompt loop SHALL support continuous chat sessions
 The interactive prompt loop utility SHALL provide a reusable mechanism for chat commands to engage in continuous back-and-forth conversations with the user until explicitly terminated.

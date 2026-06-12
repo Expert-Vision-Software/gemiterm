@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+This capability defines the cross-platform one-liner installers for GemiTerm: a PowerShell Core 7+ script for Windows and a POSIX bash 3.2+ script for Linux and macOS. Both installers are attached to every GitHub release tagged `v*` in the v2.0.0+ series, download the binary release asset to a per-user install path, install Chromium for Playwright, augment the user `PATH` idempotently, and preserve the user's v1.4.1 config dir on upgrade. The installer scripts are syntax-validated in CI.
+
+## Requirements
 
 ### Requirement: PowerShell Installer Ships With Every v2.0.0+ Release
 The system MUST attach a `install.ps1` script to every GitHub release tagged `v*` that targets the v2.0.0+ series. The `install.ps1` script MUST be a PowerShell Core 7+ script that, when invoked as `irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.ps1 | iex`, downloads the latest `GemiTerm.exe` release asset, installs it to `$env:LOCALAPPDATA\GemiTerm\GemiTerm.exe`, runs `gemiterm install-browser`, verifies Chromium is present, and augments the user `PATH` idempotently.
