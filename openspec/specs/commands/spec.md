@@ -6,19 +6,19 @@ The CLI command layer of the `gemiterm` application. It defines the 11 top-level
 
 ### Requirement: ListCommand
 
-The system MUST provide a `list` command implemented by `ListCommand` in `src/cli/commands/list-command.ts`. The command MUST be registered under the name `list` and MUST send a `ListChatsQuery` to the mediator with a payload of shape `{ limit?, offset?, search?, allProfiles }`. The command MUST support the flags `--limit/-n <N>` (default 10), `--offset <N>` (default 0), `--all` (no limit), `--all-profiles`, `--sort <recent|oldest|alpha>` (default `recent`), `--search/-s <query>`, `--after <date>`, `--before <date>`, `--format/-f <text|json>` (default `text`), and `--path/-p <path>`. When `--all` is not set, the command MUST additionally slice the result set to `[offset, offset + limit)`. The `--all-profiles` flag MUST be propagated into the mediator payload as `allProfiles: true`.
+The system MUST provide a `list` command implemented by `ListCommand` in `src/cli/commands/list-command.ts`. The command MUST be registered under the name `list` and MUST send a `ListChatsQuery` to the mediator with a payload of shape `{ limit?, offset?, search?, allProfiles }`. The command MUST support the flags `--limit/-n <N>` (no default; omitting `--limit` returns every conversation returned by the mediator), `--offset <N>` (default 0), `--all-profiles`, `--sort <recent|oldest|alpha>` (default `recent`), `--search/-s <query>`, `--after <date>`, `--before <date>`, `--format/-f <text|json>` (default `text`), and `--path/-p <path>`. When `--limit N` is supplied, the command MUST additionally slice the result set to `[offset, offset + N)`. When `--limit` is omitted, the command MUST NOT slice; the entire mediator result is rendered. When `--limit` is omitted and `--offset N` is supplied with `N > 0`, the command MUST slice the result set to `[N, ∞)`. The `--all-profiles` flag MUST be propagated into the mediator payload as `allProfiles: true`. The `list` command MUST NOT support a `--all` flag (omitting `--limit` is the canonical way to request every conversation).
 
-#### Scenario: List with no flags sends a default query
+#### Scenario: List with no flags returns all conversations
 - **WHEN** the user runs `gemiterm list`
-- **THEN** the command sends a `ListChatsQuery` to the mediator with `limit: 10`, `offset: 0`, no `search`, and `allProfiles: false`, and renders the result as a 4-column text table (ID / TITLE / DATE / PIN)
+- **THEN** the command sends a `ListChatsQuery` to the mediator with `limit: undefined`, `offset: 0`, no `search`, and `allProfiles: false`, and renders every chat returned by the mediator as a 4-column text table (ID / TITLE / DATE / PIN)
 
 #### Scenario: List with --limit
 - **WHEN** the user runs `gemiterm list --limit 5`
 - **THEN** the mediator payload carries `limit: 5` and at most 5 chats are displayed
 
-#### Scenario: List with --all disables the slice
-- **WHEN** the user runs `gemiterm list --all`
-- **THEN** the mediator payload carries `limit: undefined` and the slice step is skipped (all returned chats are shown)
+#### Scenario: List with --offset and no --limit skips the first N chats
+- **WHEN** the user runs `gemiterm list --offset 20`
+- **THEN** the mediator payload carries `limit: undefined` and `offset: 20`, and the first 20 chats are skipped before display
 
 #### Scenario: List with --all-profiles propagates to mediator
 - **WHEN** the user runs `gemiterm list --all-profiles`
@@ -50,7 +50,11 @@ The system MUST provide a `list` command implemented by `ListCommand` in `src/cl
 
 #### Scenario: List --help shows usage
 - **WHEN** the user runs `gemiterm list --help`
-- **THEN** the output contains `Usage: gemiterm list` and documents every flag above
+- **THEN** the output contains `Usage: gemiterm list` and documents every flag above, and does NOT document a `--all` flag
+
+#### Scenario: List rejects the removed --all flag
+- **WHEN** the user runs `gemiterm list --all`
+- **THEN** the command leaves the `--all` token in `subcommandArgs` and either ignores it (if argv parsing is tolerant) or rejects it; in either case the output is the same as `gemiterm list` with no flags (every conversation rendered)
 
 ### Requirement: ListCommand Text Output Table
 
@@ -63,6 +67,66 @@ The `list` command's default text output MUST be a 4-column table with headers `
 #### Scenario: --all-profiles adds a Profile column to text output
 - **WHEN** the user runs `gemiterm list --all-profiles`
 - **THEN** the rendered text output table contains 5 columns `ID`, `TITLE`, `DATE`, `PIN`, `PROFILE` and each row shows the owning profile name
+
+### Requirement: ListCommand --interactive flag
+
+The `ListCommand` MUST accept an `--interactive/-i` flag. The flag MUST be additive: the existing flag set and the existing default behaviour MUST be preserved. The flag MUST enter the chat-list browser (see the `chat-list-browser` capability) instead of the text-table or JSON output.
+
+#### Scenario: --interactive enters the TUI
+- **WHEN** the user runs `gemiterm list --interactive` on a TTY
+- **THEN** the command enters the chat-list browser
+- **AND** no text table or JSON is written to stdout
+
+#### Scenario: --interactive short flag is equivalent
+- **WHEN** the user runs `gemiterm list -i`
+- **THEN** the command behaves identically to `gemiterm list --interactive`
+
+### Requirement: ListCommand --interactive conflict detection
+
+The `ListCommand` MUST reject combinations of `--interactive` with `--format` or `--path`. The rejection MUST print `Cannot use --interactive with --format or --path.` to stderr and exit with code 1.
+
+#### Scenario: --interactive with --format errors
+- **WHEN** the user runs `gemiterm list -i --format json`
+- **THEN** the command prints `Cannot use --interactive with --format or --path.` to stderr
+- **AND** the process exits with code 1
+
+#### Scenario: --interactive with --path errors
+- **WHEN** the user runs `gemiterm list -i --path out.txt`
+- **THEN** the command prints `Cannot use --interactive with --format or --path.` to stderr
+- **AND** the process exits with code 1
+
+### Requirement: ListCommand --interactive TTY requirement
+
+The `ListCommand` MUST invoke the chat-list browser only when `process.stdin.isTTY === true`. When the flag is set but stdin is not a TTY, the command MUST print a `NonInteractiveError`-derived message containing `gemiterm list -i requires a TTY` and the hint `use --format json for machine-readable output`, and exit with code 1.
+
+#### Scenario: --interactive on a non-TTY errors
+- **WHEN** the user runs `gemiterm list -i` and `process.stdin.isTTY` is not `true`
+- **THEN** the command prints a message containing `gemiterm list -i requires a TTY` and the hint about `--format json`
+- **AND** the process exits with code 1
+
+### Requirement: ListCommand non-interactive byte-equivalence contract
+
+The `ListCommand`'s non-interactive output paths MUST remain byte-equivalent to the pre-change baseline. Specifically:
+- `gemiterm list` (no flags) MUST emit the same 4-column text table (`ID` / `TITLE` / `DATE` / `PIN`).
+- `gemiterm list --format json` MUST emit the same `{ chats: ChatInfo[] }` JSON document.
+- `gemiterm list --search <q>` MUST forward the search term to the mediator.
+- `gemiterm list --sort <mode>` MUST apply the sort.
+- `gemiterm list --limit <N>` / `--offset <N>` MUST apply the limit/offset (the deprecated `--all` flag is no longer recognised — omit `--limit` to get every conversation).
+- `gemiterm list --all-profiles` MUST add the `PROFILE` column.
+- `gemiterm list --after <date>` / `--before <date>` MUST apply the date filter.
+- `gemiterm list --path <p>` MUST write the rendered output to the path and print a confirmation line.
+
+#### Scenario: Default list is the 4-column text table
+- **WHEN** the user runs `gemiterm list` (no flags)
+- **THEN** the output is the same 4-column text table that the pre-change `list` command emitted
+
+#### Scenario: --format json is the same JSON document
+- **WHEN** the user runs `gemiterm list --format json`
+- **THEN** the output is the same `{ chats: ChatInfo[] }` JSON document that the pre-change `list` command emitted
+
+#### Scenario: --help documents --interactive
+- **WHEN** the user runs `gemiterm list --help`
+- **THEN** the output contains a `--interactive, -i` flag description in the existing flag list
 
 ### Requirement: FetchCommand
 
