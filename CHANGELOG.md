@@ -1,3 +1,13 @@
+## [2.1.1] - 2026-06-12
+
+### Added
+
+- Add long argument guard to prevent exceeding Windows command line limit (`24dc109`)
+- Add `--prompt-file` option for `continue` and `new` commands to read messages from files (`2570051`)
+- Implement spillover mechanism for long positional arguments in `continue` and `new` commands (`2c85abb`)
+
+---
+
 ## [2.1.0] - 2026-06-10
 
 ### Added

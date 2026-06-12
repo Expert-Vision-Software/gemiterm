@@ -9,13 +9,18 @@ import {
   type SendMessageCommandResult,
 } from "../../core/command-handlers.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
+import { checkArgLength } from "../utils/long-arg-guard.ts";
+import { loadPromptFromFile, spillOverToTempFile } from "../utils/prompt-file.ts";
+import { removeFile } from "../../infrastructure/io.ts";
 
 interface ContinueCommandOptions {
   help: boolean;
+  promptFile: string | null;
 }
 
 const DEFAULT_OPTIONS: ContinueCommandOptions = {
   help: false,
+  promptFile: null,
 };
 
 export class ContinueCommand implements CliCommand {
@@ -36,6 +41,7 @@ export class ContinueCommand implements CliCommand {
 
     for (const arg of args) {
       if (arg.startsWith("--") || arg.startsWith("-")) continue;
+      if (options.promptFile && arg === options.promptFile) continue;
       if (!conversationId) {
         conversationId = arg;
       } else if (!message) {
@@ -43,9 +49,64 @@ export class ContinueCommand implements CliCommand {
       }
     }
 
+    if (options.promptFile) {
+      if (!conversationId) {
+        console.error(
+          chalk.red(
+            `Error: --prompt-file requires a conversation_id. ` +
+              `Specify a conversation to continue, e.g. \`gemiterm continue <conversation_id> --prompt-file <path>\`.`,
+          ),
+        );
+        process.exit(1);
+      }
+      if (message) {
+        console.error(
+          chalk.red(
+            `Error: cannot use --prompt-file together with a positional message argument. ` +
+              `Use one or the other, not both.`,
+          ),
+        );
+        process.exit(1);
+      }
+    }
+
     if (!conversationId) {
       await this.invokeListCommand(context);
       return;
+    }
+
+    let effectivePromptFile: string | null = null;
+    let isSpillover = false;
+    if (options.promptFile) {
+      effectivePromptFile = options.promptFile;
+    } else if (message) {
+      const guard = checkArgLength(message);
+      if (!guard.safe) {
+        const spilled = await spillOverToTempFile(message);
+        effectivePromptFile = spilled;
+        isSpillover = true;
+        console.log(
+          chalk.dim(
+            `[gemiterm] Message is ${guard.length} UTF-16 code units, exceeding the ${guard.limit} limit. ` +
+              `Spilled to temp file '${spilled}' and loading from there.`,
+          ),
+        );
+      }
+    }
+
+    if (effectivePromptFile) {
+      try {
+        message = await loadPromptFromFile(effectivePromptFile);
+      } catch (err) {
+        console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
+        process.exit(1);
+      }
+      if (isSpillover) {
+        try {
+          removeFile(effectivePromptFile);
+        } catch {
+        }
+      }
     }
 
     const mediator: Mediator = context.mediator;
@@ -128,9 +189,19 @@ export class ContinueCommand implements CliCommand {
   private parseArgs(args: string[]): ContinueCommandOptions {
     const options = { ...DEFAULT_OPTIONS };
 
-    for (const arg of args) {
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
       if (arg === "--help" || arg === "-h") {
         options.help = true;
+      } else if (arg === "--prompt-file" || arg === "-f") {
+        const next = args[i + 1];
+        if (next && !next.startsWith("-")) {
+          options.promptFile = next;
+          i++;
+        } else {
+          console.error(chalk.red(`Error: --prompt-file requires a path`));
+          process.exit(1);
+        }
       }
     }
 
@@ -149,6 +220,9 @@ export class ContinueCommand implements CliCommand {
     );
     console.log("");
     console.log(chalk.bold("Options:"));
+    console.log(
+      `  ${chalk.cyan("--prompt-file, -f <path>".padEnd(22))}${chalk.dim("Read the message from a file (bypasses the 2048 code unit arg limit)")}`,
+    );
     console.log(`  ${chalk.cyan("--help, -h".padEnd(22))}${chalk.dim("Show this help message")}`);
     console.log("");
     console.log(chalk.dim("If no conversation_id is provided, the list command will be invoked."));
