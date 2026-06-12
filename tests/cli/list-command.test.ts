@@ -288,37 +288,6 @@ describe("ListCommand --interactive flag", () => {
     }
   });
 
-  test("--interactive --search pre-fills the filter", async () => {
-    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: true,
-      configurable: true,
-      writable: true,
-    });
-
-    const browserSpy = spyOn(promptsModule, "browser").mockResolvedValue({
-      kind: "quit",
-    } as any);
-
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
-
-    try {
-      await command.execute(["--interactive", "--search", "react"], context);
-      const callArg = browserSpy.mock.calls[0][0] as any;
-      expect(callArg.initialFilter).toBe("react");
-    } finally {
-      if (stdinDescriptor) {
-        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
-      } else {
-        Reflect.deleteProperty(process.stdin, "isTTY");
-      }
-    }
-  });
-
   test("--interactive --sort pre-selects the sort", async () => {
     const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
     Object.defineProperty(process.stdin, "isTTY", {

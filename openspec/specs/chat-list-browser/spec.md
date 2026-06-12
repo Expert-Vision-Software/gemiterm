@@ -1,6 +1,6 @@
 ## Purpose
 
-This capability defines the interactive chat-list browser for the `gemiterm list` command. The browser is an opt-in TUI (entered via `gemiterm list --interactive` or `gemiterm list -i`) that lets a human user navigate their Gemini conversations, sort them interactively, filter them with a live search input, and pick one to view / export / copy. The browser is built on `@inquirer/core`'s `createPrompt` + `useKeypress` primitives, accessed through the `prompts.browser` facade in `src/cli/utils/prompts.ts`. Title rendering goes through the `truncateTitle` helper (see the truncation requirement below).
+This capability defines the interactive chat-list browser for the `gemiterm list` command. The browser is an opt-in TUI (entered via `gemiterm list --interactive` or `gemiterm list -i`) that lets a human user navigate their Gemini conversations, toggle the sort order, narrow the list to a specific profile (or all profiles), narrow the list to favourites only, and pick one to view / export / copy. The browser is built on `@inquirer/core`'s `createPrompt` + `useKeypress` primitives, accessed through the `prompts.browser` facade in `src/cli/utils/prompts.ts`. Title rendering goes through the `truncateTitle` helper (see the truncation requirement below).
 
 **Status:** TBD
 
@@ -64,24 +64,19 @@ The `list` command SHALL accept a `--interactive/-i` flag. When the flag is set,
 - **THEN** the facade throws `NonInteractiveError` whose message contains `gemiterm list -i requires a TTY` and the hint `use --format json for machine-readable output`
 - **AND** the process exits with code 1
 
-#### Scenario: --interactive --search pre-fills the filter
-- **WHEN** the user runs `gemiterm list -i --search "react"`
-- **THEN** the TUI opens with the filter `"react"` already applied
-- **AND** the visible list is narrowed to chats whose title contains `"react"` (case-insensitive)
-
 #### Scenario: --interactive --sort pre-selects the sort
 - **WHEN** the user runs `gemiterm list -i --sort alpha`
 - **THEN** the TUI opens with the list sorted alphabetically by title
 
 ### Requirement: Chat-list browser SHALL display the list with cursor navigation
 
-The browser SHALL render the chat list as a table with the columns `ID`, `DATE`, `TITLE`, and `PIN` (and `PROFILE` when `--all-profiles` is set). The browser SHALL render every filtered row in a single scrollable view (no paging; the entire filtered list is always in the body). The user navigates the list with the `↑` and `↓` arrow keys. A cursor indicator (`> `) SHALL mark the active row; the active row's index MUST be clamped to `[0, filteredSorted.length - 1]` and MUST NOT wrap at the ends. The title bar MUST show the total chat count, the current sort mode, and the current filter. The browser SHALL recognise `/` to open the search input and `s` to open the sort sub-menu.
+The browser SHALL render the chat list as a table with the columns `ID`, `DATE`, `TITLE`, and `PIN` (and `PROFILE` when `--all-profiles` is set). The browser SHALL render every filtered row in a single scrollable view (no paging; the entire filtered list is always in the body). The user navigates the list with the `↑` and `↓` arrow keys. A cursor indicator (`> `) SHALL mark the active row; the active row's index MUST be clamped to `[0, filteredSorted.length - 1]` and MUST NOT wrap at the ends. The title bar MUST show the total chat count, the current sort mode, the current profile filter, and the current favourites state. The browser SHALL recognise `s` to cycle the sort mode, `p` to cycle the profile filter, and `f` to toggle the favourites filter (each described in its own requirement below).
 
 #### Scenario: Browser renders the chat list
 - **WHEN** the browser opens against a mediator returning N chats
 - **THEN** all N chats are visible in the body
 - **AND** the cursor (`> `) marks the first row
-- **AND** the title bar shows the chat count, the sort mode, and the current filter
+- **AND** the title bar shows the chat count, the sort mode, the profile filter, and the favourites state
 
 #### Scenario: Down arrow moves the cursor
 - **WHEN** the user presses `↓`
@@ -97,71 +92,75 @@ The browser SHALL render the chat list as a table with the columns `ID`, `DATE`,
 - **WHEN** the mediator returns an empty `chats` array
 - **THEN** the browser displays `No conversations found.`
 - **AND** the cursor has no row to land on
-- **AND** pressing `enter`, `/`, or `s` is a no-op
+- **AND** pressing `enter` is a no-op
 - **AND** pressing `q` or `esc` resolves the prompt with `{ kind: 'quit' }`
+- **AND** the `s`, `p`, and `f` toggles still function (so the user can recover from a filter combo that produces no matches in the non-empty case)
 
-### Requirement: Chat-list browser SHALL support interactive sorting
+### Requirement: Chat-list browser SHALL cycle the sort mode with `s`
 
-The browser SHALL support an interactive sort sub-menu invoked by pressing `s`. The sub-menu SHALL be a `prompts.select` with three options matching the non-interactive `--sort` flag: `Most recent first` (value `recent`), `Oldest first` (value `oldest`), `Alphabetical` (value `alpha`). The current sort SHALL be marked in the sub-menu prompt.
+Pressing `s` SHALL cycle the sort mode in the order `recent` → `oldest` → `alpha` → `recent`. The current sort mode SHALL be reflected in the title bar. The cursor SHALL remain on the same row index when the sort changes, clamped to the new list length. The cycle SHALL be live: no sub-menu is shown, the list re-renders in place.
 
-#### Scenario: s opens the sort menu
+#### Scenario: s cycles through the three sort modes
+- **WHEN** the user presses `s` repeatedly
+- **THEN** the sort mode cycles `recent` → `oldest` → `alpha` → `recent`, with each press advancing by one step
+
+#### Scenario: s updates the title bar
 - **WHEN** the user presses `s`
-- **THEN** a sub-menu appears titled `Sort by` with the three options
-- **AND** the current sort mode is marked (e.g. `(current: Most recent first)`)
+- **THEN** the title bar reflects the new sort mode (e.g. `Sort: oldest`)
 
-#### Scenario: Selecting a sort mode updates the list
-- **WHEN** the user selects `Oldest first` from the sort menu
-- **THEN** the sub-menu closes
-- **AND** the list re-renders sorted by `timestamp` ascending
-- **AND** the title bar shows `Sort: oldest`
-- **AND** the cursor remains on the same row index (clamped to the new list length)
+#### Scenario: s keeps the cursor on the same row index
+- **WHEN** the user is on row index `i` and presses `s`
+- **THEN** after the re-sort, the cursor is on the new row index `min(i, newLength - 1)`
 
-#### Scenario: Selecting a sort mode keeps the same list
-- **WHEN** the user selects `Alphabetical` and the filter is non-empty
-- **THEN** only the filtered chats are re-sorted
-- **AND** the filter is preserved
+#### Scenario: s works even when the visible list is empty
+- **WHEN** the visible list is empty
+- **THEN** pressing `s` still cycles the sort mode (so the user can prepare a different sort order before turning off a narrowing filter)
 
-#### Scenario: esc closes the sort menu without changing the sort
-- **WHEN** the user presses `esc` while the sort menu is open
-- **THEN** the sub-menu closes
-- **AND** the sort mode is unchanged
+### Requirement: Chat-list browser SHALL cycle the profile filter with `p`
 
-### Requirement: Chat-list browser SHALL support interactive filtering
+Pressing `p` SHALL cycle the profile filter through the values `["all", ...uniqueProfileNames]`, where `uniqueProfileNames` is the deduplicated list of `chat.profile` values found in the input chats, in the order they first appear. The default initial value SHALL be `all`. The cycle SHALL wrap: pressing `p` on the last profile returns to `all`. The current profile filter SHALL be reflected in the title bar. When the cycle has only one element (`all` — i.e. no chat has a `profile` field), `p` SHALL be a no-op. The `p` key SHALL work even when the visible list is empty, so the user can recover from a filter combination that produced no matches.
 
-The browser SHALL support a live filter input invoked by pressing `/`. The filter SHALL be a substring match (case-insensitive) against `chat.title`. As the user types, the visible list narrows in real time. Pressing `enter` applies the filter and returns to browse mode. Pressing `esc` clears the filter and returns to browse mode with the full list.
+#### Scenario: p cycles through all and each profile
+- **WHEN** the user has chats from `work` and `personal` profiles
+- **THEN** pressing `p` advances the profile filter through `all` → `work` → `personal` → `all`
 
-#### Scenario: / opens the search input
-- **WHEN** the user presses `/`
-- **THEN** a search input appears below the message line with the placeholder `Search…`
-- **AND** the cursor moves into the search input
+#### Scenario: p narrows the visible list to the selected profile
+- **WHEN** the profile filter is set to a specific profile name
+- **THEN** the visible list is restricted to chats whose `chat.profile` matches that name
 
-#### Scenario: Typing narrows the list
-- **WHEN** the user types `react` in the search input
-- **THEN** the visible list narrows to chats whose `title` contains `react` (case-insensitive)
-- **AND** the narrowing happens on every keystroke
+#### Scenario: p wraps from the last profile back to all
+- **WHEN** the profile filter is on the last profile in the cycle
+- **THEN** pressing `p` returns the filter to `all`
 
-#### Scenario: No matches shows the empty filter message
-- **WHEN** the user types `xyzzy` in the search input and no chats match
-- **THEN** the visible list shows `No matches`
-- **AND** pressing `enter` is a no-op (the empty filter does not resolve the prompt)
-- **AND** pressing `esc` clears the filter
+#### Scenario: p is a no-op when no chats have a profile field
+- **WHEN** none of the input chats have a `profile` field
+- **THEN** the cycle is `["all"]` and pressing `p` keeps the filter at `all`
 
-#### Scenario: enter applies the filter
-- **WHEN** the user types `react` and presses `enter`
-- **THEN** the search input closes
-- **AND** the list remains narrowed to chats whose title contains `react`
-- **AND** the cursor is positioned on the first visible row
+#### Scenario: p works even when the visible list is empty
+- **WHEN** the visible list is empty (e.g. favourites-only is on and the chosen profile has no pinned chats)
+- **THEN** pressing `p` still cycles the profile filter, allowing the user to widen the filter
 
-#### Scenario: esc clears the filter
-- **WHEN** the user presses `esc` while the search input is focused
-- **THEN** the search input closes
-- **AND** the search term is discarded
-- **AND** the visible list is restored to the pre-filter state
+### Requirement: Chat-list browser SHALL toggle the favourites filter with `f`
 
-#### Scenario: Empty filter shows the full list
-- **WHEN** the user types and then deletes all characters, leaving the search input empty
-- **THEN** the visible list shows the full unfiltered list
-- **AND** the `No matches` message is not shown
+Pressing `f` SHALL toggle the favourites filter on and off. When on, the visible list SHALL be restricted to chats where `chat.isPinned === true`. When off, the favourites restriction SHALL be removed. The current favourites state SHALL be reflected in the title bar. The toggle SHALL work even when the visible list is empty, so the user can recover from a filter combination that produced no matches.
+
+#### Scenario: f toggles favourites filter on and off
+- **WHEN** the user presses `f` once
+- **THEN** the favourites filter turns on and the visible list narrows to pinned chats
+- **WHEN** the user presses `f` again
+- **THEN** the favourites filter turns off and the visible list is restored
+
+#### Scenario: f updates the title bar
+- **WHEN** the user presses `f`
+- **THEN** the title bar reflects the new favourites state (e.g. `Favorites: on`)
+
+#### Scenario: f combines with the profile filter
+- **WHEN** the profile filter is set to a specific profile and the favourites filter is on
+- **THEN** the visible list contains only chats from that profile that are also pinned
+
+#### Scenario: f works even when the visible list is empty
+- **WHEN** the visible list is empty because the favourites filter is on and no chats are pinned
+- **THEN** pressing `f` still toggles the filter off, restoring the full list
 
 ### Requirement: Chat-list browser SHALL show an action menu after a chat is picked
 

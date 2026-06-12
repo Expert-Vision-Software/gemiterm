@@ -156,7 +156,6 @@ export class ListCommand implements CliCommand {
     while (true) {
       const result = await browser({
         chats,
-        initialFilter: options.search || undefined,
         initialSort: options.sort,
       });
       if (result.kind === "quit") return;

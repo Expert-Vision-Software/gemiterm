@@ -14,6 +14,18 @@ const SAMPLE_CHATS: ChatInfo[] = [
   { id: "ghi", title: "Bun runtime", isPinned: false, timestamp: 1716900000000 },
 ];
 
+const SAMPLE_CHATS_WITH_PROFILES: ChatInfo[] = [
+  { id: "w1", title: "Work spec", isPinned: true, timestamp: 1717000000000, profile: "work" },
+  { id: "p1", title: "Personal note", isPinned: false, timestamp: 1717100000000, profile: "personal" },
+  { id: "w2", title: "Work review", isPinned: false, timestamp: 1716900000000, profile: "work" },
+  { id: "p2", title: "Personal list", isPinned: true, timestamp: 1716800000000, profile: "personal" },
+];
+
+const SAMPLE_CHATS_NO_PINNED: ChatInfo[] = [
+  { id: "u1", title: "Unpinned one", isPinned: false, timestamp: 1717000000000 },
+  { id: "u2", title: "Unpinned two", isPinned: false, timestamp: 1716900000000 },
+];
+
 const LONG_TITLE = "a".repeat(80);
 
 describe("browser prompt", () => {
@@ -49,36 +61,121 @@ describe("browser prompt", () => {
     expect(after).not.toContain("> def");
   });
 
-  test("/ opens the search input, typing fills it, Enter narrows the list", async () => {
+  test("s cycles through the three sort options (recent → oldest → alpha → recent)", async () => {
     const { events, getScreen } = await render(browserPrompt, { chats: SAMPLE_CHATS });
 
-    events.keypress("/");
-    for (const ch of "React") {
-      events.keypress(ch);
-    }
-
-    const searchScreen = getScreen();
-    expect(searchScreen).toContain("Search:");
-    expect(searchScreen).toContain("React");
-
-    events.keypress({ name: "enter" });
-
-    const narrowed = getScreen();
-    expect(narrowed).toContain("React hooks");
-    expect(narrowed).not.toContain("TypeScript types");
-    expect(narrowed).not.toContain("Bun runtime");
-  });
-
-  test("s opens the sort menu with three options", async () => {
-    const { events, getScreen } = await render(browserPrompt, { chats: SAMPLE_CHATS });
+    expect(getScreen()).toContain("Sort: recent");
 
     events.keypress("s");
+    expect(getScreen()).toContain("Sort: oldest");
+
+    events.keypress("s");
+    expect(getScreen()).toContain("Sort: alpha");
+
+    events.keypress("s");
+    expect(getScreen()).toContain("Sort: recent");
+  });
+
+  test("s keeps the cursor on the same row index when sort changes (clamped to new list length)", async () => {
+    const { events, getScreen } = await render(browserPrompt, { chats: SAMPLE_CHATS });
+
+    events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> abc");
+
+    events.keypress("s");
+    expect(getScreen()).toContain("Sort: oldest");
+    expect(getScreen()).toContain("> abc");
+  });
+
+  test("p cycles through profile filter (all → work → personal → all)", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: SAMPLE_CHATS_WITH_PROFILES,
+    });
+
+    expect(getScreen()).toContain("Profile: all");
+
+    events.keypress("p");
+    expect(getScreen()).toContain("Profile: work");
+    expect(getScreen()).not.toContain("Personal note");
+
+    events.keypress("p");
+    expect(getScreen()).toContain("Profile: personal");
+    expect(getScreen()).not.toContain("Work spec");
+    expect(getScreen()).not.toContain("Work review");
+
+    events.keypress("p");
+    expect(getScreen()).toContain("Profile: all");
+  });
+
+  test("p is a no-op when no chats have a profile", async () => {
+    const { events, getScreen } = await render(browserPrompt, { chats: SAMPLE_CHATS });
+
+    events.keypress("p");
+
+    expect(getScreen()).toContain("Profile: all");
+    expect(getScreen()).toContain("React hooks");
+    expect(getScreen()).toContain("TypeScript types");
+    expect(getScreen()).toContain("Bun runtime");
+  });
+
+  test("f toggles favorites filter on and off", async () => {
+    const { events, getScreen } = await render(browserPrompt, { chats: SAMPLE_CHATS });
+
+    expect(getScreen()).toContain("Favorites: off");
+    expect(getScreen()).toContain("React hooks");
+
+    events.keypress("f");
+    expect(getScreen()).toContain("Favorites: on");
+    expect(getScreen()).toContain("React hooks");
+    expect(getScreen()).not.toContain("TypeScript types");
+    expect(getScreen()).not.toContain("Bun runtime");
+
+    events.keypress("f");
+    expect(getScreen()).toContain("Favorites: off");
+    expect(getScreen()).toContain("TypeScript types");
+    expect(getScreen()).toContain("Bun runtime");
+  });
+
+  test("f and p work even when the visible list is empty (recovery from bad combo)", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: SAMPLE_CHATS_NO_PINNED,
+    });
+
+    events.keypress("f");
+    expect(getScreen()).toContain("Favorites: on");
+    expect(getScreen()).toContain("No conversations found");
+
+    events.keypress("f");
+    expect(getScreen()).toContain("Favorites: off");
+    expect(getScreen()).toContain("Unpinned one");
+    expect(getScreen()).toContain("Unpinned two");
+  });
+
+  test("p is a no-op when no profile filter narrows the list (single-profile data)", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: SAMPLE_CHATS_NO_PINNED,
+    });
+
+    events.keypress("p");
+    expect(getScreen()).toContain("Profile: all");
+    expect(getScreen()).toContain("Unpinned one");
+  });
+
+  test("p and f combine: work + favorites shows only pinned work chats", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: SAMPLE_CHATS_WITH_PROFILES,
+    });
+
+    events.keypress("p");
+    events.keypress("f");
 
     const screen = getScreen();
-    expect(screen).toContain("Sort:");
-    expect(screen).toContain("(1) recent");
-    expect(screen).toContain("(2) oldest");
-    expect(screen).toContain("(3) alpha");
+    expect(screen).toContain("Profile: work");
+    expect(screen).toContain("Favorites: on");
+    expect(screen).toContain("Work spec");
+    expect(screen).not.toContain("Work review");
+    expect(screen).not.toContain("Personal note");
+    expect(screen).not.toContain("Personal list");
   });
 
   test("enter on a chat resolves with kind: 'pick' and the active chat", async () => {

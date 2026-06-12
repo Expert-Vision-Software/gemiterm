@@ -14,7 +14,6 @@ import {
   isUpKey,
   isDownKey,
   isEnterKey,
-  isBackspaceKey,
   AbortPromptError,
   ExitPromptError,
 } from "@inquirer/core";
@@ -166,7 +165,6 @@ export type BrowserResult =
 
 export interface BrowserConfig {
   chats: ReadonlyArray<ChatInfo>;
-  initialFilter?: string;
   initialSort?: "recent" | "oldest" | "alpha";
 }
 
@@ -183,21 +181,27 @@ export function truncateTitle(title: string): string {
 
 export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
   (config, done) => {
-    const [mode, setMode] = useState<"browse" | "search" | "sort">("browse");
-    const [filter, setFilter] = useState<string>(config.initialFilter ?? "");
     const [sort, setSort] = useState<"recent" | "oldest" | "alpha">(
       config.initialSort ?? "recent",
     );
+    const [profileFilter, setProfileFilter] = useState<"all" | string>("all");
+    const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
     const [active, setActive] = useState<number>(0);
-    const [searchInput, setSearchInput] = useState<string>(
-      config.initialFilter ?? "",
-    );
+
+    const profileNames = useMemo(() => {
+      const seen = new Set<string>();
+      for (const c of config.chats) {
+        if (c.profile) seen.add(c.profile);
+      }
+      return Array.from(seen);
+    }, [config.chats]);
 
     const filteredSorted = useMemo(() => {
-      const needle = filter.toLowerCase();
-      const filtered = config.chats.filter((c) =>
-        c.title.toLowerCase().includes(needle),
-      );
+      const filtered = config.chats.filter((c) => {
+        if (profileFilter !== "all" && c.profile !== profileFilter) return false;
+        if (favoritesOnly && !c.isPinned) return false;
+        return true;
+      });
       const sorted = [...filtered];
       switch (sort) {
         case "recent":
@@ -211,45 +215,37 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
           break;
       }
       return sorted;
-    }, [config.chats, filter, sort]);
+    }, [config.chats, sort, profileFilter, favoritesOnly]);
 
     useKeypress((key) => {
+      if (key.name === "s") {
+        const next =
+          sort === "recent" ? "oldest" : sort === "oldest" ? "alpha" : "recent";
+        setSort(next);
+        return;
+      }
+
+      if (key.name === "p") {
+        const cycle = ["all", ...profileNames];
+        if (cycle.length === 0) {
+          setProfileFilter("all");
+        } else {
+          const currentIndex = cycle.indexOf(profileFilter);
+          const nextIndex = (currentIndex + 1) % cycle.length;
+          setProfileFilter(cycle[nextIndex] ?? "all");
+        }
+        return;
+      }
+
+      if (key.name === "f") {
+        setFavoritesOnly(!favoritesOnly);
+        return;
+      }
+
       const total = filteredSorted.length;
 
-      if (mode === "search") {
-        if (isEnterKey(key)) {
-          setFilter(searchInput);
-          setMode("browse");
-        } else if (key.name === "escape") {
-          setSearchInput("");
-          setFilter("");
-          setMode("browse");
-        } else if (isBackspaceKey(key)) {
-          setSearchInput(searchInput.slice(0, -1));
-        } else if (key.name.length === 1 && !key.ctrl) {
-          setSearchInput(searchInput + key.name);
-        }
-        return;
-      }
-
-      if (mode === "sort") {
-        if (key.name === "escape") {
-          setMode("browse");
-        } else if (key.name === "1") {
-          setSort("recent");
-          setMode("browse");
-        } else if (key.name === "2") {
-          setSort("oldest");
-          setMode("browse");
-        } else if (key.name === "3") {
-          setSort("alpha");
-          setMode("browse");
-        }
-        return;
-      }
-
       if (total === 0) {
-        if (isEnterKey(key) || key.name === "q" || key.name === "escape") {
+        if (key.name === "q" || key.name === "escape") {
           done({ kind: "quit" });
         }
         return;
@@ -277,24 +273,13 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
         setActive(Math.min(total - 1, active + 1));
         return;
       }
-
-      if (key.name === "s") {
-        setMode("sort");
-        return;
-      }
-
-      if (key.name === "/") {
-        setSearchInput(filter);
-        setMode("search");
-        return;
-      }
     });
 
     const titleBar = chalk.bold(
-      `Browse conversations (${filteredSorted.length} chats | Sort: ${sort} | Filter: ${filter || "none"})`,
+      `Browse conversations (${filteredSorted.length} chats | Sort: ${sort} | Profile: ${profileFilter} | Favorites: ${favoritesOnly ? "on" : "off"})`,
     );
     const hintLine = chalk.dim(
-      "↑↓ navigate · / filter · s sort · enter pick · q quit",
+      "↑↓ navigate · s sort · p profile · f favorites · enter pick · q quit",
     );
 
     const renderRow = (item: ChatInfo, isActive: boolean): string => {
@@ -311,18 +296,11 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       .map((chat, i) => renderRow(chat, i === safeActive))
       .join("\n");
 
-    let top = titleBar;
-    if (mode === "search") {
-      top = `${top}\nSearch: ${searchInput}_`;
-    } else if (mode === "sort") {
-      top = `${top}\nSort: (1) recent  (2) oldest  (3) alpha  (esc cancel)`;
-    }
-
     if (filteredSorted.length === 0) {
-      return [`${top}\nNo conversations found.`, hintLine];
+      return [`${titleBar}\nNo conversations found.`, hintLine];
     }
 
-    return [`${top}\n${rows}`, hintLine];
+    return [`${titleBar}\n${rows}`, hintLine];
   },
 );
 
