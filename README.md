@@ -7,12 +7,12 @@
 [![npm version](https://img.shields.io/npm/v/gemiterm?color=cb3837&label=npm)](https://www.npmjs.com/package/gemiterm)
 [![Bun](https://img.shields.io/badge/Runtime-Bun-f9f1e1?logo=bun&logoColor=black)](https://bun.sh)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)](LICENSE.md)
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20macOS-6366f1)](#installation)
 
 **List · Search · Export · Continue · Debate · Automate**
 
-[Quick Start](#quick-start) · [Features](#features) · [Cross-Agent Debates](#cross-agent-debates-with-gemini) · [Commands](#commands) · [Configuration](#configuration) · [Architecture](#architecture)
+[Quick Start](#quick-start) · [Features](#features) · [Cross-Agent Debates](#cross-agent-debates-with-gemini) · [Commands](#commands) · [Configuration](#configuration) · [Contributing](#contributing) · [Acknowledgements](#acknowledgments)
 
 </div>
 
@@ -320,73 +320,9 @@ Upgrading from v1.4.1 keeps these paths and files unchanged.
 | --- | --- | --- |
 | `GEMITERM_CONFIG_DIR` | Override the configuration directory | Platform default |
 
-## Architecture
-
-```
-src/
-  cli/             # entrypoint, command registry, per-command files, REPL helpers
-  core/            # Mediator (CQRS), typed Command/Query messages, handlers, domain types
-  services/        # business logic: auth, cookie management, Gemini client, skills installer
-  infrastructure/  # config, I/O, logging, formatters, validators, path utilities
-tests/
-  cli/             # CLI command tests
-  core/            # query-handler tests
-  services/        # service-layer tests
-  infrastructure/  # infrastructure tests
-  fixtures/        # shared test fixtures
-```
-
-The core uses a **Mediator (CQRS)** pattern: CLI handlers send typed `Command` and `Query` messages to a central mediator, which routes them to registered handlers. This decouples the CLI from the business logic, keeps each command testable in isolation, and makes new commands cheap to add.
-
-Authentication is driven by a [`@playwright/cli`](https://www.npmjs.com/package/@playwright/cli) subprocess. A JS probe polls the page for Google's sign-out link, and cookies are persisted locally for 7 days.
-
-## Development
-
-```bash
-bun install
-bun run dev              # run the CLI in dev mode
-bun test                 # full test suite
-bun run test:unit        # unit tests only
-bun run test:integration # integration tests only
-bun run typecheck        # tsc --noEmit
-bun run lint:mediation   # path-mediation lint (enforces the I/O boundary)
-```
-
-For Chromium installation on different platforms, use the platform-specific wrappers:
-
-```bash
-bash scripts/install-browser.sh   # Linux / macOS
-pwsh scripts/install-browser.ps1  # Windows
-```
-
-## Building from source
-
-GemiTerm requires **[Bun](https://bun.sh) ≥ 1.3.13** to build.
-
-```bash
-bun run build            # native binary for the current OS (dist/gemiterm or dist/gemiterm.exe)
-bun run build:linux      # cross-compile to bun-linux-x64
-bun run build:windows    # cross-compile to bun-windows-x64
-bun run build:release    # minified host-target build
-```
-
-Output paths:
-
-- **Linux / macOS:** `dist/gemiterm`
-- **Windows:** `dist/gemiterm.exe`
-
-### Release artifacts
-
-Each GitHub release ships:
-
-- `GemiTerm` — Linux x64 binary
-- `GemiTerm.exe` — Windows x64 binary
-- `install.sh` — POSIX installer script
-- `install.ps1` — Windows PowerShell installer script
-
 ## Contributing
 
-Issues and PRs are welcome. The full agent guide — including the path-mediation rules, the sensitive auth files to be careful with, and the OpenSpec workflow — lives in [`AGENTS.md`](AGENTS.md).
+Architecture, development workflow, build instructions, and contribution guidelines live in **[CONTRIBUTING.md](CONTRIBUTING.md)**. The agent guide — including the path-mediation rules, the sensitive auth files, and the OpenSpec workflow — lives in **[AGENTS.md](AGENTS.md)**.
 
 ## Acknowledgments
 
@@ -398,4 +334,4 @@ Issues and PRs are welcome. The full agent guide — including the path-mediatio
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE.md)
