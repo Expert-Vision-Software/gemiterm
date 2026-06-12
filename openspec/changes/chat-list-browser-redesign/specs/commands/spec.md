@@ -43,7 +43,7 @@ The `ListCommand`'s non-interactive output paths MUST remain byte-equivalent to 
 - `gemiterm list --format json` MUST emit the same `{ chats: ChatInfo[] }` JSON document.
 - `gemiterm list --search <q>` MUST forward the search term to the mediator.
 - `gemiterm list --sort <mode>` MUST apply the sort.
-- `gemiterm list --limit <N>` / `--offset <N>` / `--all` MUST apply the pagination.
+- `gemiterm list --limit <N>` / `--offset <N>` MUST apply the limit/offset (the deprecated `--all` flag is no longer recognised — omit `--limit` to get every conversation).
 - `gemiterm list --all-profiles` MUST add the `PROFILE` column.
 - `gemiterm list --after <date>` / `--before <date>` MUST apply the date filter.
 - `gemiterm list --path <p>` MUST write the rendered output to the path and print a confirmation line.

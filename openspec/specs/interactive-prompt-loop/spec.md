@@ -6,7 +6,7 @@ TBD
 
 ### Requirement: Interactive prompt loop SHALL require a TTY
 
-The interactive prompt loop SHALL refuse to start when `process.stdin.isTTY` is not `true`. The loop SHALL throw a `NonInteractiveError` immediately, before constructing the readline interface or invoking the first prompt.
+The interactive prompt loop SHALL refuse to start when `process.stdin.isTTY` is not `true`. The loop SHALL throw a `NonInteractiveError` immediately, before invoking the first prompt.
 
 #### Scenario: REPL invoked from a TTY
 - **WHEN** `gemiterm new` (no args, no `--prompt-file`) is invoked with `process.stdin.isTTY === true`
