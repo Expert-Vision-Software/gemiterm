@@ -141,59 +141,36 @@ describe("NewCommand with long-arg guard", () => {
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
-  test("message of 2049 ASCII chars does not crash and exits with a clear error", async () => {
+  test("message of 2049 ASCII chars spills to a temp file and is sent", async () => {
     const arg = "a".repeat(2049);
-    let thrown: Error | null = null;
-    try {
-      await command.execute([arg], context);
-    } catch (e) {
-      thrown = e as Error;
-    }
-    expect(thrown).not.toBeNull();
-    expect(thrown?.message).toBe("__exit__:1");
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(sendSpy).not.toHaveBeenCalled();
-
-    const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(stderr).toContain("Error:");
-    expect(stderr).toContain("2049");
-    expect(stderr).toContain("2048");
-    expect(stderr.toLowerCase()).toContain("stdin");
+    await command.execute([arg], context);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).not.toHaveBeenCalled();
+    const sentCommand = sendSpy.mock.calls[0][0] as { type: string; payload: { message: string } };
+    expect(sentCommand.type).toBe(COMMAND_TYPES.START_NEW_CHAT);
+    expect(sentCommand.payload.message.length).toBe(2049);
+    expect(sentCommand.payload.message).toBe(arg);
   });
 
-  test("message of 5000 chars does not crash and exits with a clear error", async () => {
+  test("message of 5000 chars spills to a temp file and is sent", async () => {
     const arg = "a".repeat(5000);
-    let thrown: Error | null = null;
-    try {
-      await command.execute([arg], context);
-    } catch (e) {
-      thrown = e as Error;
-    }
-    expect(thrown).not.toBeNull();
-    expect(thrown?.message).toBe("__exit__:1");
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(sendSpy).not.toHaveBeenCalled();
-
-    const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(stderr).toContain("5000");
+    await command.execute([arg], context);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).not.toHaveBeenCalled();
+    const sentCommand = sendSpy.mock.calls[0][0] as { type: string; payload: { message: string } };
+    expect(sentCommand.payload.message.length).toBe(5000);
+    expect(sentCommand.payload.message).toBe(arg);
   });
 
-  test("multi-byte message exceeding 2048 code units exits with clear error", async () => {
+  test("multi-byte message exceeding 2048 code units spills and is sent", async () => {
     const arg = "\u{1F600}".repeat(1500);
-    let thrown: Error | null = null;
-    try {
-      await command.execute([arg], context);
-    } catch (e) {
-      thrown = e as Error;
-    }
-    expect(thrown).not.toBeNull();
-    expect(thrown?.message).toBe("__exit__:1");
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(sendSpy).not.toHaveBeenCalled();
-
-    const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(stderr).toContain("3000");
-    expect(stderr).toContain("2048");
+    expect(arg.length).toBe(3000);
+    await command.execute([arg], context);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).not.toHaveBeenCalled();
+    const sentCommand = sendSpy.mock.calls[0][0] as { type: string; payload: { message: string } };
+    expect(sentCommand.payload.message.length).toBe(3000);
+    expect(sentCommand.payload.message).toBe(arg);
   });
 
   test("multi-byte message at 2048 code unit boundary is accepted (does not crash, no exit)", async () => {
@@ -203,13 +180,13 @@ describe("NewCommand with long-arg guard", () => {
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
-  test("long-arg guard runs before START_NEW_CHAT handler is invoked", async () => {
+  test("long-arg guard runs before START_NEW_CHAT handler is invoked, and START_NEW_CHAT fires with the spilled content", async () => {
     const arg = "a".repeat(3000);
-    try {
-      await command.execute([arg], context);
-    } catch {
-    }
+    await command.execute([arg], context);
     const calledWith = sendSpy.mock.calls.map((c) => (c[0] as { type: string }).type);
-    expect(calledWith).not.toContain(COMMAND_TYPES.START_NEW_CHAT);
+    expect(calledWith).toContain(COMMAND_TYPES.START_NEW_CHAT);
+    const sentCommand = sendSpy.mock.calls[0][0] as { payload: { message: string } };
+    expect(sentCommand.payload.message.length).toBe(3000);
+    expect(sentCommand.payload.message).toBe(arg);
   });
 });

@@ -114,6 +114,14 @@ function removeDir(path: string): void {
   }
 }
 
+function removeFile(path: string): void {
+  try {
+    rmSync(path, { force: true });
+  } catch (err) {
+    throw wrap("removeFile", path, err instanceof Error ? err : undefined);
+  }
+}
+
 function renameDir(src: string, dest: string): void {
   try {
     renameSync(src, dest);
@@ -155,6 +163,7 @@ export {
   readJsonFile,
   writeJsonFile,
   removeDir,
+  removeFile,
   renameDir,
   isDirectory,
   listSubdirectories,

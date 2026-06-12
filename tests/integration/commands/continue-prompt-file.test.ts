@@ -217,3 +217,191 @@ describe("continue command --prompt-file option", () => {
     expect(output).toContain("path");
   });
 });
+
+describe("continue command spillover: long positional arg is written to a temp file and loaded from there", () => {
+  let command: ContinueCommand;
+  let context: CliCommandContext;
+  let logSpy: ReturnType<typeof spyOn>;
+  let errorSpy: ReturnType<typeof spyOn>;
+  let exitSpy: ReturnType<typeof spyOn>;
+  let mediatorSendSpy: ReturnType<typeof spyOn>;
+  const tempFiles: string[] = [];
+
+  function makeTempFile(content: string): string {
+    const path = join(tmpdir(), `continue-spillover-test-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
+    writeFileSync(path, content, "utf-8");
+    tempFiles.push(path);
+    return path;
+  }
+
+  function captureSpilledPath(): string | null {
+    const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    const match = logText.match(/Spilled to temp file '([^']+)'/);
+    return match ? match[1] : null;
+  }
+
+  beforeEach(() => {
+    command = new ContinueCommand();
+    context = {
+      verbose: false,
+      mediator: new Mediator(),
+      profileAuthManager: {
+        getActiveProfiles: mock(() => ["default"]),
+        findProfileForConversation: mock(() => "default"),
+        ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+      } as unknown as CliCommandContext["profileAuthManager"],
+    };
+    logSpy = spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = spyOn(console, "error").mockImplementation(() => {});
+    exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`__exit__:${code ?? "undefined"}`);
+    }) as never);
+    mediatorSendSpy = spyOn(context.mediator, "send").mockResolvedValue({
+      response: "Hello from Gemini!",
+    } as SendMessageCommandResult);
+  });
+
+  afterEach(() => {
+    mock.restore();
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+    for (const p of tempFiles) {
+      if (existsSync(p)) {
+        try { unlinkSync(p); } catch {}
+      }
+    }
+    tempFiles.length = 0;
+  });
+
+  test("5000-char positional is sent to SEND_MESSAGE with the correct conversation_id (no error, no truncation)", async () => {
+    const arg = "a".repeat(5000);
+    await command.execute(["conv-123", arg], context);
+
+    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).not.toHaveBeenCalled();
+    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { type: string; payload: { conversationId: string; message: string } };
+    expect(sentCommand.type).toBe(COMMAND_TYPES.SEND_MESSAGE);
+    expect(sentCommand.payload.conversationId).toBe("conv-123");
+    expect(sentCommand.payload.message.length).toBe(5000);
+    expect(sentCommand.payload.message).toBe(arg);
+  });
+
+  test("5000-char positional spills: temp file is created in tmpdir and DELETED after send", async () => {
+    const arg = "a".repeat(5000);
+    await command.execute(["conv-123", arg], context);
+
+    const spilledPath = captureSpilledPath();
+    expect(spilledPath).not.toBeNull();
+    expect(spilledPath).toMatch(/gemiterm-arg-spill-.*\.txt$/);
+    expect(spilledPath!.startsWith(tmpdir())).toBe(true);
+    expect(existsSync(spilledPath!)).toBe(false);
+  });
+
+  test("stdout log message mentions the spillover (contains 'spilled' and 'temp file')", async () => {
+    const arg = "a".repeat(5000);
+    await command.execute(["conv-123", arg], context);
+
+    const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logText.toLowerCase()).toContain("spilled");
+    expect(logText.toLowerCase()).toContain("temp file");
+    expect(logText).toContain("5000");
+    expect(logText).toContain("2048");
+  });
+
+  test("2048-char positional does NOT trigger spillover (no temp file, no spillover log, direct send)", async () => {
+    const arg = "a".repeat(2048);
+    await command.execute(["conv-123", arg], context);
+
+    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).not.toHaveBeenCalled();
+    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { conversationId: string; message: string } };
+    expect(sentCommand.payload.conversationId).toBe("conv-123");
+    expect(sentCommand.payload.message).toBe(arg);
+
+    const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logText.toLowerCase()).not.toContain("spilled to temp file");
+
+    const spilledPath = captureSpilledPath();
+    expect(spilledPath).toBeNull();
+  });
+
+  test("2049-char positional DOES trigger spillover (boundary + 1)", async () => {
+    const arg = "a".repeat(2049);
+    await command.execute(["conv-123", arg], context);
+
+    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { message: string } };
+    expect(sentCommand.payload.message.length).toBe(2049);
+
+    const spilledPath = captureSpilledPath();
+    expect(spilledPath).not.toBeNull();
+    expect(existsSync(spilledPath!)).toBe(false);
+  });
+
+  test("multi-byte (emoji) message exceeding 2048 code units spills correctly", async () => {
+    const emoji = "\u{1F600}";
+    const arg = emoji.repeat(1500);
+    expect(arg.length).toBe(3000);
+
+    await command.execute(["conv-123", arg], context);
+
+    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { conversationId: string; message: string } };
+    expect(sentCommand.payload.conversationId).toBe("conv-123");
+    expect(sentCommand.payload.message.length).toBe(3000);
+    expect(sentCommand.payload.message).toBe(arg);
+
+    const spilledPath = captureSpilledPath();
+    expect(spilledPath).not.toBeNull();
+    expect(existsSync(spilledPath!)).toBe(false);
+  });
+
+  test("spillover does not affect conversation_id (spilled content is still routed to the given conversation)", async () => {
+    const arg = "a".repeat(5000);
+    await command.execute(["conv-xyz", arg], context);
+
+    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { conversationId: string; message: string } };
+    expect(sentCommand.payload.conversationId).toBe("conv-xyz");
+  });
+
+  test("when --prompt-file is given (no positional), no spillover happens — user-provided file wins, no spillover log", async () => {
+    const content = "short user-provided file content";
+    const path = makeTempFile(content);
+
+    await command.execute(["conv-123", "--prompt-file", path], context);
+
+    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { conversationId: string; message: string } };
+    expect(sentCommand.payload.conversationId).toBe("conv-123");
+    expect(sentCommand.payload.message).toBe(content);
+
+    const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(logText.toLowerCase()).not.toContain("spilled to temp file");
+
+    const spilledPath = captureSpilledPath();
+    expect(spilledPath).toBeNull();
+  });
+
+  test("when --prompt-file is given AND a long positional is given, the user-provided file is the source of truth (no spillover)", async () => {
+    const fileContent = "from the file";
+    const path = makeTempFile(fileContent);
+    const longPositional = "a".repeat(3000);
+
+    let thrown: Error | null = null;
+    try {
+      await command.execute(["conv-123", "--prompt-file", path, longPositional], context);
+    } catch (e) {
+      thrown = e as Error;
+    }
+    expect(thrown).not.toBeNull();
+    expect(thrown?.message).toBe("__exit__:1");
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(mediatorSendSpy).not.toHaveBeenCalled();
+
+    const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(stderr).toContain("--prompt-file");
+
+    const spilledPath = captureSpilledPath();
+    expect(spilledPath).toBeNull();
+  });
+});

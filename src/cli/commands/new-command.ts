@@ -9,7 +9,8 @@ import {
 } from "../../core/command-handlers.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 import { checkArgLength } from "../utils/long-arg-guard.ts";
-import { loadPromptFromFile } from "../utils/prompt-file.ts";
+import { loadPromptFromFile, spillOverToTempFile } from "../utils/prompt-file.ts";
+import { removeFile } from "../../infrastructure/io.ts";
 
 interface NewCommandOptions {
   help: boolean;
@@ -47,34 +48,53 @@ export class NewCommand implements CliCommand {
       }
     }
 
+    if (options.promptFile && message) {
+      console.error(
+        chalk.red(
+          `Error: cannot use --prompt-file together with a positional message argument. ` +
+            `Use one or the other, not both.`,
+        ),
+      );
+      process.exit(1);
+    }
+
+    let effectivePromptFile: string | null = null;
+    let isSpillover = false;
     if (options.promptFile) {
-      if (message) {
-        console.error(
-          chalk.red(
-            `Error: cannot use --prompt-file together with a positional message argument. ` +
-              `Use one or the other, not both.`,
+      effectivePromptFile = options.promptFile;
+    } else if (message) {
+      const guard = checkArgLength(message);
+      if (!guard.safe) {
+        const spilled = await spillOverToTempFile(message);
+        effectivePromptFile = spilled;
+        isSpillover = true;
+        console.log(
+          chalk.dim(
+            `[gemiterm] Message is ${guard.length} UTF-16 code units, exceeding the ${guard.limit} limit. ` +
+              `Spilled to temp file '${spilled}' and loading from there.`,
           ),
         );
-        process.exit(1);
       }
+    }
+
+    if (effectivePromptFile) {
       try {
-        message = await loadPromptFromFile(options.promptFile);
+        message = await loadPromptFromFile(effectivePromptFile);
       } catch (err) {
         console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
         process.exit(1);
+      }
+      if (isSpillover) {
+        try {
+          removeFile(effectivePromptFile);
+        } catch {
+        }
       }
     }
 
     const mediator: Mediator = context.mediator;
 
     if (message) {
-      if (!options.promptFile) {
-        const guard = checkArgLength(message);
-        if (!guard.safe) {
-          console.error(chalk.red(`Error: ${guard.suggestion}`));
-          process.exit(1);
-        }
-      }
       await this.sendNonInteractive(mediator, message, options.profile, logger);
     } else {
       await this.startInteractive(mediator, options.profile, logger);

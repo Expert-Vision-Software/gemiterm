@@ -1,4 +1,5 @@
-import { IOError, readTextFile } from "../../infrastructure/io.ts";
+import { IOError, readTextFile, writeTextFile } from "../../infrastructure/io.ts";
+import { getTempFilePath } from "../../infrastructure/path-utils.ts";
 
 export async function loadPromptFromFile(filePath: string): Promise<string> {
   try {
@@ -9,4 +10,17 @@ export async function loadPromptFromFile(filePath: string): Promise<string> {
     }
     throw err;
   }
+}
+
+export async function spillOverToTempFile(content: string): Promise<string> {
+  const path = getTempFilePath("gemiterm-arg-spill", ".txt");
+  try {
+    writeTextFile(path, content);
+  } catch (err) {
+    if (err instanceof IOError) {
+      throw new Error(`Could not spill message to temp file: ${err.message}`);
+    }
+    throw err;
+  }
+  return path;
 }
