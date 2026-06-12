@@ -177,6 +177,13 @@ function formatDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 16).replace("T", " ");
 }
 
+const TITLE_MAX = 55;
+
+export function truncateTitle(title: string): string {
+  if (title.length <= TITLE_MAX) return title;
+  return `${title.slice(0, TITLE_MAX - 1)}…`;
+}
+
 export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
   (config, done) => {
     const pageSize = config.pageSize ?? 15;
@@ -325,7 +332,7 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
         const cursor = isActive ? "> " : "  ";
         const id = chalk.dim(item.id);
         const date = chalk.cyan(formatDate(item.timestamp));
-        const title = item.title;
+        const title = truncateTitle(item.title);
         const pin = item.isPinned ? chalk.yellow("★") : "";
         return `${cursor}${id}  ${date}  ${title}  ${pin}`;
       },

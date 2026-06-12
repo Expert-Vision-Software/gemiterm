@@ -3,6 +3,7 @@ import { render } from "@inquirer/testing";
 import {
   browser,
   browserPrompt,
+  truncateTitle,
   NonInteractiveError,
 } from "../../../src/cli/utils/prompts.ts";
 import type { ChatInfo } from "../../../src/core/types.ts";
@@ -12,6 +13,8 @@ const SAMPLE_CHATS: ChatInfo[] = [
   { id: "def", title: "TypeScript types", isPinned: false, timestamp: 1717100000000 },
   { id: "ghi", title: "Bun runtime", isPinned: false, timestamp: 1716900000000 },
 ];
+
+const LONG_TITLE = "a".repeat(80);
 
 describe("browser prompt", () => {
   let stdinDescriptor: PropertyDescriptor | undefined;
@@ -141,5 +144,63 @@ describe("TTY gate", () => {
     await expect(browser({ chats: SAMPLE_CHATS })).rejects.toBeInstanceOf(
       NonInteractiveError,
     );
+  });
+});
+
+describe("truncateTitle", () => {
+  test("returns the title unchanged when shorter than 55 chars", () => {
+    expect(truncateTitle("React hooks")).toBe("React hooks");
+    expect(truncateTitle("")).toBe("");
+  });
+
+  test("returns the title unchanged when exactly 55 chars", () => {
+    const title = "a".repeat(55);
+    expect(truncateTitle(title)).toBe(title);
+  });
+
+  test("truncates titles longer than 55 chars and appends an ellipsis", () => {
+    const result = truncateTitle(LONG_TITLE);
+    expect(result.length).toBe(55);
+    expect(result.endsWith("…")).toBe(true);
+    expect(result).toBe("a".repeat(54) + "…");
+  });
+
+  test("truncates a 56-char title to 55 chars (54 + ellipsis)", () => {
+    const title = "a".repeat(56);
+    const result = truncateTitle(title);
+    expect(result).toBe("a".repeat(54) + "…");
+  });
+});
+
+describe("browser prompt title rendering", () => {
+  let stdinDescriptor: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    if (stdinDescriptor) {
+      Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+    } else {
+      Reflect.deleteProperty(process.stdin, "isTTY");
+    }
+  });
+
+  test("long titles are truncated with an ellipsis in the rendered row", async () => {
+    const longChats: ChatInfo[] = [
+      { id: "long", title: LONG_TITLE, isPinned: false, timestamp: 1717000000000 },
+    ];
+    const { getScreen } = await render(browserPrompt, { chats: longChats });
+
+    const screen = getScreen({ raw: true });
+
+    expect(screen).toContain("a".repeat(54));
+    expect(screen).toContain("…");
   });
 });
