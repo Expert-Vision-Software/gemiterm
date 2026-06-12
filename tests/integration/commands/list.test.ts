@@ -189,12 +189,19 @@ describe("list command integration", () => {
     });
   });
 
-  describe("--all flag", () => {
-    test("--all sends query without limit", async () => {
-      await command.execute(["--all"], context);
+  describe("default limit behaviour", () => {
+    test("omitting --limit sends query without limit", async () => {
+      await command.execute([], context);
 
       const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
       expect(sentQuery.payload.limit).toBeUndefined();
+    });
+
+    test("--limit N sends N as limit", async () => {
+      await command.execute(["--limit", "7"], context);
+
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.payload.limit).toBe(7);
     });
   });
 

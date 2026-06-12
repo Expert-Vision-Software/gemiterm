@@ -17,7 +17,6 @@ interface ListCommandOptions {
   help: boolean;
   limit: number;
   offset: number;
-  all: boolean;
   allProfiles: boolean;
   sort: "recent" | "oldest" | "alpha";
   search: string;
@@ -30,9 +29,8 @@ interface ListCommandOptions {
 
 const DEFAULT_OPTIONS: ListCommandOptions = {
   help: false,
-  limit: 10,
+  limit: 0,
   offset: 0,
-  all: false,
   allProfiles: false,
   sort: "recent",
   search: "",
@@ -57,8 +55,9 @@ export class ListCommand implements CliCommand {
     }
 
     const mediator: Mediator = context.mediator;
+    const hasLimit = options.limit > 0;
     const query: ListChatsQueryPayload = {
-      limit: options.all ? undefined : options.limit,
+      limit: hasLimit ? options.limit : undefined,
       offset: options.offset || undefined,
       search: options.search || undefined,
       allProfiles: options.allProfiles,
@@ -80,8 +79,10 @@ export class ListCommand implements CliCommand {
     chats = this.applySort(chats, options.sort);
     chats = this.applyDateFilter(chats, options.after, options.before);
 
-    if (!options.all) {
+    if (hasLimit) {
       chats = chats.slice(options.offset, options.offset + options.limit);
+    } else if (options.offset > 0) {
+      chats = chats.slice(options.offset);
     }
 
     if (options.format === "json") {
@@ -222,9 +223,6 @@ export class ListCommand implements CliCommand {
         case "--offset":
           options.offset = parseInt(args[++i], 10) || 0;
           break;
-        case "--all":
-          options.all = true;
-          break;
         case "--all-profiles":
           options.allProfiles = true;
           break;
@@ -282,9 +280,8 @@ export class ListCommand implements CliCommand {
     console.log(chalk.bold("Options:"));
 
     const flags = [
-      { flag: "--limit, -n N", desc: "Number of results (default: 10)" },
+      { flag: "--limit, -n N", desc: "Limit number of results (no limit by default)" },
       { flag: "--offset N", desc: "Skip N results (default: 0)" },
-      { flag: "--all", desc: "Show all conversations (no limit)" },
       { flag: "--all-profiles", desc: "Show conversations from all profiles (with Profile column in text output)" },
       { flag: "--sort <mode>", desc: "Sort order: recent, oldest, alpha (default: recent)" },
       { flag: "--search, -s <query>", desc: "Filter by title search" },

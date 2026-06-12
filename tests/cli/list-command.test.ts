@@ -91,17 +91,34 @@ describe("ListCommand", () => {
     );
   });
 
-  test("applies --all flag", async () => {
+  test("returns all conversations by default (no limit)", async () => {
     const mockHandler = {
       queryType: QUERY_TYPES.LIST_CHATS,
       handle: mock(async () => ({ chats: SAMPLE_CHATS })),
     };
     mediator.registerQueryHandler(mockHandler as any);
 
-    await command.execute(["--all"], context);
+    await command.execute([], context);
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("Total: 3 conversations");
+    const sentQuery = mockHandler.handle.mock.calls[0][0] as any;
+    expect(sentQuery.payload.limit).toBeUndefined();
+  });
+
+  test("applies --limit to restrict results", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    await command.execute(["--limit", "1"], context);
+
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Total: 1 conversation");
+    const sentQuery = mockHandler.handle.mock.calls[0][0] as any;
+    expect(sentQuery.payload.limit).toBe(1);
   });
 
   test("applies sort by alpha", async () => {
