@@ -35,7 +35,7 @@ The one currently-open OpenSpec change is `commander-cli-parser` (proposes repla
 ```bash
 bun install                # install deps (bun.lock is committed)
 bun run dev                # = bun run src/cli/index.ts; runs the CLI in dev
-bun test                   # full suite — baseline: 544 pass, 0 fail
+bun test                   # full suite — baseline: 657 pass, 0 fail
 bun run test:unit          # tests/unit only
 bun run test:integration   # tests/integration only
 bun run test:parity        # tests/parity (requires v1.4.1 Python CLI on PATH; not run in CI)
@@ -66,6 +66,20 @@ Auth is the only area with non-trivial history. Cookies are obtained by spawning
 Service-level test files: `tests/services/{playwright-cli-driver,cookie-monitor,auth-service,cookie-storage-service}.test.ts`.
 
 The full upstream API for the `playwright-cli` subprocess is documented in `docs/PLAYWRIGHT_CLI_API.md` (verified against `@playwright/cli`). Reach for `deepwiki` or the GitHub upstream when the docs are unclear.
+
+The prompt layer is the second sensitive area. `src/cli/utils/prompts.ts` is the single facade that imports from `@inquirer/prompts` and `@inquirer/core`; it is the only module in `src/` allowed to do so. The TTY gate (`requireTty`), the shared `chalk`-based theme, the module-level `AbortController` (via `getAbortSignal` / `abortActivePrompts` / `resetAbortController`), and the cancellation-to-`CancellationError` mapping all live here. All interactive call sites — including the chat REPL, the auth/profile/delete commands, the chat-list browser, and any future prompts — must route through this facade.
+
+Files in the prompt layer:
+- `src/cli/utils/prompts.ts` — facade: `text`, `confirm`, `select`, `browser` (the custom chat-list browser), plus `NonInteractiveError` and `CancellationError`
+- `src/cli/utils/interactive-prompt.ts` — chat REPL; uses facade's `text` and `CancellationError` via the `InteractiveLoopDeps` injection point for testability
+- `src/cli/commands/auth-command.ts` — `promptInput` shim delegates to facade
+- `src/cli/commands/delete-command.ts` — `promptConfirmation` shim delegates to facade
+- `src/cli/commands/profile-command.ts` — `promptInput` shim delegates to facade
+- `src/cli/commands/list-command.ts` — `--interactive/-i` flag drives `runInteractiveBrowser` (uses `browser` + `select`)
+
+Test files for the prompt layer: `tests/cli/utils/{prompts,interactive-prompt,chat-list-browser}.test.ts`, plus the `--interactive` block in `tests/cli/list-command.test.ts`.
+
+The `gemiterm list -i` (or `--interactive`) flag is the **only** entry point to the chat-list TUI; the non-interactive forms (`gemiterm list`, `gemiterm list --format json`, `gemiterm list --search foo`, `gemiterm list --path out.txt`) are byte-equivalent to the pre-change baseline. Any change to the non-interactive output paths is a regression and must be caught by `tests/integration/commands/list.test.ts`.
 
 ---
 

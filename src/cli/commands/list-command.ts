@@ -10,6 +10,8 @@ import {
 import { formatChatList } from "../../infrastructure/formatters.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
+import { GemitermError } from "../../core/errors.ts";
+import { browser, select, type BrowserAction } from "../utils/prompts.ts";
 
 interface ListCommandOptions {
   help: boolean;
@@ -23,6 +25,7 @@ interface ListCommandOptions {
   before: string;
   format: "text" | "json";
   path: string;
+  interactive: boolean;
 }
 
 const DEFAULT_OPTIONS: ListCommandOptions = {
@@ -37,6 +40,7 @@ const DEFAULT_OPTIONS: ListCommandOptions = {
   before: "",
   format: "text",
   path: "",
+  interactive: false,
 };
 
 export class ListCommand implements CliCommand {
@@ -67,6 +71,11 @@ export class ListCommand implements CliCommand {
     } as Query<ListChatsQueryPayload>);
 
     let chats = result.chats;
+
+    if (options.interactive) {
+      await this.runInteractiveBrowser(chats, options, context);
+      return;
+    }
 
     chats = this.applySort(chats, options.sort);
     chats = this.applyDateFilter(chats, options.after, options.before);
@@ -138,6 +147,64 @@ export class ListCommand implements CliCommand {
     console.log(chalk.dim(`Output written to: ${path}`));
   }
 
+  private async runInteractiveBrowser(
+    chats: ChatInfo[],
+    options: ListCommandOptions,
+    context: CliCommandContext,
+  ): Promise<void> {
+    while (true) {
+      const result = await browser({
+        chats,
+        initialFilter: options.search || undefined,
+        initialSort: options.sort,
+      });
+      if (result.kind === "quit") return;
+      const actionResult = await this.showActionMenu(result.chat);
+      if (actionResult === "quit") return;
+      if (actionResult === "back") continue;
+      await this.executeAction(actionResult, result.chat, context);
+    }
+  }
+
+  private async showActionMenu(chat: ChatInfo): Promise<BrowserAction> {
+    const choice = await select<BrowserAction>({
+      message: `Selected: ${chat.id} — "${chat.title}"`,
+      choices: [
+        { value: "view", label: "View full conversation" },
+        { value: "export-markdown", label: "Export to Markdown" },
+        { value: "export-json", label: "Export to JSON" },
+        { value: "copy-id", label: "Copy conversation ID" },
+        { value: "back", label: "Back to list" },
+        { value: "quit", label: "Quit" },
+      ],
+    });
+    return choice;
+  }
+
+  private async executeAction(
+    action: "view" | "export-markdown" | "export-json" | "copy-id",
+    chat: ChatInfo,
+    context: CliCommandContext,
+  ): Promise<void> {
+    if (action === "copy-id") {
+      console.log(chalk.cyan(`Copied: ${chat.id}`));
+      return;
+    }
+    const { CommandRegistry } = await import("../command-registry.ts");
+    const registry = new CommandRegistry();
+    registry.registerAllCommands();
+    if (action === "view") {
+      const fetch = registry.getHandler("fetch");
+      if (fetch) await fetch.execute([chat.id, "--format", "text"], context);
+    } else if (action === "export-markdown") {
+      const exportCmd = registry.getHandler("export");
+      if (exportCmd) await exportCmd.execute([chat.id, "--format", "markdown"], context);
+    } else if (action === "export-json") {
+      const exportCmd = registry.getHandler("export");
+      if (exportCmd) await exportCmd.execute([chat.id, "--format", "json"], context);
+    }
+  }
+
   private parseArgs(args: string[]): ListCommandOptions {
     const options = { ...DEFAULT_OPTIONS };
 
@@ -182,7 +249,18 @@ export class ListCommand implements CliCommand {
         case "-p":
           options.path = args[++i] ?? "";
           break;
+        case "--interactive":
+        case "-i":
+          options.interactive = true;
+          break;
       }
+    }
+
+    if (
+      options.interactive &&
+      (options.format !== DEFAULT_OPTIONS.format || options.path !== DEFAULT_OPTIONS.path)
+    ) {
+      throw new GemitermError("Cannot use --interactive with --format or --path.");
     }
 
     return options;
@@ -214,6 +292,7 @@ export class ListCommand implements CliCommand {
       { flag: "--before <date>", desc: "Only show chats before this date" },
       { flag: "--format, -f <fmt>", desc: "Output format: text, json (default: text)" },
       { flag: "--path, -p <path>", desc: "Write output to file" },
+      { flag: "--interactive, -i", desc: "Open interactive chat-list browser (TTY only)" },
       { flag: "--help, -h", desc: "Show this help message" },
     ];
 

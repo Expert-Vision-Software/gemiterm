@@ -1,6 +1,6 @@
 import chalk from "chalk";
-import { createInterface } from "node:readline";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
+import { text } from "../utils/prompts.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { CookieStorage, ProfileManager } from "../../infrastructure/storage.ts";
 import { PlaywrightCliDriver } from "../../services/playwright-cli-driver.ts";
@@ -215,12 +215,6 @@ export class ProfileCommand implements CliCommand {
   }
 
   private promptInput(prompt: string): Promise<string> {
-    return new Promise<string>((resolve) => {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      rl.question(`${chalk.cyan(prompt + ": ")} `, (answer) => {
-        rl.close();
-        resolve(answer);
-      });
-    });
+    return text({ message: prompt });
   }
 }
