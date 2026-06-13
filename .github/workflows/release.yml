@@ -192,7 +192,11 @@ jobs:
       - run: bun install
       - name: Publish to npm
         run: |
+          TAG_ARG=""
+          if [[ "${{ inputs.tag_name || github.ref_name }}" == *-* ]]; then
+            TAG_ARG="--tag next"
+          fi
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          npm publish --provenance --access public
+          npm publish --provenance --access public $TAG_ARG
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
