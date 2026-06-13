@@ -253,6 +253,10 @@ export class ListCommand implements CliCommand {
       }
     }
 
+    if (options.interactive) {
+      options.allProfiles = true;
+    }
+
     if (
       options.interactive &&
       (options.format !== DEFAULT_OPTIONS.format || options.out !== DEFAULT_OPTIONS.out)
@@ -288,7 +292,7 @@ export class ListCommand implements CliCommand {
       { flag: "--before <date>", desc: "Only show chats before this date" },
       { flag: "--format, -f <fmt>", desc: "Output format: text, json (default: text)" },
       { flag: "--out, -o <path>", desc: "Write output to file" },
-      { flag: "--interactive, -i", desc: "Open interactive chat-list browser (TTY only)" },
+      { flag: "--interactive, -i", desc: "Open interactive chat-list browser (TTY only; shows all profiles by default)" },
       { flag: "--help, -h", desc: "Show this help message" },
     ];
 

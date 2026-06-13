@@ -249,6 +249,46 @@ describe("ListCommand --interactive flag", () => {
       const callArg = browserSpy.mock.calls[0][0] as any;
       expect(callArg.chats).toEqual(SAMPLE_CHATS);
       expect(selectSpy).not.toHaveBeenCalled();
+      expect(mockHandler.handle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ allProfiles: true }),
+        }),
+      );
+    } finally {
+      if (stdinDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    }
+  });
+
+  test("--interactive -i short flag also enables allProfiles by default", async () => {
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const browserSpy = spyOn(promptsModule, "browser").mockResolvedValue({
+      kind: "quit",
+    } as any);
+
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    try {
+      await command.execute(["-i"], context);
+      expect(browserSpy).toHaveBeenCalledTimes(1);
+      expect(mockHandler.handle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ allProfiles: true }),
+        }),
+      );
     } finally {
       if (stdinDescriptor) {
         Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
