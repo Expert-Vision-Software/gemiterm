@@ -18,6 +18,7 @@ interface ListCommandOptions {
   limit: number;
   offset: number;
   allProfiles: boolean;
+  profile: string;
   sort: "recent" | "oldest" | "alpha";
   search: string;
   after: string;
@@ -32,6 +33,7 @@ const DEFAULT_OPTIONS: ListCommandOptions = {
   limit: 0,
   offset: 0,
   allProfiles: false,
+  profile: "",
   sort: "recent",
   search: "",
   after: "",
@@ -61,6 +63,7 @@ export class ListCommand implements CliCommand {
       offset: options.offset || undefined,
       search: options.search || undefined,
       allProfiles: options.allProfiles,
+      profile: options.profile || undefined,
     };
 
     logger.debug(`Sending list-chats query: ${JSON.stringify(query)}`);
@@ -88,7 +91,7 @@ export class ListCommand implements CliCommand {
     if (options.format === "json") {
       this.outputJson(chats, options.out);
     } else {
-      this.outputText(chats, options.out, options.allProfiles);
+      this.outputText(chats, options.out, options.allProfiles || Boolean(options.profile));
     }
   }
 
@@ -225,6 +228,10 @@ export class ListCommand implements CliCommand {
         case "--all-profiles":
           options.allProfiles = true;
           break;
+        case "--profile":
+        case "-p":
+          options.profile = args[++i] ?? "";
+          break;
         case "--sort":
           options.sort = this.parseSort(args[++i]);
           break;
@@ -253,7 +260,7 @@ export class ListCommand implements CliCommand {
       }
     }
 
-    if (options.interactive) {
+    if (options.interactive && !options.profile) {
       options.allProfiles = true;
     }
 
@@ -286,6 +293,7 @@ export class ListCommand implements CliCommand {
       { flag: "--limit, -n N", desc: "Limit number of results (no limit by default)" },
       { flag: "--offset N", desc: "Skip N results (default: 0)" },
       { flag: "--all-profiles", desc: "Show conversations from all profiles (with Profile column in text output)" },
+      { flag: "--profile, -p <name>", desc: "Filter conversations to a specific profile (non-interactive)" },
       { flag: "--sort <mode>", desc: "Sort order: recent, oldest, alpha (default: recent)" },
       { flag: "--search, -s <query>", desc: "Filter by title search" },
       { flag: "--after <date>", desc: "Only show chats after this date" },

@@ -182,6 +182,51 @@ describe("ListCommand", () => {
     );
   });
 
+  test("applies --profile flag in query", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: [] })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    await command.execute(["--profile", "work"], context);
+
+    expect(mockHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ profile: "work" }),
+      }),
+    );
+  });
+
+  test("applies -p short flag in query", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: [] })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    await command.execute(["-p", "personal"], context);
+
+    expect(mockHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ profile: "personal" }),
+      }),
+    );
+  });
+
+  test("omits profile from payload when not specified", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: [] })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    await command.execute([], context);
+
+    const call = mockHandler.handle.mock.calls[0][0] as any;
+    expect(call.payload.profile).toBeUndefined();
+  });
+
   test("applies --offset flag", async () => {
     const mockHandler = {
       queryType: QUERY_TYPES.LIST_CHATS,
@@ -350,6 +395,41 @@ describe("ListCommand --interactive flag", () => {
       await command.execute(["--interactive", "--sort", "alpha"], context);
       const callArg = browserSpy.mock.calls[0][0] as any;
       expect(callArg.initialSort).toBe("alpha");
+    } finally {
+      if (stdinDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    }
+  });
+
+  test("--interactive --profile work does not force allProfiles", async () => {
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const browserSpy = spyOn(promptsModule, "browser").mockResolvedValue({
+      kind: "quit",
+    } as any);
+
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    try {
+      await command.execute(["-i", "--profile", "work"], context);
+      expect(mockHandler.handle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ profile: "work", allProfiles: false }),
+        }),
+      );
+      expect(browserSpy).toHaveBeenCalledTimes(1);
     } finally {
       if (stdinDescriptor) {
         Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
