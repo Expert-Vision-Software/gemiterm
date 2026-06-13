@@ -53,7 +53,7 @@ export class GeminiClientService
     this.initPromise = this.client!.init({
       timeout: 300_000,
       autoClose: false,
-      autoRefresh: true,
+      autoRefresh: false,
       refreshInterval: 540_000,
     });
     await this.initPromise;
