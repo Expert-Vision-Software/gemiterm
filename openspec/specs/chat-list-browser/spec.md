@@ -51,12 +51,12 @@ The `list` command SHALL accept a `--interactive/-i` flag. When the flag is set,
 
 #### Scenario: --interactive conflicts with --format
 - **WHEN** the user runs `gemiterm list -i --format json`
-- **THEN** the command prints `Cannot use --interactive with --format or --path.` to stderr
+- **THEN** the command prints `Cannot use --interactive with --format or --out.` to stderr
 - **AND** the process exits with code 1
 
-#### Scenario: --interactive conflicts with --path
-- **WHEN** the user runs `gemiterm list -i --path out.txt`
-- **THEN** the command prints `Cannot use --interactive with --format or --path.` to stderr
+#### Scenario: --interactive conflicts with --out
+- **WHEN** the user runs `gemiterm list -i --out out.txt`
+- **THEN** the command prints `Cannot use --interactive with --format or --out.` to stderr
 - **AND** the process exits with code 1
 
 #### Scenario: --interactive requires a TTY
@@ -223,10 +223,10 @@ The browser SHALL exit cleanly on `q`, `esc`, or `Ctrl+C`, resolving the prompt 
 
 ### Requirement: Chat-list browser SHALL preserve the non-interactive contract
 
-The non-interactive forms of `gemiterm list` SHALL remain byte-equivalent to the previous baseline. The `--interactive` flag SHALL be the only entry point to the TUI. The flag SHALL be added without changing the default output of `gemiterm list` (no flags), the JSON output of `gemiterm list --format json`, the file output of `gemiterm list --path out.txt`, or any other existing flag's behaviour. The `--search` flag, when used with `--interactive`, SHALL be forwarded to the mediator (the browser receives the mediator-filtered list) but SHALL NOT pre-fill a browser-side search input — there is no browser-side search input.
+The non-interactive forms of `gemiterm list` SHALL remain byte-equivalent to the previous baseline. The `--interactive` flag SHALL be the only entry point to the TUI. The flag SHALL be added without changing the default output of `gemiterm list` (no flags), the JSON output of `gemiterm list --format json`, the file output of `gemiterm list --out out.txt`, or any other existing flag's behaviour. The `--search` flag, when used with `--interactive`, SHALL be forwarded to the mediator (the browser receives the mediator-filtered list) but SHALL NOT pre-fill a browser-side search input — there is no browser-side search input.
 
 #### Scenario: gemiterm list (no flags) is unchanged
-- **WHEN** the user runs `gemiterm list` without `--interactive` (and without `--format`, `--path`, etc.)
+- **WHEN** the user runs `gemiterm list` without `--interactive` (and without `--format`, `--out`, etc.)
 - **THEN** the output is the same 4-column text table (`ID` / `TITLE` / `DATE` / `PIN`) that the pre-change `list` command emitted
 
 #### Scenario: gemiterm list --format json is unchanged
@@ -237,8 +237,8 @@ The non-interactive forms of `gemiterm list` SHALL remain byte-equivalent to the
 - **WHEN** the user runs `gemiterm list --search "foo"` without `--interactive`
 - **THEN** the mediator payload carries `search: "foo"` and the output is the filtered text table
 
-#### Scenario: gemiterm list --path is unchanged
-- **WHEN** the user runs `gemiterm list --path out.txt` without `--interactive`
+#### Scenario: gemiterm list --out is unchanged
+- **WHEN** the user runs `gemiterm list --out out.txt` without `--interactive`
 - **THEN** the rendered output is written to `out.txt` and a confirmation line `Output written to: <resolved>` is printed
 
 #### Scenario: gemiterm list --interactive --search forwards the search to the mediator
