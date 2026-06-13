@@ -1,3 +1,10 @@
+## [2.2.0-beta.0] - 2026-06-13
+
+### Changed
+- documentation update
+- spec changes
+- test @next deploy tag
+
 ## [2.1.1] - 2026-06-12
 
 ### Added
