@@ -10,6 +10,7 @@ import {
   useState,
   useKeypress,
   useMemo,
+  usePagination,
   makeTheme,
   isUpKey,
   isDownKey,
@@ -166,6 +167,7 @@ export type BrowserResult =
 export interface BrowserConfig {
   chats: ReadonlyArray<ChatInfo>;
   initialSort?: "recent" | "oldest" | "alpha";
+  pageSize?: number;
 }
 
 function formatDate(timestamp: number): string {
@@ -217,6 +219,14 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       return sorted;
     }, [config.chats, sort, profileFilter, favoritesOnly]);
 
+    const pageSize = useMemo(() => {
+      if (typeof config.pageSize === "number" && config.pageSize > 0) {
+        return config.pageSize;
+      }
+      const rows = process.stdout.rows ?? 24;
+      return Math.max(5, Math.floor((rows - 4) * 0.8));
+    }, [config.pageSize]);
+
     useKeypress((key) => {
       if (key.name === "s") {
         const next =
@@ -251,6 +261,16 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
         return;
       }
 
+      if (key.name === "left") {
+        setActive(Math.max(0, active - pageSize));
+        return;
+      }
+
+      if (key.name === "right") {
+        setActive(Math.min(total - 1, active + pageSize));
+        return;
+      }
+
       if (isEnterKey(key)) {
         const chat = filteredSorted[active];
         if (chat) {
@@ -275,11 +295,23 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       }
     });
 
+    const safeActive = Math.min(active, Math.max(0, filteredSorted.length - 1));
+    const totalPages = Math.max(
+      1,
+      Math.ceil(filteredSorted.length / pageSize),
+    );
+    const currentPage = Math.min(
+      totalPages,
+      Math.floor(safeActive / pageSize) + 1,
+    );
+    const pageIndicator =
+      totalPages > 1 ? ` | Page: ${currentPage}/${totalPages}` : "";
+
     const titleBar = chalk.bold(
-      `Browse conversations (${filteredSorted.length} chats | Sort: ${sort} | Profile: ${profileFilter} | Favorites: ${favoritesOnly ? "on" : "off"})`,
+      `Browse conversations (${filteredSorted.length} chats${pageIndicator} | Sort: ${sort} | Profile: ${profileFilter} | Favorites: ${favoritesOnly ? "on" : "off"})`,
     );
     const hintLine = chalk.dim(
-      "↑↓ navigate · s sort · p profile · f favorites · enter pick · q quit",
+      "↑↓ navigate · ← → page · s sort · p profile · f favorites · enter pick · q quit",
     );
 
     const renderRow = (item: ChatInfo, isActive: boolean): string => {
@@ -291,14 +323,16 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       return `${cursor}${id}  ${date}  ${title}  ${pin}`;
     };
 
-    const safeActive = Math.min(active, Math.max(0, filteredSorted.length - 1));
-    const rows = filteredSorted
-      .map((chat, i) => renderRow(chat, i === safeActive))
-      .join("\n");
-
     if (filteredSorted.length === 0) {
       return [`${titleBar}\nNo conversations found.`, hintLine];
     }
+
+    const rows = usePagination({
+      items: filteredSorted,
+      active: safeActive,
+      pageSize,
+      renderItem: ({ item, isActive }) => renderRow(item, isActive),
+    });
 
     return [`${titleBar}\n${rows}`, hintLine];
   },
