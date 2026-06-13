@@ -16,14 +16,14 @@ import { writeTextFile } from "../../infrastructure/io.ts";
 
 interface ExportCommandOptions {
   help: boolean;
-  output: string;
+  out: string;
   format: "markdown" | "json";
   includeMetadata: boolean;
 }
 
 const DEFAULT_OPTIONS: ExportCommandOptions = {
   help: false,
-  output: "",
+  out: "",
   format: "markdown",
   includeMetadata: false,
 };
@@ -67,7 +67,7 @@ export class ExportCommand implements CliCommand {
         payload: query,
       } as Query<FetchChatQueryPayload>);
 
-      const outputPath = options.output || this.defaultFilename(conversationId, options.format);
+      const outputPath = options.out || this.defaultFilename(conversationId, options.format);
 
       const content =
         options.format === "json"
@@ -108,9 +108,9 @@ export class ExportCommand implements CliCommand {
         case "-h":
           options.help = true;
           break;
-        case "--output":
+        case "--out":
         case "-o":
-          options.output = args[++i] ?? "";
+          options.out = args[++i] ?? "";
           break;
         case "--format":
         case "-f":
@@ -141,7 +141,7 @@ export class ExportCommand implements CliCommand {
     console.log(chalk.bold("Options:"));
 
     const flags = [
-      { flag: "--output, -o <path>", desc: "Output file path (default: gemini-chat-<id>-<date>.md)" },
+      { flag: "--out, -o <path>", desc: "Output file path (default: gemini-chat-<id>-<date>.md)" },
       { flag: "--format, -f <fmt>", desc: "Output format: markdown, json (default: markdown)" },
       { flag: "--include-metadata", desc: "Include metadata header (ID, count, date)" },
       { flag: "--help, -h", desc: "Show this help message" },

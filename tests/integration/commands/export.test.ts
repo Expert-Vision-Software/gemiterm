@@ -59,7 +59,7 @@ describe("export command integration", () => {
 
       const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
       expect(output).toContain("Usage: gemiterm export");
-      expect(output).toContain("--output");
+      expect(output).toContain("--out");
       expect(output).toContain("--format");
       expect(output).toContain("--include-metadata");
       expect(output).toContain("--help");
@@ -84,7 +84,7 @@ describe("export command integration", () => {
       const outputPath = join(tmpdir(), `export-test-${Date.now()}.md`);
 
       try {
-        await command.execute(["conv-abc123", "--output", outputPath], context);
+        await command.execute(["conv-abc123", "--out", outputPath], context);
 
         expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
         const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
@@ -99,7 +99,7 @@ describe("export command integration", () => {
       const outputPath = join(tmpdir(), `export-md-${Date.now()}.md`);
 
       try {
-        await command.execute(["conv-abc123", "--output", outputPath], context);
+        await command.execute(["conv-abc123", "--out", outputPath], context);
 
         expect(existsSync(outputPath)).toBe(true);
         const content = readFileSync(outputPath, "utf-8");
@@ -115,7 +115,7 @@ describe("export command integration", () => {
       const outputPath = join(tmpdir(), `export-msg-${Date.now()}.md`);
 
       try {
-        await command.execute(["conv-xyz", "--output", outputPath], context);
+        await command.execute(["conv-xyz", "--out", outputPath], context);
 
         const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
         expect(output).toContain("Exported conversation");
@@ -131,7 +131,7 @@ describe("export command integration", () => {
       const outputPath = join(tmpdir(), `export-json-${Date.now()}.json`);
 
       try {
-        await command.execute(["conv-abc123", "--format", "json", "--output", outputPath], context);
+        await command.execute(["conv-abc123", "--format", "json", "--out", outputPath], context);
 
         expect(existsSync(outputPath)).toBe(true);
         const content = readFileSync(outputPath, "utf-8");
@@ -148,7 +148,7 @@ describe("export command integration", () => {
       const outputPath = join(tmpdir(), `export-f-json-${Date.now()}.json`);
 
       try {
-        await command.execute(["conv-abc123", "-f", "json", "--output", outputPath], context);
+        await command.execute(["conv-abc123", "-f", "json", "--out", outputPath], context);
 
         expect(existsSync(outputPath)).toBe(true);
         const content = readFileSync(outputPath, "utf-8");
@@ -170,7 +170,7 @@ describe("export command integration", () => {
       const outputPath = join(tmpdir(), `export-json-roles-${Date.now()}.json`);
 
       try {
-        await command.execute(["conv-abc123", "--format", "json", "--output", outputPath], context);
+        await command.execute(["conv-abc123", "--format", "json", "--out", outputPath], context);
 
         const content = readFileSync(outputPath, "utf-8");
         const parsed = JSON.parse(content);
@@ -184,12 +184,12 @@ describe("export command integration", () => {
     });
   });
 
-  describe("--output option", () => {
-    test("--output writes to specified path", async () => {
+  describe("--out option", () => {
+    test("--out writes to specified path", async () => {
       const outputPath = join(tmpdir(), `export-custom-${Date.now()}.md`);
 
       try {
-        await command.execute(["conv-abc123", "--output", outputPath], context);
+        await command.execute(["conv-abc123", "--out", outputPath], context);
 
         expect(existsSync(outputPath)).toBe(true);
         const content = readFileSync(outputPath, "utf-8");
@@ -213,11 +213,11 @@ describe("export command integration", () => {
       }
     });
 
-    test("--output with --format json writes JSON to specified path", async () => {
+    test("--out with --format json writes JSON to specified path", async () => {
       const outputPath = join(tmpdir(), `export-o-json-${Date.now()}.json`);
 
       try {
-        await command.execute(["conv-abc123", "--output", outputPath, "--format", "json"], context);
+        await command.execute(["conv-abc123", "--out", outputPath, "--format", "json"], context);
 
         expect(existsSync(outputPath)).toBe(true);
         const content = readFileSync(outputPath, "utf-8");
@@ -252,7 +252,7 @@ describe("export command integration", () => {
 
       try {
         const outputPath = join(tmpdir(), `export-err-${Date.now()}.md`);
-        await command.execute(["conv-abc123", "--output", outputPath], context);
+        await command.execute(["conv-abc123", "--out", outputPath], context);
         expect.unreachable("should have thrown");
       } catch (error) {
         expect((error as Error).message).toBe("process.exit(1)");

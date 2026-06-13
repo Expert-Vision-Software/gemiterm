@@ -128,7 +128,7 @@ A new file `src/cli/utils/conversation-id-parser.ts` exports:
 export function extractConversationIds(args: string[]): string[];
 ```
 
-It walks `args`, skips tokens that start with `--` or `-` (flags) and tokens that are values of `--output` / `--output-dir` / `--format` / `--profile` / `--include-metadata` / `--force` / `--since` / `--after` / `--before` (flag values), collects the remaining positional tokens, splits each on `,`, trims whitespace, drops empties, and dedupes. Returns `string[]`. Throws `GemitermError` with message `Error: at least one conversation ID is required.` if the result is empty.
+It walks `args`, skips tokens that start with `--` or `-` (flags) and tokens that are values of `--out` / `--out-dir` / `--format` / `--profile` / `--include-metadata` / `--force` / `--since` / `--after` / `--before` (flag values), collects the remaining positional tokens, splits each on `,`, trims whitespace, drops empties, and dedupes. Returns `string[]`. Throws `GemitermError` with message `Error: at least one conversation ID is required.` if the result is empty.
 
 The three commands (`delete`, `export`, `summarize`) each call this helper, then validate each id via the existing `validateConversationId`. The existing single-id `extractConversationId(args): string | null` private method is **removed** from each command and replaced with the shared utility — no duplicated argv-walking logic.
 
@@ -147,14 +147,14 @@ The three commands (`delete`, `export`, `summarize`) each call this helper, then
 
 In multi-profile setups, ids whose owning profile cannot be resolved are skipped with a warning `Skipped '<id>': no owning profile found. Use 'gemiterm list --all-profiles' to see which profile it belongs to.` and the rest of the batch proceeds.
 
-### D8. `export` multi-id: N files, optional `--output-dir`
+### D8. `export` multi-id: N files, optional `--out-dir`
 
 `gemiterm export id1,id2,id3` flow:
 
 1. Parse ids. If empty, error and exit 1.
-2. If `--output` is supplied, it is rejected with `Error: cannot use --output together with comma-separated ids. Specify --output-dir instead.` (a single `--output` makes no sense for N files).
-3. If `--output-dir` is supplied, ensure it exists (use the existing `infrastructure/io.ts:ensureDir`). Default is the current working directory.
-4. Iterate ids. For each, send `FetchChatQuery`, build the formatted content (existing `formatChatAsMarkdown` / `formatChatAsJson`), and write to `<output-dir>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` (the existing default filename pattern, just inside `--output-dir`).
+2. If `--out` is supplied, it is rejected with `Error: cannot use --out together with comma-separated ids. Specify --out-dir instead.` (a single `--out` makes no sense for N files).
+3. If `--out-dir` is supplied, ensure it exists (use the existing `infrastructure/io.ts:ensureDir`). Default is the current working directory.
+4. Iterate ids. For each, send `FetchChatQuery`, build the formatted content (existing `formatChatAsMarkdown` / `formatChatAsJson`), and write to `<out-dir>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` (the existing default filename pattern, just inside `--out-dir`).
 5. Print `Exported conversation '<id>' to: <path>` per success. On any failure, print the error and continue.
 6. After the loop, print a summary `Exported: <n>` / `Failed: <m>` / `Output: <dir>` (matches the existing `export-all` summary style at `src/cli/commands/export-all-command.ts:139-145`).
 
@@ -170,7 +170,7 @@ Two new files:
 1. Parse ids. If empty, error and exit 1.
 2. Send a `ListChatsQuery` (no filter) and a `FetchChatQuery` per id. On any per-id failure, log a warning and continue with the rest.
 3. Call `summarizeChatsLocally(chats, messagesById)` and `formatBulkSummary(summary)` to get the file content.
-4. Resolve the default output path: `gemiterm-bulk-summary-<YYYY-MM-DD-HHMMSS>.md` in CWD, or the path supplied by `--output/-o`.
+4. Resolve the default output path: `gemiterm-bulk-summary-<YYYY-MM-DD-HHMMSS>.md` in CWD, or the path supplied by `--out/-o`.
 5. Write the file and print the path: `Bulk summary written to: <path>`.
 6. If `process.stdin.isTTY === true`, call `confirm("Open a new chat with this file as context?")`. On yes, look up the active profile via `ProfileAuthManager.getActiveProfiles()` (or the single default profile) and invoke `CommandRegistry.getHandler("new").execute(["--prompt-file", path, "--profile", profileName], context)`. On no, return normally.
 7. If non-TTY, skip the prompt and return (the user can run `gemiterm new --prompt-file <path>` themselves).
@@ -281,7 +281,7 @@ The `new` command (which is a real `CliCommand` already, not a new code path) ha
 
 - **[Risk]** A bulk delete batch with N>50 ids could take a long time (N mediator round-trips) and the user has no way to abort. → **Mitigation:** the mediator calls are sequential and the user's `Ctrl+C` kills the process. We add a progress line `[i/N] Deleting <id>... OK|FAILED` for N>1 (consistent with `export-all`'s progress line at `src/cli/commands/export-all-command.ts:127-129`).
 
-- **[Risk]** `--output-dir` could shadow the parent directory of a user's existing files. → **Mitigation:** `export` only writes files *into* the directory (it doesn't delete or overwrite anything outside it). If a file with the default name already exists in the dir, `writeTextFile` overwrites it — same behavior as the single-id `export` for the CWD case.
+- **[Risk]** `--out-dir` could shadow the parent directory of a user's existing files. → **Mitigation:** `export` only writes files *into* the directory (it doesn't delete or overwrite anything outside it). If a file with the default name already exists in the dir, `writeTextFile` overwrites it — same behavior as the single-id `export` for the CWD case.
 
 - **[Risk]** The browser's selection state lives in `useState`, which is keyed by component identity. If `@inquirer/core` re-mounts the prompt between filter changes, the selection is lost. → **Mitigation:** the existing browser doesn't re-mount on filter changes (filter changes update `useState` and re-render in place). The same pattern applies to the new selection state.
 

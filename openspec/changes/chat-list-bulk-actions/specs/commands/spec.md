@@ -72,7 +72,7 @@ The system MUST provide a `delete` command implemented by `DeleteCommand` in `sr
 
 ### Requirement: ExportCommand
 
-The system MUST provide an `export` command implemented by `ExportCommand` in `src/cli/commands/export-command.ts`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids (e.g. `id1,id2,id3`); the command MUST split comma-separated tokens into individual ids. The command MUST deduplicate ids after splitting. The command MUST support `--output/-o <path>`, `--output-dir/-d <dir>`, `--format/-f <markdown|json>` (default `markdown`), `--include-metadata`, and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. The command MUST reject combining `--output` with more than one id by printing `Error: cannot use --output together with comma-separated ids. Specify --output-dir instead.` and exiting with code 1. When `--output-dir` is supplied, the command MUST create the directory (and any parents) via `infrastructure/io.ts:ensureDir`. The command MUST iterate the ids in order and, for each id, send a `FetchChatQuery` to the mediator with `payload.conversationId` and write the formatted output to `<output-dir>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` (where `ext` is `md` for markdown and `json` for json) when `--output-dir` is set, or to `<cwd>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` when `--output-dir` is not set. The legacy single-id `--output` flow MUST be preserved: when exactly one id is provided and `--output` is supplied, the command writes to that path (and not to the default filename). The command MUST reject combining `--output` with more than one id by printing `Error: cannot use --output together with comma-separated ids. Specify --output-dir instead.` and exiting with code 1. Markdown output MUST be produced by `formatChatAsMarkdown` and JSON output MUST be produced by `formatChatAsJson`. The command MUST print `Exported conversation '<id>' to: <path>` for each success. On any per-id failure, the command MUST print `Failed to export conversation '<id>': <message>` in red and continue with the next id. After the iteration, the command MUST print a summary line `Exported: <n>` (and `Failed: <m>` when m > 0) and `Output: <dir>`. When the mediator's `FetchChatQuery` handler throws for one of the ids, the failing id is counted as a failure and the summary line includes `Failed: <m>`. When all ids fail, the process MUST exit with code 1; when all succeed, the process MUST exit with code 0.
+The system MUST provide an `export` command implemented by `ExportCommand` in `src/cli/commands/export-command.ts`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids (e.g. `id1,id2,id3`); the command MUST split comma-separated tokens into individual ids. The command MUST deduplicate ids after splitting. The command MUST support `--out/-o <path>`, `--out-dir/-d <dir>`, `--format/-f <markdown|json>` (default `markdown`), `--include-metadata`, and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. The command MUST reject combining `--out` with more than one id by printing `Error: cannot use --out together with comma-separated ids. Specify --out-dir instead.` and exiting with code 1. When `--out-dir` is supplied, the command MUST create the directory (and any parents) via `infrastructure/io.ts:ensureDir`. The command MUST iterate the ids in order and, for each id, send a `FetchChatQuery` to the mediator with `payload.conversationId` and write the formatted output to `<out-dir>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` (where `ext` is `md` for markdown and `json` for json) when `--out-dir` is set, or to `<cwd>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` when `--out-dir` is not set. The legacy single-id `--out` flow MUST be preserved: when exactly one id is provided and `--out` is supplied, the command writes to that path (and not to the default filename). The command MUST reject combining `--out` with more than one id by printing `Error: cannot use --out together with comma-separated ids. Specify --out-dir instead.` and exiting with code 1. Markdown output MUST be produced by `formatChatAsMarkdown` and JSON output MUST be produced by `formatChatAsJson`. The command MUST print `Exported conversation '<id>' to: <path>` for each success. On any per-id failure, the command MUST print `Failed to export conversation '<id>': <message>` in red and continue with the next id. After the iteration, the command MUST print a summary line `Exported: <n>` (and `Failed: <m>` when m > 0) and `Output: <dir>`. When the mediator's `FetchChatQuery` handler throws for one of the ids, the failing id is counted as a failure and the summary line includes `Failed: <m>`. When all ids fail, the process MUST exit with code 1; when all succeed, the process MUST exit with code 0.
 
 #### Scenario: Export with a single id writes the default-named file in CWD
 
@@ -87,23 +87,23 @@ The system MUST provide an `export` command implemented by `ExportCommand` in `s
 - **AND** the output contains three `Exported conversation '<id>' to: <path>` lines
 - **AND** the summary line `Exported: 3` is printed at the end
 
-#### Scenario: Export with --output-dir writes N files under the supplied directory
+#### Scenario: Export with --out-dir writes N files under the supplied directory
 
-- **WHEN** the user runs `gemiterm export id1,id2,id3 --output-dir ./exports`
+- **WHEN** the user runs `gemiterm export id1,id2,id3 --out-dir ./exports`
 - **THEN** the directory `./exports` is created (along with any parents)
 - **AND** three files are written under `./exports` with the default filename pattern
 - **AND** the summary line `Output: ./exports` is printed
 
-#### Scenario: Export rejects --output together with multiple ids
+#### Scenario: Export rejects --out together with multiple ids
 
-- **WHEN** the user runs `gemiterm export id1,id2,id3 --output ./out.md`
-- **THEN** the output contains `Error: cannot use --output together with comma-separated ids. Specify --output-dir instead.`
+- **WHEN** the user runs `gemiterm export id1,id2,id3 --out ./out.md`
+- **THEN** the output contains `Error: cannot use --out together with comma-separated ids. Specify --out-dir instead.`
 - **AND** the process exits with code 1
 - **AND** no files are written
 
 #### Scenario: Export with --format json uses the json extension
 
-- **WHEN** the user runs `gemiterm export id1,id2 --format json --output-dir ./exports`
+- **WHEN** the user runs `gemiterm export id1,id2 --format json --out-dir ./exports`
 - **THEN** the written files have a `.json` extension and the content is the JSON export of each conversation
 
 #### Scenario: Export with --include-metadata
@@ -127,7 +127,7 @@ The system MUST provide an `export` command implemented by `ExportCommand` in `s
 #### Scenario: Export --help shows usage
 
 - **WHEN** the user runs `gemiterm export --help`
-- **THEN** the output contains `Usage: gemiterm export <conversation_id> [options]` and documents `--output`, `--output-dir`, `--format`, `--include-metadata`, and `--help`
+- **THEN** the output contains `Usage: gemiterm export <conversation_id> [options]` and documents `--out`, `--out-dir`, `--format`, `--include-metadata`, and `--help`
 
 ### Requirement: CommandRegistry
 
@@ -157,7 +157,7 @@ The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.t
 
 ### Requirement: SummarizeCommand
 
-The system MUST provide a `summarize` command implemented by `SummarizeCommand` in `src/cli/commands/summarize-command.ts`. The command MUST be registered under the name `summarize`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids; the command MUST split comma-separated tokens into individual ids. The command MUST support `--output/-o <path>` and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. When ids are provided, the command MUST send a `ListChatsQuery` to the mediator to obtain the chat metadata for the summary header (the per-id content is fetched via a `FetchChatQuery` per id). For each id whose `FetchChatQuery` fails, the command MUST log a warning `Skipped '<id>': <message>` to stderr and continue with the rest. The command MUST call `summarizeChatsLocally` from `src/services/local-summarizer.ts` to compute the summary structure, MUST call `formatBulkSummary` to render markdown, and MUST write the rendered content via `infrastructure/io.ts:writeTextFile` to the path supplied by `--output` or, when `--output` is not set, to a default file in the current working directory named `gemiterm-bulk-summary-<YYYY-MM-DD-HHMMSS>.md`. The command MUST print `Bulk summary written to: <path>`. When `process.stdin.isTTY === true`, the command MUST additionally call the prompts-facade `confirm` helper with message `Open a new chat with this file as context?`; on a yes answer, the command MUST look up the active profile via `ProfileAuthManager.getActiveProfiles()` (or the single default profile), MUST invoke `CommandRegistry.getHandler("new")` with argv `["--prompt-file", outputPath, "--profile", profileName]` (omitting `--profile` when no active profile is resolvable), and MUST return after the new command completes. When `process.stdin.isTTY` is not `true`, the command MUST skip the prompt and MUST NOT spawn the new command. The command MUST NOT call Gemini or any other LLM; the summary is computed entirely from the local chat content via the `local-summarizer` service.
+The system MUST provide a `summarize` command implemented by `SummarizeCommand` in `src/cli/commands/summarize-command.ts`. The command MUST be registered under the name `summarize`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids; the command MUST split comma-separated tokens into individual ids. The command MUST support `--out/-o <path>` and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. When ids are provided, the command MUST send a `ListChatsQuery` to the mediator to obtain the chat metadata for the summary header (the per-id content is fetched via a `FetchChatQuery` per id). For each id whose `FetchChatQuery` fails, the command MUST log a warning `Skipped '<id>': <message>` to stderr and continue with the rest. The command MUST call `summarizeChatsLocally` from `src/services/local-summarizer.ts` to compute the summary structure, MUST call `formatBulkSummary` to render markdown, and MUST write the rendered content via `infrastructure/io.ts:writeTextFile` to the path supplied by `--out` or, when `--out` is not set, to a default file in the current working directory named `gemiterm-bulk-summary-<YYYY-MM-DD-HHMMSS>.md`. The command MUST print `Bulk summary written to: <path>`. When `process.stdin.isTTY === true`, the command MUST additionally call the prompts-facade `confirm` helper with message `Open a new chat with this file as context?`; on a yes answer, the command MUST look up the active profile via `ProfileAuthManager.getActiveProfiles()` (or the single default profile), MUST invoke `CommandRegistry.getHandler("new")` with argv `["--prompt-file", outputPath, "--profile", profileName]` (omitting `--profile` when no active profile is resolvable), and MUST return after the new command completes. When `process.stdin.isTTY` is not `true`, the command MUST skip the prompt and MUST NOT spawn the new command. The command MUST NOT call Gemini or any other LLM; the summary is computed entirely from the local chat content via the `local-summarizer` service.
 
 #### Scenario: Summarize with comma-separated ids writes the summary file
 
@@ -165,9 +165,9 @@ The system MUST provide a `summarize` command implemented by `SummarizeCommand` 
 - **THEN** the output contains `Bulk summary written to: gemini-bulk-summary-<timestamp>.md`
 - **AND** the file exists in the current working directory and contains a `# Bulk summary — 3 conversations` heading
 
-#### Scenario: Summarize with --output writes to the supplied path
+#### Scenario: Summarize with --out writes to the supplied path
 
-- **WHEN** the user runs `gemiterm summarize id1,id2 --output ./out.md`
+- **WHEN** the user runs `gemiterm summarize id1,id2 --out ./out.md`
 - **THEN** the file `./out.md` is created and contains the bulk summary
 
 #### Scenario: Summarize with no ids errors and exits 1
@@ -210,4 +210,4 @@ The system MUST provide a `summarize` command implemented by `SummarizeCommand` 
 #### Scenario: Summarize --help shows usage
 
 - **WHEN** the user runs `gemiterm summarize --help`
-- **THEN** the output contains `Usage: gemiterm summarize <conversation_id> [options]` and documents `--output` and `--help`
+- **THEN** the output contains `Usage: gemiterm summarize <conversation_id> [options]` and documents `--out` and `--help`

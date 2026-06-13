@@ -362,12 +362,12 @@ describe("ListCommand --interactive flag", () => {
       throw new Error("should have thrown");
     } catch (error) {
       expect((error as Error).message).toContain(
-        "Cannot use --interactive with --format or --path.",
+        "Cannot use --interactive with --format or --out.",
       );
     }
   });
 
-  test("--interactive --path out.txt throws GemitermError", async () => {
+  test("--interactive --out out.txt throws GemitermError", async () => {
     const mockHandler = {
       queryType: QUERY_TYPES.LIST_CHATS,
       handle: mock(async () => ({ chats: SAMPLE_CHATS })),
@@ -375,12 +375,12 @@ describe("ListCommand --interactive flag", () => {
     mediator.registerQueryHandler(mockHandler as any);
 
     try {
-      await command.execute(["--interactive", "--path", "out.txt"], context);
+      await command.execute(["--interactive", "--out", "out.txt"], context);
       throw new Error("should have thrown");
     } catch (error) {
       expect(error).toBeInstanceOf(GemitermError);
       expect((error as Error).message).toContain(
-        "Cannot use --interactive with --format or --path.",
+        "Cannot use --interactive with --format or --out.",
       );
     }
   });

@@ -23,7 +23,7 @@ interface ListCommandOptions {
   after: string;
   before: string;
   format: "text" | "json";
-  path: string;
+  out: string;
   interactive: boolean;
 }
 
@@ -37,7 +37,7 @@ const DEFAULT_OPTIONS: ListCommandOptions = {
   after: "",
   before: "",
   format: "text",
-  path: "",
+  out: "",
   interactive: false,
 };
 
@@ -86,9 +86,9 @@ export class ListCommand implements CliCommand {
     }
 
     if (options.format === "json") {
-      this.outputJson(chats, options.path);
+      this.outputJson(chats, options.out);
     } else {
-      this.outputText(chats, options.path, options.allProfiles);
+      this.outputText(chats, options.out, options.allProfiles);
     }
   }
 
@@ -125,27 +125,27 @@ export class ListCommand implements CliCommand {
     });
   }
 
-  private outputJson(chats: ChatInfo[], path: string): void {
+  private outputJson(chats: ChatInfo[], out: string): void {
     const output = JSON.stringify({ chats }, null, 2);
-    if (path) {
-      this.writeOutput(path, output);
+    if (out) {
+      this.writeOutput(out, output);
     } else {
       console.log(output);
     }
   }
 
-  private outputText(chats: ChatInfo[], path: string, allProfiles: boolean): void {
+  private outputText(chats: ChatInfo[], out: string, allProfiles: boolean): void {
     const output = formatChatList(chats, { includeProfileColumn: allProfiles });
-    if (path) {
-      this.writeOutput(path, output);
+    if (out) {
+      this.writeOutput(out, output);
     } else {
       console.log(output);
     }
   }
 
-  private writeOutput(path: string, content: string): void {
-    writeTextFile(path, content);
-    console.log(chalk.dim(`Output written to: ${path}`));
+  private writeOutput(out: string, content: string): void {
+    writeTextFile(out, content);
+    console.log(chalk.dim(`Output written to: ${out}`));
   }
 
   private async runInteractiveBrowser(
@@ -242,9 +242,9 @@ export class ListCommand implements CliCommand {
         case "-f":
           options.format = this.parseFormat(args[++i]);
           break;
-        case "--path":
-        case "-p":
-          options.path = args[++i] ?? "";
+        case "--out":
+        case "-o":
+          options.out = args[++i] ?? "";
           break;
         case "--interactive":
         case "-i":
@@ -255,9 +255,9 @@ export class ListCommand implements CliCommand {
 
     if (
       options.interactive &&
-      (options.format !== DEFAULT_OPTIONS.format || options.path !== DEFAULT_OPTIONS.path)
+      (options.format !== DEFAULT_OPTIONS.format || options.out !== DEFAULT_OPTIONS.out)
     ) {
-      throw new GemitermError("Cannot use --interactive with --format or --path.");
+      throw new GemitermError("Cannot use --interactive with --format or --out.");
     }
 
     return options;
@@ -287,7 +287,7 @@ export class ListCommand implements CliCommand {
       { flag: "--after <date>", desc: "Only show chats after this date" },
       { flag: "--before <date>", desc: "Only show chats before this date" },
       { flag: "--format, -f <fmt>", desc: "Output format: text, json (default: text)" },
-      { flag: "--path, -p <path>", desc: "Write output to file" },
+      { flag: "--out, -o <path>", desc: "Write output to file" },
       { flag: "--interactive, -i", desc: "Open interactive chat-list browser (TTY only)" },
       { flag: "--help, -h", desc: "Show this help message" },
     ];

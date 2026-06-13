@@ -173,7 +173,7 @@ gemiterm list --all --all-profiles -f json -p chats.json
 | `--all` | Show all chats (no limit) |
 | `--all-profiles` | Merge chats from all profiles |
 | `-f, --format <text\|json>` | Output format |
-| `-p, --path <path>` | Save output to file |
+| `-o, --out <path>` | Save output to file |
 
 ### `gemiterm fetch <conversation_id>`
 
@@ -181,13 +181,13 @@ Fetch a single conversation's full history.
 
 ```bash
 gemiterm fetch c_abc123
-gemiterm fetch c_abc123 -f json -p chat.json
+gemiterm fetch c_abc123 -f json -o chat.json
 ```
 
 | Flag | Description |
 | --- | --- |
 | `-f, --format <text\|json>` | Output format |
-| `-p, --path <path>` | Save output to file |
+| `-o, --out <path>` | Save output to file |
 
 ### `gemiterm new [message]`
 
@@ -233,7 +233,7 @@ gemiterm export c_abc123 -o ./chat.md -f json --include-metadata
 
 | Flag | Description |
 | --- | --- |
-| `-o, --output <path>` | Custom output file path |
+| `-o, --out <path>` | Custom output file path |
 | `-f, --format <markdown\|json>` | Export format (default: `markdown`) |
 | `--include-metadata` | Include full metadata in the export |
 
@@ -249,7 +249,7 @@ gemiterm export-all -o ./exports -a
 
 | Flag | Description |
 | --- | --- |
-| `-o, --output-dir <dir>` | Output directory (default: `./exports`) |
+| `-o, --out-dir <dir>` | Output directory (default: `./exports`) |
 | `--since <date>` | Only chats newer than this date |
 | `--include-metadata` | Include full metadata |
 | `-a, --all-profiles` | Export from all profiles |
