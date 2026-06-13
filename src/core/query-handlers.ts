@@ -11,6 +11,7 @@ export interface ListChatsQueryPayload {
   offset?: number;
   search?: string;
   allProfiles?: boolean;
+  profile?: string;
 }
 
 export interface ListChatsQueryResult {
@@ -78,12 +79,14 @@ export class ListChatsQueryHandler
   }
 
   async handle(query: Query<ListChatsQueryPayload>): Promise<ListChatsQueryResult> {
-    const { limit, offset, search, allProfiles } = extractPayload(query);
+    const { limit, offset, search, allProfiles, profile } = extractPayload(query);
     const options = { limit, offset, search };
     const client = this.getGeminiClient();
 
     let chats: ChatInfo[];
-    if (allProfiles) {
+    if (profile) {
+      chats = await client.forProfile(profile).listChats(options);
+    } else if (allProfiles) {
       const profileNames = this.listProfiles();
       const results = await Promise.all(
         profileNames.map((name) => client.forProfile(name).listChats(options)),

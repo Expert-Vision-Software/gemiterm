@@ -55,6 +55,56 @@ describe("ListChatsQueryHandler", () => {
     );
     expect(mockClient.listChats).toHaveBeenCalledTimes(1);
   });
+
+  test("routes to forProfile(name) when profile is set in payload", async () => {
+    const profileClient = {
+      ...mockClient,
+      listChats: mock(() =>
+        Promise.resolve([{ id: "p1", title: "P chat", isPinned: false, timestamp: 1, profile: "work" }]),
+      ),
+    };
+    const forProfileSpy = mock((_name: string) => profileClient as any);
+    const handler = new ListChatsQueryHandler(
+      () => ({ ...mockClient, forProfile: forProfileSpy } as any),
+      () => ["work", "personal"],
+    );
+
+    const result = await handler.handle(
+      makeQuery(QUERY_TYPES.LIST_CHATS, { profile: "work", search: "foo" }),
+    );
+
+    expect(forProfileSpy).toHaveBeenCalledTimes(1);
+    expect(forProfileSpy.mock.calls[0][0]).toBe("work");
+    expect(profileClient.listChats).toHaveBeenCalledWith({
+      limit: undefined,
+      offset: undefined,
+      search: "foo",
+    });
+    expect(result.chats).toHaveLength(1);
+    expect(result.chats[0].id).toBe("p1");
+  });
+
+  test("profile takes precedence over allProfiles", async () => {
+    const profileClient = {
+      ...mockClient,
+      listChats: mock(() => Promise.resolve([])),
+    };
+    const forProfileSpy = mock((_name: string) => profileClient as any);
+    const listProfilesSpy = mock(() => ["work", "personal"]);
+
+    const handler = new ListChatsQueryHandler(
+      () => ({ ...mockClient, forProfile: forProfileSpy } as any),
+      listProfilesSpy,
+    );
+
+    await handler.handle(
+      makeQuery(QUERY_TYPES.LIST_CHATS, { profile: "work", allProfiles: true }),
+    );
+
+    expect(forProfileSpy).toHaveBeenCalledTimes(1);
+    expect(forProfileSpy.mock.calls[0][0]).toBe("work");
+    expect(listProfilesSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("FetchChatQueryHandler", () => {

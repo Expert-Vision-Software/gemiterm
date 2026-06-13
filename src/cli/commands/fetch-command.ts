@@ -13,13 +13,13 @@ import { writeTextFile } from "../../infrastructure/io.ts";
 interface FetchCommandOptions {
   help: boolean;
   format: "text" | "json";
-  path: string;
+  out: string;
 }
 
 const DEFAULT_OPTIONS: FetchCommandOptions = {
   help: false,
   format: "text",
-  path: "",
+  out: "",
 };
 
 export class FetchCommand implements CliCommand {
@@ -52,9 +52,9 @@ export class FetchCommand implements CliCommand {
     } as Query<FetchChatQueryPayload>);
 
     if (options.format === "json") {
-      this.outputJson(result.messages, conversationId, options.path);
+      this.outputJson(result.messages, conversationId, options.out);
     } else {
-      this.outputText(result.messages, conversationId, options.path);
+      this.outputText(result.messages, conversationId, options.out);
     }
   }
 
@@ -81,16 +81,16 @@ export class FetchCommand implements CliCommand {
     }
   }
 
-  private outputJson(messages: Message[], conversationId: string, path: string): void {
+  private outputJson(messages: Message[], conversationId: string, out: string): void {
     const output = JSON.stringify({ conversationId, messages }, null, 2);
-    if (path) {
-      this.writeOutput(path, output);
+    if (out) {
+      this.writeOutput(out, output);
     } else {
       console.log(output);
     }
   }
 
-  private outputText(messages: Message[], conversationId: string, path: string): void {
+  private outputText(messages: Message[], conversationId: string, out: string): void {
     const lines: string[] = [];
 
     lines.push(chalk.bold(`Conversation: ${chalk.cyan(conversationId)}`));
@@ -109,16 +109,16 @@ export class FetchCommand implements CliCommand {
     }
 
     const output = lines.join("\n");
-    if (path) {
-      this.writeOutput(path, output);
+    if (out) {
+      this.writeOutput(out, output);
     } else {
       console.log(output);
     }
   }
 
-  private writeOutput(path: string, content: string): void {
-    writeTextFile(path, content);
-    console.log(chalk.dim(`Output written to: ${path}`));
+  private writeOutput(out: string, content: string): void {
+    writeTextFile(out, content);
+    console.log(chalk.dim(`Output written to: ${out}`));
   }
 
   private parseArgs(args: string[]): FetchCommandOptions {
@@ -135,9 +135,9 @@ export class FetchCommand implements CliCommand {
         case "-f":
           options.format = this.parseFormat(args[++i]);
           break;
-        case "--path":
-        case "-p":
-          options.path = args[++i] ?? "";
+        case "--out":
+        case "-o":
+          options.out = args[++i] ?? "";
           break;
       }
     }
@@ -160,7 +160,7 @@ export class FetchCommand implements CliCommand {
 
     const flags = [
       { flag: "--format, -f <fmt>", desc: "Output format: text, json (default: text)" },
-      { flag: "--path, -p <path>", desc: "Write output to file" },
+      { flag: "--out, -o <path>", desc: "Write output to file" },
       { flag: "--help, -h", desc: "Show this help message" },
     ];
 

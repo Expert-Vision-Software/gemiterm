@@ -4,6 +4,8 @@ import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
 import { QUERY_TYPES } from "../../src/core/query-handlers.ts";
 import type { ListChatsQueryResult } from "../../src/core/query-handlers.ts";
+import { NonInteractiveError } from "../../src/cli/utils/prompts.ts";
+import { GemitermError } from "../../src/core/errors.ts";
 
 const SAMPLE_CHATS = [
   { id: "abc123", title: "Python tips", isPinned: true, timestamp: 1717000000000 },
@@ -89,17 +91,34 @@ describe("ListCommand", () => {
     );
   });
 
-  test("applies --all flag", async () => {
+  test("returns all conversations by default (no limit)", async () => {
     const mockHandler = {
       queryType: QUERY_TYPES.LIST_CHATS,
       handle: mock(async () => ({ chats: SAMPLE_CHATS })),
     };
     mediator.registerQueryHandler(mockHandler as any);
 
-    await command.execute(["--all"], context);
+    await command.execute([], context);
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("Total: 3 conversations");
+    const sentQuery = mockHandler.handle.mock.calls[0][0] as any;
+    expect(sentQuery.payload.limit).toBeUndefined();
+  });
+
+  test("applies --limit to restrict results", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    await command.execute(["--limit", "1"], context);
+
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Total: 1 conversation");
+    const sentQuery = mockHandler.handle.mock.calls[0][0] as any;
+    expect(sentQuery.payload.limit).toBe(1);
   });
 
   test("applies sort by alpha", async () => {
@@ -163,6 +182,51 @@ describe("ListCommand", () => {
     );
   });
 
+  test("applies --profile flag in query", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: [] })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    await command.execute(["--profile", "work"], context);
+
+    expect(mockHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ profile: "work" }),
+      }),
+    );
+  });
+
+  test("applies -p short flag in query", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: [] })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    await command.execute(["-p", "personal"], context);
+
+    expect(mockHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ profile: "personal" }),
+      }),
+    );
+  });
+
+  test("omits profile from payload when not specified", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: [] })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    await command.execute([], context);
+
+    const call = mockHandler.handle.mock.calls[0][0] as any;
+    expect(call.payload.profile).toBeUndefined();
+  });
+
   test("applies --offset flag", async () => {
     const mockHandler = {
       queryType: QUERY_TYPES.LIST_CHATS,
@@ -175,5 +239,269 @@ describe("ListCommand", () => {
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("ghi789");
     expect(output).toContain("Total: 1 conversation");
+  });
+});
+
+describe("ListCommand --interactive flag", () => {
+  let command: ListCommand;
+  let mediator: Mediator;
+  let context: CliCommandContext;
+  let logSpy: ReturnType<typeof spyOn>;
+  let promptsModule: typeof import("../../src/cli/utils/prompts.ts");
+
+  beforeEach(async () => {
+    command = new ListCommand();
+    mediator = new Mediator();
+    context = { verbose: false, mediator };
+    logSpy = spyOn(console, "log").mockImplementation(() => {});
+    promptsModule = await import("../../src/cli/utils/prompts.ts");
+  });
+
+  afterEach(() => {
+    mock.restore();
+    logSpy.mockRestore();
+  });
+
+  test("help documents --interactive flag", async () => {
+    await command.execute(["--help"], context);
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("--interactive");
+    expect(output).toContain("-i");
+  });
+
+  test("--interactive enters the TUI when TTY and chat is picked then quit", async () => {
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const browserSpy = spyOn(promptsModule, "browser").mockResolvedValue({
+      kind: "quit",
+    } as any);
+    const selectSpy = spyOn(promptsModule, "select").mockResolvedValue(undefined as any);
+
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    try {
+      await command.execute(["--interactive"], context);
+      expect(browserSpy).toHaveBeenCalledTimes(1);
+      const callArg = browserSpy.mock.calls[0][0] as any;
+      expect(callArg.chats).toEqual(SAMPLE_CHATS);
+      expect(selectSpy).not.toHaveBeenCalled();
+      expect(mockHandler.handle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ allProfiles: true }),
+        }),
+      );
+    } finally {
+      if (stdinDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    }
+  });
+
+  test("--interactive -i short flag also enables allProfiles by default", async () => {
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const browserSpy = spyOn(promptsModule, "browser").mockResolvedValue({
+      kind: "quit",
+    } as any);
+
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    try {
+      await command.execute(["-i"], context);
+      expect(browserSpy).toHaveBeenCalledTimes(1);
+      expect(mockHandler.handle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ allProfiles: true }),
+        }),
+      );
+    } finally {
+      if (stdinDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    }
+  });
+
+  test("--interactive -i short flag is equivalent", async () => {
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const browserSpy = spyOn(promptsModule, "browser").mockResolvedValue({
+      kind: "quit",
+    } as any);
+
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    try {
+      await command.execute(["-i"], context);
+      expect(browserSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      if (stdinDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    }
+  });
+
+  test("--interactive --sort pre-selects the sort", async () => {
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const browserSpy = spyOn(promptsModule, "browser").mockResolvedValue({
+      kind: "quit",
+    } as any);
+
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    try {
+      await command.execute(["--interactive", "--sort", "alpha"], context);
+      const callArg = browserSpy.mock.calls[0][0] as any;
+      expect(callArg.initialSort).toBe("alpha");
+    } finally {
+      if (stdinDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    }
+  });
+
+  test("--interactive --profile work does not force allProfiles", async () => {
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+
+    const browserSpy = spyOn(promptsModule, "browser").mockResolvedValue({
+      kind: "quit",
+    } as any);
+
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    try {
+      await command.execute(["-i", "--profile", "work"], context);
+      expect(mockHandler.handle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ profile: "work", allProfiles: false }),
+        }),
+      );
+      expect(browserSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      if (stdinDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    }
+  });
+
+  test("--interactive throws NonInteractiveError when not a TTY", async () => {
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: false,
+      configurable: true,
+      writable: true,
+    });
+
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    try {
+      await expect(command.execute(["--interactive"], context)).rejects.toBeInstanceOf(
+        NonInteractiveError,
+      );
+    } finally {
+      if (stdinDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    }
+  });
+
+  test("--interactive --format json throws GemitermError", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    await expect(command.execute(["--interactive", "--format", "json"], context)).rejects.toThrow(
+      GemitermError,
+    );
+
+    try {
+      await command.execute(["--interactive", "--format", "json"], context);
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect((error as Error).message).toContain(
+        "Cannot use --interactive with --format or --out.",
+      );
+    }
+  });
+
+  test("--interactive --out out.txt throws GemitermError", async () => {
+    const mockHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
+    };
+    mediator.registerQueryHandler(mockHandler as any);
+
+    try {
+      await command.execute(["--interactive", "--out", "out.txt"], context);
+      throw new Error("should have thrown");
+    } catch (error) {
+      expect(error).toBeInstanceOf(GemitermError);
+      expect((error as Error).message).toContain(
+        "Cannot use --interactive with --format or --out.",
+      );
+    }
   });
 });

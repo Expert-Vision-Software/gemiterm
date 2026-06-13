@@ -1,9 +1,24 @@
-## [2.2.0-beta.0] - 2026-06-13
+## [2.2.0-beta.1] - 2026-06-13
+
+### Added
+
+- Introduced an interactive conversation browser for `list -i` using Inquirer prompts.
+- Added profile and favorites filtering options in the interactive browser.
+- Added `--profile` support for conversation filtering in list flows.
+- Improved readability for long conversation titles with truncation and ellipsis in browser views.
 
 ### Changed
-- documentation update
-- spec changes
-- test @next deploy tag
+
+- Refined interactive list UX by removing pagination and simplifying default list behavior.
+- Standardized CLI short flags: `-o` for output (`--out`) and reserved `-p` for profile-related usage.
+- Updated release publishing behavior so prerelease tags publish to npm `next` instead of overriding `latest`.
+- Updated docs and OpenSpec artifacts to reflect the new browser/list behavior and ongoing UX changes.
+
+### Fixed
+
+- Prevented Gemini client startup instability by disabling auto-refresh during client initialization.
+
+---
 
 ## [2.1.1] - 2026-06-12
 

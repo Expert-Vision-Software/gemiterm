@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import { createInterface } from "node:readline";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { CookieStorage, ProfileManager } from "../../infrastructure/storage.ts";
@@ -10,6 +9,7 @@ import { getDefaultProfileName, listProfiles, setDefaultProfileName } from "../.
 import { GemitermError } from "../../core/errors.ts";
 import { validateProfileName } from "../../infrastructure/validators.ts";
 import { formatProfileTable } from "../../infrastructure/formatters.ts";
+import { text } from "../utils/prompts.ts";
 
 export class AuthCommand implements CliCommand {
   readonly name = "auth";
@@ -90,7 +90,9 @@ export class AuthCommand implements CliCommand {
 
     switch (choice) {
       case "A": {
-        const name = await this.promptInput("Enter profile name");
+        const name = await this.promptInput("Enter profile name", {
+          validate: (v) => /^[a-zA-Z0-9_-]+$/.test(v) || "Invalid profile name",
+        });
         validateProfileName(name.trim());
         if (listProfiles().includes(name.trim())) {
           throw new GemitermError(`Profile '${name.trim()}' already exists.`);
@@ -131,7 +133,9 @@ export class AuthCommand implements CliCommand {
         if (!profiles.includes(oldTrimmed)) {
           throw new GemitermError(`Profile '${oldTrimmed}' does not exist.`);
         }
-        const newName = await this.promptInput("Enter new profile name");
+        const newName = await this.promptInput("Enter new profile name", {
+          validate: (v) => /^[a-zA-Z0-9_-]+$/.test(v) || "Invalid profile name",
+        });
         const newTrimmed = newName.trim();
         validateProfileName(newTrimmed);
         profileManager.rename(oldTrimmed, newTrimmed);
@@ -167,13 +171,10 @@ export class AuthCommand implements CliCommand {
     console.log("  -h, --help    Show this help message");
   }
 
-  private promptInput(prompt: string): Promise<string> {
-    return new Promise<string>((resolve) => {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      rl.question(`${chalk.cyan(prompt + ": ")} `, (answer) => {
-        rl.close();
-        resolve(answer);
-      });
-    });
+  private promptInput(
+    prompt: string,
+    opts?: { validate?: (value: string) => boolean | string },
+  ): Promise<string> {
+    return text({ message: prompt, validate: opts?.validate });
   }
 }

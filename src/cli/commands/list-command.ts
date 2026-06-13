@@ -10,33 +10,37 @@ import {
 import { formatChatList } from "../../infrastructure/formatters.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
+import { GemitermError } from "../../core/errors.ts";
+import { browser, select, type BrowserAction } from "../utils/prompts.ts";
 
 interface ListCommandOptions {
   help: boolean;
   limit: number;
   offset: number;
-  all: boolean;
   allProfiles: boolean;
+  profile: string;
   sort: "recent" | "oldest" | "alpha";
   search: string;
   after: string;
   before: string;
   format: "text" | "json";
-  path: string;
+  out: string;
+  interactive: boolean;
 }
 
 const DEFAULT_OPTIONS: ListCommandOptions = {
   help: false,
-  limit: 10,
+  limit: 0,
   offset: 0,
-  all: false,
   allProfiles: false,
+  profile: "",
   sort: "recent",
   search: "",
   after: "",
   before: "",
   format: "text",
-  path: "",
+  out: "",
+  interactive: false,
 };
 
 export class ListCommand implements CliCommand {
@@ -53,11 +57,13 @@ export class ListCommand implements CliCommand {
     }
 
     const mediator: Mediator = context.mediator;
+    const hasLimit = options.limit > 0;
     const query: ListChatsQueryPayload = {
-      limit: options.all ? undefined : options.limit,
+      limit: hasLimit ? options.limit : undefined,
       offset: options.offset || undefined,
       search: options.search || undefined,
       allProfiles: options.allProfiles,
+      profile: options.profile || undefined,
     };
 
     logger.debug(`Sending list-chats query: ${JSON.stringify(query)}`);
@@ -68,17 +74,24 @@ export class ListCommand implements CliCommand {
 
     let chats = result.chats;
 
+    if (options.interactive) {
+      await this.runInteractiveBrowser(chats, options, context);
+      return;
+    }
+
     chats = this.applySort(chats, options.sort);
     chats = this.applyDateFilter(chats, options.after, options.before);
 
-    if (!options.all) {
+    if (hasLimit) {
       chats = chats.slice(options.offset, options.offset + options.limit);
+    } else if (options.offset > 0) {
+      chats = chats.slice(options.offset);
     }
 
     if (options.format === "json") {
-      this.outputJson(chats, options.path);
+      this.outputJson(chats, options.out);
     } else {
-      this.outputText(chats, options.path, options.allProfiles);
+      this.outputText(chats, options.out, options.allProfiles || Boolean(options.profile));
     }
   }
 
@@ -115,27 +128,84 @@ export class ListCommand implements CliCommand {
     });
   }
 
-  private outputJson(chats: ChatInfo[], path: string): void {
+  private outputJson(chats: ChatInfo[], out: string): void {
     const output = JSON.stringify({ chats }, null, 2);
-    if (path) {
-      this.writeOutput(path, output);
+    if (out) {
+      this.writeOutput(out, output);
     } else {
       console.log(output);
     }
   }
 
-  private outputText(chats: ChatInfo[], path: string, allProfiles: boolean): void {
+  private outputText(chats: ChatInfo[], out: string, allProfiles: boolean): void {
     const output = formatChatList(chats, { includeProfileColumn: allProfiles });
-    if (path) {
-      this.writeOutput(path, output);
+    if (out) {
+      this.writeOutput(out, output);
     } else {
       console.log(output);
     }
   }
 
-  private writeOutput(path: string, content: string): void {
-    writeTextFile(path, content);
-    console.log(chalk.dim(`Output written to: ${path}`));
+  private writeOutput(out: string, content: string): void {
+    writeTextFile(out, content);
+    console.log(chalk.dim(`Output written to: ${out}`));
+  }
+
+  private async runInteractiveBrowser(
+    chats: ChatInfo[],
+    options: ListCommandOptions,
+    context: CliCommandContext,
+  ): Promise<void> {
+    while (true) {
+      const result = await browser({
+        chats,
+        initialSort: options.sort,
+      });
+      if (result.kind === "quit") return;
+      const actionResult = await this.showActionMenu(result.chat);
+      if (actionResult === "quit") return;
+      if (actionResult === "back") continue;
+      await this.executeAction(actionResult, result.chat, context);
+    }
+  }
+
+  private async showActionMenu(chat: ChatInfo): Promise<BrowserAction> {
+    const choice = await select<BrowserAction>({
+      message: `Selected: ${chat.id} — "${chat.title}"`,
+      choices: [
+        { value: "view", label: "View full conversation" },
+        { value: "export-markdown", label: "Export to Markdown" },
+        { value: "export-json", label: "Export to JSON" },
+        { value: "copy-id", label: "Copy conversation ID" },
+        { value: "back", label: "Back to list" },
+        { value: "quit", label: "Quit" },
+      ],
+    });
+    return choice;
+  }
+
+  private async executeAction(
+    action: "view" | "export-markdown" | "export-json" | "copy-id",
+    chat: ChatInfo,
+    context: CliCommandContext,
+  ): Promise<void> {
+    if (action === "copy-id") {
+      console.log(chalk.cyan(`Copied: ${chat.id}`));
+      return;
+    }
+    const { CommandRegistry } = await import("../command-registry.ts");
+    const registry = new CommandRegistry();
+    registry.registerAllCommands();
+    if (action === "view") {
+      const fetch = registry.getHandler("fetch");
+      if (fetch) await fetch.execute([chat.id, "--format", "text"], context);
+    } else if (action === "export-markdown") {
+      const exportCmd = registry.getHandler("export");
+      if (exportCmd) await exportCmd.execute([chat.id, "--format", "markdown"], context);
+    } else if (action === "export-json") {
+      const exportCmd = registry.getHandler("export");
+      if (exportCmd) await exportCmd.execute([chat.id, "--format", "json"], context);
+    }
   }
 
   private parseArgs(args: string[]): ListCommandOptions {
@@ -155,11 +225,12 @@ export class ListCommand implements CliCommand {
         case "--offset":
           options.offset = parseInt(args[++i], 10) || 0;
           break;
-        case "--all":
-          options.all = true;
-          break;
         case "--all-profiles":
           options.allProfiles = true;
+          break;
+        case "--profile":
+        case "-p":
+          options.profile = args[++i] ?? "";
           break;
         case "--sort":
           options.sort = this.parseSort(args[++i]);
@@ -178,11 +249,26 @@ export class ListCommand implements CliCommand {
         case "-f":
           options.format = this.parseFormat(args[++i]);
           break;
-        case "--path":
-        case "-p":
-          options.path = args[++i] ?? "";
+        case "--out":
+        case "-o":
+          options.out = args[++i] ?? "";
+          break;
+        case "--interactive":
+        case "-i":
+          options.interactive = true;
           break;
       }
+    }
+
+    if (options.interactive && !options.profile) {
+      options.allProfiles = true;
+    }
+
+    if (
+      options.interactive &&
+      (options.format !== DEFAULT_OPTIONS.format || options.out !== DEFAULT_OPTIONS.out)
+    ) {
+      throw new GemitermError("Cannot use --interactive with --format or --out.");
     }
 
     return options;
@@ -204,16 +290,17 @@ export class ListCommand implements CliCommand {
     console.log(chalk.bold("Options:"));
 
     const flags = [
-      { flag: "--limit, -n N", desc: "Number of results (default: 10)" },
+      { flag: "--limit, -n N", desc: "Limit number of results (no limit by default)" },
       { flag: "--offset N", desc: "Skip N results (default: 0)" },
-      { flag: "--all", desc: "Show all conversations (no limit)" },
       { flag: "--all-profiles", desc: "Show conversations from all profiles (with Profile column in text output)" },
+      { flag: "--profile, -p <name>", desc: "Filter conversations to a specific profile (non-interactive)" },
       { flag: "--sort <mode>", desc: "Sort order: recent, oldest, alpha (default: recent)" },
       { flag: "--search, -s <query>", desc: "Filter by title search" },
       { flag: "--after <date>", desc: "Only show chats after this date" },
       { flag: "--before <date>", desc: "Only show chats before this date" },
       { flag: "--format, -f <fmt>", desc: "Output format: text, json (default: text)" },
-      { flag: "--path, -p <path>", desc: "Write output to file" },
+      { flag: "--out, -o <path>", desc: "Write output to file" },
+      { flag: "--interactive, -i", desc: "Open interactive chat-list browser (TTY only; shows all profiles by default)" },
       { flag: "--help, -h", desc: "Show this help message" },
     ];
 

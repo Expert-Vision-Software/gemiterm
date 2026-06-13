@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { createInterface } from "node:readline";
+import { confirm } from "../utils/prompts.ts";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
@@ -126,17 +126,8 @@ export class DeleteCommand implements CliCommand {
     return options;
   }
 
-  private promptConfirmation(conversationId: string): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      rl.question(
-        `${chalk.cyan(`Delete conversation '${conversationId}'?`)} (yes/no): `,
-        (answer) => {
-          rl.close();
-          resolve(answer.toLowerCase().startsWith("y"));
-        },
-      );
-    });
+  private promptConfirmation(question: string): Promise<boolean> {
+    return confirm({ message: question, default: false });
   }
 
   private showUsage(): void {

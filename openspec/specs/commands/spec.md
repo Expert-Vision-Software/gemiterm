@@ -6,19 +6,19 @@ The CLI command layer of the `gemiterm` application. It defines the 11 top-level
 
 ### Requirement: ListCommand
 
-The system MUST provide a `list` command implemented by `ListCommand` in `src/cli/commands/list-command.ts`. The command MUST be registered under the name `list` and MUST send a `ListChatsQuery` to the mediator with a payload of shape `{ limit?, offset?, search?, allProfiles }`. The command MUST support the flags `--limit/-n <N>` (default 10), `--offset <N>` (default 0), `--all` (no limit), `--all-profiles`, `--sort <recent|oldest|alpha>` (default `recent`), `--search/-s <query>`, `--after <date>`, `--before <date>`, `--format/-f <text|json>` (default `text`), and `--path/-p <path>`. When `--all` is not set, the command MUST additionally slice the result set to `[offset, offset + limit)`. The `--all-profiles` flag MUST be propagated into the mediator payload as `allProfiles: true`.
+The system MUST provide a `list` command implemented by `ListCommand` in `src/cli/commands/list-command.ts`. The command MUST be registered under the name `list` and MUST send a `ListChatsQuery` to the mediator with a payload of shape `{ limit?, offset?, search?, allProfiles }`. The command MUST support the flags `--limit/-n <N>` (no default; omitting `--limit` returns every conversation returned by the mediator), `--offset <N>` (default 0), `--all-profiles`, `--sort <recent|oldest|alpha>` (default `recent`), `--search/-s <query>`, `--after <date>`, `--before <date>`, `--format/-f <text|json>` (default `text`), and `--out/-o <path>`. When `--limit N` is supplied, the command MUST additionally slice the result set to `[offset, offset + N)`. When `--limit` is omitted, the command MUST NOT slice; the entire mediator result is rendered. When `--limit` is omitted and `--offset N` is supplied with `N > 0`, the command MUST slice the result set to `[N, ∞)`. The `--all-profiles` flag MUST be propagated into the mediator payload as `allProfiles: true`. The `list` command MUST NOT support a `--all` flag (omitting `--limit` is the canonical way to request every conversation). When `--out <path>` is supplied, the rendered output MUST be written to that file via `infrastructure/io.ts:writeTextFile` and the command MUST print `Output written to: <path>`; otherwise the output MUST be printed to stdout. The command MUST NOT recognize `--path` or `-p` as output flags.
 
-#### Scenario: List with no flags sends a default query
+#### Scenario: List with no flags returns all conversations
 - **WHEN** the user runs `gemiterm list`
-- **THEN** the command sends a `ListChatsQuery` to the mediator with `limit: 10`, `offset: 0`, no `search`, and `allProfiles: false`, and renders the result as a 4-column text table (ID / TITLE / DATE / PIN)
+- **THEN** the command sends a `ListChatsQuery` to the mediator with `limit: undefined`, `offset: 0`, no `search`, and `allProfiles: false`, and renders every chat returned by the mediator as a 4-column text table (ID / TITLE / DATE / PIN)
 
 #### Scenario: List with --limit
 - **WHEN** the user runs `gemiterm list --limit 5`
 - **THEN** the mediator payload carries `limit: 5` and at most 5 chats are displayed
 
-#### Scenario: List with --all disables the slice
-- **WHEN** the user runs `gemiterm list --all`
-- **THEN** the mediator payload carries `limit: undefined` and the slice step is skipped (all returned chats are shown)
+#### Scenario: List with --offset and no --limit skips the first N chats
+- **WHEN** the user runs `gemiterm list --offset 20`
+- **THEN** the mediator payload carries `limit: undefined` and `offset: 20`, and the first 20 chats are skipped before display
 
 #### Scenario: List with --all-profiles propagates to mediator
 - **WHEN** the user runs `gemiterm list --all-profiles`
@@ -36,8 +36,8 @@ The system MUST provide a `list` command implemented by `ListCommand` in `src/cl
 - **WHEN** the user runs `gemiterm list --format json`
 - **THEN** the output is a JSON document with shape `{ chats: ChatInfo[] }` and nothing else is written to stdout
 
-#### Scenario: List with --path writes the rendered output to the given file
-- **WHEN** the user runs `gemiterm list --path ./out.txt`
+#### Scenario: List with --out writes the rendered output to the given file
+- **WHEN** the user runs `gemiterm list --out ./out.txt`
 - **THEN** the rendered text or JSON content is written to `./out.txt` and a confirmation line `Output written to: <resolved>` is printed
 
 #### Scenario: List with --after and --before filters chats by date
@@ -50,7 +50,11 @@ The system MUST provide a `list` command implemented by `ListCommand` in `src/cl
 
 #### Scenario: List --help shows usage
 - **WHEN** the user runs `gemiterm list --help`
-- **THEN** the output contains `Usage: gemiterm list` and documents every flag above
+- **THEN** the output contains `Usage: gemiterm list` and documents every flag above, and does NOT document a `--all` flag
+
+#### Scenario: List rejects the removed --all flag
+- **WHEN** the user runs `gemiterm list --all`
+- **THEN** the command leaves the `--all` token in `subcommandArgs` and either ignores it (if argv parsing is tolerant) or rejects it; in either case the output is the same as `gemiterm list` with no flags (every conversation rendered)
 
 ### Requirement: ListCommand Text Output Table
 
@@ -64,9 +68,69 @@ The `list` command's default text output MUST be a 4-column table with headers `
 - **WHEN** the user runs `gemiterm list --all-profiles`
 - **THEN** the rendered text output table contains 5 columns `ID`, `TITLE`, `DATE`, `PIN`, `PROFILE` and each row shows the owning profile name
 
+### Requirement: ListCommand --interactive flag
+
+The `ListCommand` MUST accept an `--interactive/-i` flag. The flag MUST be additive: the existing flag set and the existing default behaviour MUST be preserved. The flag MUST enter the chat-list browser (see the `chat-list-browser` capability) instead of the text-table or JSON output.
+
+#### Scenario: --interactive enters the TUI
+- **WHEN** the user runs `gemiterm list --interactive` on a TTY
+- **THEN** the command enters the chat-list browser
+- **AND** no text table or JSON is written to stdout
+
+#### Scenario: --interactive short flag is equivalent
+- **WHEN** the user runs `gemiterm list -i`
+- **THEN** the command behaves identically to `gemiterm list --interactive`
+
+### Requirement: ListCommand --interactive conflict detection
+
+The `ListCommand` MUST reject combinations of `--interactive` with `--format` or `--out`. The rejection MUST print `Cannot use --interactive with --format or --out.` to stderr and exit with code 1.
+
+#### Scenario: --interactive with --format errors
+- **WHEN** the user runs `gemiterm list -i --format json`
+- **THEN** the command prints `Cannot use --interactive with --format or --out.` to stderr
+- **AND** the process exits with code 1
+
+#### Scenario: --interactive with --out errors
+- **WHEN** the user runs `gemiterm list -i --out out.txt`
+- **THEN** the command prints `Cannot use --interactive with --format or --out.` to stderr
+- **AND** the process exits with code 1
+
+### Requirement: ListCommand --interactive TTY requirement
+
+The `ListCommand` MUST invoke the chat-list browser only when `process.stdin.isTTY === true`. When the flag is set but stdin is not a TTY, the command MUST print a `NonInteractiveError`-derived message containing `gemiterm list -i requires a TTY` and the hint `use --format json for machine-readable output`, and exit with code 1.
+
+#### Scenario: --interactive on a non-TTY errors
+- **WHEN** the user runs `gemiterm list -i` and `process.stdin.isTTY` is not `true`
+- **THEN** the command prints a message containing `gemiterm list -i requires a TTY` and the hint about `--format json`
+- **AND** the process exits with code 1
+
+### Requirement: ListCommand non-interactive byte-equivalence contract
+
+The `ListCommand`'s non-interactive output paths MUST remain byte-equivalent to the pre-change baseline. Specifically:
+- `gemiterm list` (no flags) MUST emit the same 4-column text table (`ID` / `TITLE` / `DATE` / `PIN`).
+- `gemiterm list --format json` MUST emit the same `{ chats: ChatInfo[] }` JSON document.
+- `gemiterm list --search <q>` MUST forward the search term to the mediator.
+- `gemiterm list --sort <mode>` MUST apply the sort.
+- `gemiterm list --limit <N>` / `--offset <N>` MUST apply the limit/offset (the deprecated `--all` flag is no longer recognised — omit `--limit` to get every conversation).
+- `gemiterm list --all-profiles` MUST add the `PROFILE` column.
+- `gemiterm list --after <date>` / `--before <date>` MUST apply the date filter.
+- `gemiterm list --out <p>` MUST write the rendered output to the path and print a confirmation line.
+
+#### Scenario: Default list is the 4-column text table
+- **WHEN** the user runs `gemiterm list` (no flags)
+- **THEN** the output is the same 4-column text table that the pre-change `list` command emitted
+
+#### Scenario: --format json is the same JSON document
+- **WHEN** the user runs `gemiterm list --format json`
+- **THEN** the output is the same `{ chats: ChatInfo[] }` JSON document that the pre-change `list` command emitted
+
+#### Scenario: --help documents --interactive
+- **WHEN** the user runs `gemiterm list --help`
+- **THEN** the output contains a `--interactive, -i` flag description in the existing flag list
+
 ### Requirement: FetchCommand
 
-The system MUST provide a `fetch` command implemented by `FetchCommand` in `src/cli/commands/fetch-command.ts`. The command MUST accept a single optional positional `<conversation_id>` argument and MUST support `--format/-f <text|json>` (default `text`) and `--path/-p <path>`. When a conversation id is provided, the command MUST send a `FetchChatQuery` to the mediator with payload `{ conversationId }`. When no conversation id is provided, the command MUST invoke the `list` command via the `CommandRegistry` and return without sending a fetch query. Text output MUST include a header line `Conversation: <id>` and label each message with `User:` or `Model:` depending on role. JSON output MUST be `{ conversationId, messages }`.
+The system MUST provide a `fetch` command implemented by `FetchCommand` in `src/cli/commands/fetch-command.ts`. The command MUST accept a single optional positional `<conversation_id>` argument and MUST support `--format/-f <text|json>` (default `text`) and `--out/-o <path>`. When a conversation id is provided, the command MUST send a `FetchChatQuery` to the mediator with payload `{ conversationId }`. When no conversation id is provided, the command MUST invoke the `list` command via the `CommandRegistry` and return without sending a fetch query. Text output MUST include a header line `Conversation: <id>` and label each message with `User:` or `Model:` depending on role. JSON output MUST be `{ conversationId, messages }`. When `--out <path>` is supplied, the rendered output MUST be written to that file via `infrastructure/io.ts:writeTextFile` and the command MUST print `Output written to: <path>`; otherwise the output MUST be printed to stdout. The command MUST NOT recognize `--path` or `-p` as output flags.
 
 #### Scenario: Fetch with conversation id sends a FetchChatQuery
 - **WHEN** the user runs `gemiterm fetch conv-abc123`
@@ -80,8 +144,8 @@ The system MUST provide a `fetch` command implemented by `FetchCommand` in `src/
 - **WHEN** the user runs `gemiterm fetch conv-abc123 --format json`
 - **THEN** the output is a JSON document with shape `{ conversationId: "conv-abc123", messages: Message[] }`
 
-#### Scenario: Fetch with --path writes the rendered output to the given file
-- **WHEN** the user runs `gemiterm fetch conv-abc123 --path ./out.txt`
+#### Scenario: Fetch with --out writes the rendered output to the given file
+- **WHEN** the user runs `gemiterm fetch conv-abc123 --out ./out.txt`
 - **THEN** the rendered text or JSON content is written to `./out.txt` and a confirmation line `Output written to: <resolved>` is printed
 
 #### Scenario: Fetch with empty messages prints "No messages found"
@@ -90,7 +154,7 @@ The system MUST provide a `fetch` command implemented by `FetchCommand` in `src/
 
 #### Scenario: Fetch --help shows usage
 - **WHEN** the user runs `gemiterm fetch --help`
-- **THEN** the output contains `Usage: gemiterm fetch [conversation_id] [options]` and documents `--format`, `--path`, and `--help`
+- **THEN** the output contains `Usage: gemiterm fetch [conversation_id] [options]` and documents `--format`, `--out`, and `--help`
 
 ### Requirement: ContinueCommand
 
@@ -178,14 +242,14 @@ The system MUST provide a `delete` command implemented by `DeleteCommand` in `sr
 
 ### Requirement: ExportCommand
 
-The system MUST provide an `export` command implemented by `ExportCommand` in `src/cli/commands/export-command.ts`. The command MUST accept a single positional `<conversation_id>` argument and MUST support `--output/-o <path>`, `--format/-f <markdown|json>` (default `markdown`), `--include-metadata`, and `--help/-h`. The command MUST send a `FetchChatQuery` to the mediator with `payload.conversationId` and MUST write the formatted output to the path supplied by `--output` or, when `--output` is not set, to a default file in the current working directory named `gemini-chat-<conversation_id>-<YYYY-MM-DD>.<ext>` (where `ext` is `md` for markdown and `json` for json). The command MUST create the output directory (and any parents) with `mkdirSync(..., { recursive: true })` before writing. Markdown output MUST be produced by `formatChatAsMarkdown` and JSON output MUST be produced by `formatChatAsJson`. When `<conversation_id>` is missing or invalid, the command MUST print an error and exit with code 1.
+The system MUST provide an `export` command implemented by `ExportCommand` in `src/cli/commands/export-command.ts`. The command MUST accept a single positional `<conversation_id>` argument and MUST support `--out/-o <path>`, `--format/-f <markdown|json>` (default `markdown`), `--include-metadata`, and `--help/-h`. The command MUST send a `FetchChatQuery` to the mediator with `payload.conversationId` and MUST write the formatted output to the path supplied by `--out` or, when `--out` is not set, to a default file in the current working directory named `gemini-chat-<conversation_id>-<YYYY-MM-DD>.<ext>` (where `ext` is `md` for markdown and `json` for json). The command MUST create the output directory (and any parents) with `mkdirSync(..., { recursive: true })` before writing. Markdown output MUST be produced by `formatChatAsMarkdown` and JSON output MUST be produced by `formatChatAsJson`. When `<conversation_id>` is missing or invalid, the command MUST print an error and exit with code 1. The command MUST NOT recognize `--output` as a flag.
 
-#### Scenario: Export with --output writes to the supplied path
-- **WHEN** the user runs `gemiterm export conv-abc123 --output ./out.md`
+#### Scenario: Export with --out writes to the supplied path
+- **WHEN** the user runs `gemiterm export conv-abc123 --out ./out.md`
 - **THEN** the file `./out.md` is created (its parent directory is created if missing) and contains the markdown export of the conversation
 
 #### Scenario: Export with default path
-- **WHEN** the user runs `gemiterm export conv-abc123` with no `--output`
+- **WHEN** the user runs `gemiterm export conv-abc123` with no `--out`
 - **THEN** a file named `gemini-chat-conv-abc123-<YYYY-MM-DD>.md` is created in the current working directory
 
 #### Scenario: Export with --format json
@@ -202,18 +266,18 @@ The system MUST provide an `export` command implemented by `ExportCommand` in `s
 
 #### Scenario: Export --help shows usage
 - **WHEN** the user runs `gemiterm export --help`
-- **THEN** the output contains `Usage: gemiterm export <conversation_id> [options]` and documents `--output`, `--format`, `--include-metadata`, and `--help`
+- **THEN** the output contains `Usage: gemiterm export <conversation_id> [options]` and documents `--out`, `--format`, `--include-metadata`, and `--help`
 
 ### Requirement: ExportAllCommand
 
-The system MUST provide an `export-all` command implemented by `ExportAllCommand` in `src/cli/commands/export-all-command.ts`. The command MUST support `--output-dir/-o <dir>` (default `./exports`), `--since <date>`, `--include-metadata`, `--all-profiles/-a`, and `--help/-h`. The command MUST send a `ListChatsQuery` to the mediator with payload `{ allProfiles }`, MUST filter the resulting chats to those whose `timestamp` is on or after the `--since` date (when supplied), and MUST iterate over the remaining chats sending a `FetchChatQuery` for each and writing a markdown file per chat under the output directory using `formatChatAsMarkdown` with sanitized filenames of the form `gemini-chat-<sanitized-title>-<YYYY-MM-DD>.md`. The command MUST create the output directory with `mkdirSync(..., { recursive: true })` and MUST write an `index.md` file in the output directory that lists each successfully exported conversation as a markdown link and, when present, a `## Failed Exports` section listing failed exports with their error message. The command MUST print progress to stdout as `  [i/total] Exporting <id>...` followed by `OK` or `FAILED` on the same line, and MUST print a final summary including `Exported: <n>`, optional `Failed: <n>`, `Output: <dir>`, and `Index: <dir>/index.md`. When `--include-metadata` is set the index MUST include a `> Successful: <n> | Failed: <n>` line.
+The system MUST provide an `export-all` command implemented by `ExportAllCommand` in `src/cli/commands/export-all-command.ts`. The command MUST support `--out-dir/-o <dir>` (default `./exports`), `--since <date>`, `--include-metadata`, `--all-profiles/-a`, and `--help/-h`. The command MUST send a `ListChatsQuery` to the mediator with payload `{ allProfiles }`, MUST filter the resulting chats to those whose `timestamp` is on or after the `--since` date (when supplied), and MUST iterate over the remaining chats sending a `FetchChatQuery` for each and writing a markdown file per chat under the output directory using `formatChatAsMarkdown` with sanitized filenames of the form `gemini-chat-<sanitized-title>-<YYYY-MM-DD>.md`. The command MUST create the output directory with `mkdirSync(..., { recursive: true })` and MUST write an `index.md` file in the output directory that lists each successfully exported conversation as a markdown link and, when present, a `## Failed Exports` section listing failed exports with their error message. The command MUST print progress to stdout as `  [i/total] Exporting <id>...` followed by `OK` or `FAILED` on the same line, and MUST print a final summary including `Exported: <n>`, optional `Failed: <n>`, `Output: <dir>`, and `Index: <dir>/index.md`. When `--include-metadata` is set the index MUST include a `> Successful: <n> | Failed: <n>` line. The command MUST NOT recognize `--output-dir` as a flag.
 
 #### Scenario: Export-all writes per-chat files and an index
-- **WHEN** the user runs `gemiterm export-all --output-dir ./exports` against a mediator returning two chats
+- **WHEN** the user runs `gemiterm export-all --out-dir ./exports` against a mediator returning two chats
 - **THEN** exactly two markdown files appear under `./exports` and `./exports/index.md` contains a `## Conversations` section linking to both filenames
 
 #### Scenario: Export-all default output directory is ./exports
-- **WHEN** the user runs `gemiterm export-all` with no `--output-dir`
+- **WHEN** the user runs `gemiterm export-all` with no `--out-dir`
 - **THEN** the output directory is `./exports` (resolved against the current working directory)
 
 #### Scenario: Export-all with --all-profiles propagates to mediator
@@ -242,7 +306,7 @@ The system MUST provide an `export-all` command implemented by `ExportAllCommand
 
 #### Scenario: Export-all --help shows usage
 - **WHEN** the user runs `gemiterm export-all --help`
-- **THEN** the output contains `Usage: gemiterm export-all [options]` and documents `--output-dir`, `--since`, `--include-metadata`, `--all-profiles`, and `--help`
+- **THEN** the output contains `Usage: gemiterm export-all [options]` and documents `--out-dir`, `--since`, `--include-metadata`, `--all-profiles`, and `--help`
 
 ### Requirement: AuthCommand
 

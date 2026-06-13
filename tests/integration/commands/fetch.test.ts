@@ -53,7 +53,7 @@ describe("fetch command integration", () => {
       const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
       expect(output).toContain("Usage: gemiterm fetch");
       expect(output).toContain("--format");
-      expect(output).toContain("--path");
+      expect(output).toContain("--out");
       expect(output).toContain("--help");
     });
 
@@ -158,12 +158,12 @@ describe("fetch command integration", () => {
     });
   });
 
-  describe("--path option", () => {
-    test("--path writes text output to file", async () => {
+  describe("--out option", () => {
+    test("--out writes text output to file", async () => {
       const outputPath = join(tmpdir(), `fetch-test-${Date.now()}.txt`);
 
       try {
-        await command.execute(["conv-abc123", "--path", outputPath], context);
+        await command.execute(["conv-abc123", "--out", outputPath], context);
 
         expect(existsSync(outputPath)).toBe(true);
         const content = readFileSync(outputPath, "utf-8");
@@ -174,11 +174,11 @@ describe("fetch command integration", () => {
       }
     });
 
-    test("-p writes text output to file", async () => {
+    test("-o writes text output to file", async () => {
       const outputPath = join(tmpdir(), `fetch-test-short-${Date.now()}.txt`);
 
       try {
-        await command.execute(["conv-abc123", "-p", outputPath], context);
+        await command.execute(["conv-abc123", "-o", outputPath], context);
 
         expect(existsSync(outputPath)).toBe(true);
         const content = readFileSync(outputPath, "utf-8");
@@ -188,11 +188,11 @@ describe("fetch command integration", () => {
       }
     });
 
-    test("--path with json format writes JSON to file", async () => {
+    test("--out with json format writes JSON to file", async () => {
       const outputPath = join(tmpdir(), `fetch-test-json-${Date.now()}.json`);
 
       try {
-        await command.execute(["conv-abc123", "--format", "json", "--path", outputPath], context);
+        await command.execute(["conv-abc123", "--format", "json", "--out", outputPath], context);
 
         expect(existsSync(outputPath)).toBe(true);
         const content = readFileSync(outputPath, "utf-8");

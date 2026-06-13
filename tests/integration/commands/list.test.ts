@@ -189,12 +189,19 @@ describe("list command integration", () => {
     });
   });
 
-  describe("--all flag", () => {
-    test("--all sends query without limit", async () => {
-      await command.execute(["--all"], context);
+  describe("default limit behaviour", () => {
+    test("omitting --limit sends query without limit", async () => {
+      await command.execute([], context);
 
       const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
       expect(sentQuery.payload.limit).toBeUndefined();
+    });
+
+    test("--limit N sends N as limit", async () => {
+      await command.execute(["--limit", "7"], context);
+
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.payload.limit).toBe(7);
     });
   });
 
@@ -268,6 +275,64 @@ describe("list command integration", () => {
       const outputWithoutFlag = logSpy.mock.calls.map((c) => c[0]).join("\n");
       const parsedWithoutFlag = JSON.parse(outputWithoutFlag);
       expect(parsedWithoutFlag.chats[0]).not.toHaveProperty("profile");
+    });
+  });
+
+  describe("--profile / -p flag", () => {
+    test("--help documents --profile flag", async () => {
+      await command.execute(["--help"], context);
+
+      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(output).toContain("--profile");
+      expect(output).toContain("-p");
+    });
+
+    test("--profile work sends profile in query payload", async () => {
+      await command.execute(["--profile", "work"], context);
+
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.payload.profile).toBe("work");
+    });
+
+    test("-p short flag sends profile in query payload", async () => {
+      await command.execute(["-p", "personal"], context);
+
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.payload.profile).toBe("personal");
+    });
+
+    test("without --profile, payload.profile is undefined", async () => {
+      await command.execute([], context);
+
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.payload.profile).toBeUndefined();
+    });
+
+    test("--profile renders Profile column in text output", async () => {
+      const mockChats = [
+        { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
+      ];
+      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+
+      await command.execute(["--profile", "work"], context);
+
+      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(output).toContain("PROFILE");
+      expect(output).toContain("work");
+    });
+
+    test("--profile filters to one profile in JSON output", async () => {
+      const mockChats = [
+        { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
+      ];
+      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+
+      await command.execute(["--profile", "work", "--format", "json"], context);
+
+      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      const parsed = JSON.parse(output);
+      expect(parsed.chats).toHaveLength(1);
+      expect(parsed.chats[0].profile).toBe("work");
     });
   });
 

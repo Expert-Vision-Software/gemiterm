@@ -67,7 +67,7 @@ describe("ExportAllCommand", () => {
     await command.execute(["--help"], context);
     const output = capturedLog(logSpy);
     expect(output).toContain("Usage: gemiterm export-all");
-    expect(output).toContain("--output-dir");
+    expect(output).toContain("--out-dir");
     expect(output).toContain("--since");
     expect(output).toContain("--all-profiles");
   });
@@ -84,7 +84,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--output-dir", tempDir], context);
+    await command.execute(["--out-dir", tempDir], context);
 
     const indexPath = join(tempDir, "index.md");
     expect(existsSync(indexPath)).toBeTrue();
@@ -107,7 +107,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--output-dir", tempDir], context);
+    await command.execute(["--out-dir", tempDir], context);
 
     const files = readFileSync(join(tempDir, "index.md"), "utf-8");
     const mdFiles = files.match(/\.md\)/g);
@@ -121,7 +121,7 @@ describe("ExportAllCommand", () => {
     };
     mediator.registerQueryHandler(listHandler as any);
 
-    await command.execute(["--output-dir", tempDir], context);
+    await command.execute(["--out-dir", tempDir], context);
 
     const output = capturedLog(logSpy);
     expect(output).toContain("No conversations found");
@@ -139,7 +139,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--all-profiles", "--output-dir", tempDir], context);
+    await command.execute(["--all-profiles", "--out-dir", tempDir], context);
 
     expect(listHandler.handle).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -160,7 +160,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--since", "2024-01-01", "--output-dir", tempDir], context);
+    await command.execute(["--since", "2024-01-01", "--out-dir", tempDir], context);
 
     const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
     const mdFiles = indexContent.match(/\.md\)/g);
@@ -184,7 +184,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--output-dir", tempDir], context);
+    await command.execute(["--out-dir", tempDir], context);
 
     const output = capturedLog(logSpy);
     expect(output).toMatch(/Exported:\s+1/);
@@ -207,7 +207,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--output-dir", tempDir], context);
+    await command.execute(["--out-dir", tempDir], context);
 
     const progressOutput = capturedStdout(writeSpy);
     expect(progressOutput).toContain("[1/2]");
@@ -226,7 +226,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--include-metadata", "--output-dir", tempDir], context);
+    await command.execute(["--include-metadata", "--out-dir", tempDir], context);
 
     const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
     expect(indexContent).toContain("Successful:");
@@ -259,7 +259,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--output-dir", tempDir], context);
+    await command.execute(["--out-dir", tempDir], context);
 
     const output = capturedLog(logSpy);
     expect(output).toMatch(/Exported:\s+0/);
@@ -287,7 +287,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--output-dir", tempDir], context);
+    await command.execute(["--out-dir", tempDir], context);
 
     const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
     expect(indexContent).toContain("string-failure");
@@ -306,7 +306,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--output-dir", nested], context);
+    await command.execute(["--out-dir", nested], context);
 
     expect(existsSync(nested)).toBeTrue();
     expect(existsSync(join(nested, "index.md"))).toBeTrue();
@@ -324,7 +324,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["-a", "--output-dir", tempDir], context);
+    await command.execute(["-a", "--out-dir", tempDir], context);
 
     expect(listHandler.handle).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -345,7 +345,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--since", "not-a-date", "--output-dir", tempDir], context);
+    await command.execute(["--since", "not-a-date", "--out-dir", tempDir], context);
 
     const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
     expect(indexContent).toContain("Python tips");
@@ -366,7 +366,7 @@ describe("ExportAllCommand", () => {
     mediator.registerQueryHandler(listHandler as any);
     mediator.registerQueryHandler(fetchHandler as any);
 
-    await command.execute(["--since", "2024-01-01", "--output-dir", tempDir], context);
+    await command.execute(["--since", "2024-01-01", "--out-dir", tempDir], context);
 
     const indexContent = readFileSync(join(tempDir, "index.md"), "utf-8");
     expect(indexContent).toContain("New chat");

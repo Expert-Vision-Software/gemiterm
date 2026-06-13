@@ -16,7 +16,7 @@ import { joinPath, resolvePath } from "../../infrastructure/path-utils.ts";
 
 interface ExportAllCommandOptions {
   help: boolean;
-  outputDir: string;
+  outDir: string;
   since: string;
   includeMetadata: boolean;
   allProfiles: boolean;
@@ -24,7 +24,7 @@ interface ExportAllCommandOptions {
 
 const DEFAULT_OPTIONS: ExportAllCommandOptions = {
   help: false,
-  outputDir: "./exports",
+  outDir: "./exports",
   since: "",
   includeMetadata: false,
   allProfiles: false,
@@ -75,8 +75,8 @@ export class ExportAllCommand implements CliCommand {
       console.log(chalk.bold(`Found ${chats.length} conversation${chats.length !== 1 ? "s" : ""} to export.`));
       console.log("");
 
-      const outputDir = resolvePath(options.outputDir);
-      ensureDir(outputDir);
+      const outDir = resolvePath(options.outDir);
+      ensureDir(outDir);
 
       const results: ExportResult[] = [];
 
@@ -92,7 +92,7 @@ export class ExportAllCommand implements CliCommand {
           } as Query<FetchChatQueryPayload>);
 
           const filename = this.sanitizeFilename(chat.title || chat.id);
-          const filePath = joinPath(outputDir, `${filename}.md`);
+          const filePath = joinPath(outDir, `${filename}.md`);
           const content = formatChatAsMarkdown(
             fetchResult.messages,
             chat.title,
@@ -112,8 +112,8 @@ export class ExportAllCommand implements CliCommand {
         }
       }
 
-      this.writeIndex(outputDir, results, options.includeMetadata);
-      this.printSummary(results, outputDir);
+      this.writeIndex(outDir, results, options.includeMetadata);
+      this.printSummary(results, outDir);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Error: ${message}`));
@@ -138,7 +138,7 @@ export class ExportAllCommand implements CliCommand {
     return `gemini-chat-${safe}-${date}`.replace(/-+$/, "");
   }
 
-  private writeIndex(outputDir: string, results: ExportResult[], includeMetadata: boolean): void {
+  private writeIndex(outDir: string, results: ExportResult[], includeMetadata: boolean): void {
     const lines: string[] = [];
 
     lines.push("# Exported Conversations");
@@ -173,11 +173,11 @@ export class ExportAllCommand implements CliCommand {
       }
     }
 
-    const indexPath = joinPath(outputDir, "index.md");
+    const indexPath = joinPath(outDir, "index.md");
     writeTextFile(indexPath, lines.join("\n"));
   }
 
-  private printSummary(results: ExportResult[], outputDir: string): void {
+  private printSummary(results: ExportResult[], outDir: string): void {
     const succeeded = results.filter((r) => r.success);
     const failed = results.filter((r) => !r.success);
 
@@ -187,8 +187,8 @@ export class ExportAllCommand implements CliCommand {
     if (failed.length > 0) {
       console.log(`  Failed:  ${chalk.red(failed.length)}`);
     }
-    console.log(`  Output:  ${outputDir}`);
-    console.log(`  Index:   ${chalk.cyan(joinPath(outputDir, "index.md"))}`);
+    console.log(`  Output:  ${outDir}`);
+    console.log(`  Index:   ${chalk.cyan(joinPath(outDir, "index.md"))}`);
   }
 
   private parseArgs(args: string[]): ExportAllCommandOptions {
@@ -201,9 +201,9 @@ export class ExportAllCommand implements CliCommand {
         case "-h":
           options.help = true;
           break;
-        case "--output-dir":
+        case "--out-dir":
         case "-o":
-          options.outputDir = args[++i] ?? DEFAULT_OPTIONS.outputDir;
+          options.outDir = args[++i] ?? DEFAULT_OPTIONS.outDir;
           break;
         case "--since":
           options.since = args[++i] ?? "";
@@ -227,7 +227,7 @@ export class ExportAllCommand implements CliCommand {
     console.log(chalk.bold("Options:"));
 
     const flags = [
-      { flag: "--output-dir, -o <dir>", desc: "Output directory (default: ./exports)" },
+      { flag: "--out-dir, -o <dir>", desc: "Output directory (default: ./exports)" },
       { flag: "--since <date>", desc: "Only export chats from this date onwards" },
       { flag: "--include-metadata", desc: "Include metadata headers in exports" },
       { flag: "--all-profiles, -a", desc: "Export conversations from all profiles" },
