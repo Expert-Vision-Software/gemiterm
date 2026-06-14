@@ -157,6 +157,7 @@ export type BrowserAction =
   | "export-markdown"
   | "export-json"
   | "copy-id"
+  | "delete"
   | "back"
   | "quit";
 

@@ -239,12 +239,17 @@ Pressing `f` SHALL toggle the favourites filter on and off. When on, the visible
 
 ### Requirement: Chat-list browser SHALL show an action menu after a chat is picked
 
-When the user presses `enter` on a highlighted chat, the browser SHALL resolve with `{ kind: 'pick', chat, action: <pending> }` and the caller SHALL show a `prompts.select` action menu with five options: `View full conversation`, `Export to Markdown`, `Export to JSON`, `Copy conversation ID`, `Back to list`. After the user picks an action, the action SHALL execute and the loop SHALL re-enter the browser.
+When the user presses `enter` on a highlighted chat, the browser SHALL resolve with `{ kind: 'pick', chat, action: <pending> }` and the caller SHALL show a `prompts.select` action menu with seven options, in this order: `View full conversation`, `Export to Markdown`, `Export to JSON`, `Copy conversation ID`, `Delete conversation`, `Back to list`, `Quit`. The `Delete conversation` option SHALL display a `No confirmation` description adjacent to its label. After the user picks an action, the action SHALL execute and the loop SHALL re-enter the browser.
 
 #### Scenario: enter on a chat opens the action menu
 - **WHEN** the user navigates to a chat and presses `enter`
 - **THEN** the browser prompt resolves with `{ kind: 'pick', chat, action: <pending> }`
 - **AND** the caller shows the action menu titled `Selected: <id> — "<title>"`
+
+#### Scenario: action menu lists all seven options in the documented order
+- **WHEN** the caller shows the action menu
+- **THEN** the choice list contains exactly seven entries with values `view`, `export-markdown`, `export-json`, `copy-id`, `delete`, `back`, `quit` in that order
+- **AND** the `delete` entry's label is `Delete conversation` and its description is `No confirmation`
 
 #### Scenario: View action invokes fetch
 - **WHEN** the user selects `View full conversation` from the action menu
@@ -253,18 +258,25 @@ When the user presses `enter` on a highlighted chat, the browser SHALL resolve w
 
 #### Scenario: Export to Markdown action writes a file
 - **WHEN** the user selects `Export to Markdown` from the action menu
-- **THEN** the caller invokes `ExportCommand` with `format: 'markdown'` against the picked `chat.id`
+- **THEN** the caller prompts for an output path (see the *Export action prompts for an output path* requirement)
+- **AND** the caller invokes `ExportCommand` with `format: 'markdown'` and `--out <path>` against the picked `chat.id`
 - **AND** the loop re-enters the browser after the export completes
 
 #### Scenario: Export to JSON action writes a file
 - **WHEN** the user selects `Export to JSON` from the action menu
-- **THEN** the caller invokes `ExportCommand` with `format: 'json'` against the picked `chat.id`
+- **THEN** the caller prompts for an output path (see the *Export action prompts for an output path* requirement)
+- **AND** the caller invokes `ExportCommand` with `format: 'json'` and `--out <path>` against the picked `chat.id`
 - **AND** the loop re-enters the browser after the export completes
 
 #### Scenario: Copy conversation ID action prints the id
 - **WHEN** the user selects `Copy conversation ID` from the action menu
 - **THEN** the caller prints `Copied: <chat.id>` to stdout
 - **AND** the loop re-enters the browser
+
+#### Scenario: Delete conversation action invokes delete with --force
+- **WHEN** the user selects `Delete conversation` from the action menu
+- **THEN** the caller invokes `DeleteCommand` with `--force` against the picked `chat.id` (see the *Delete action bypasses confirmation* requirement)
+- **AND** the loop re-enters the browser after the delete completes
 
 #### Scenario: Back to list returns to the browser
 - **WHEN** the user selects `Back to list` (or presses `esc`) from the action menu
@@ -275,6 +287,55 @@ When the user presses `enter` on a highlighted chat, the browser SHALL resolve w
 - **WHEN** the user selects `Quit` from the action menu
 - **THEN** the browser loop exits
 - **AND** the process exits with code 0
+
+### Requirement: Export action prompts for an output path
+
+When the user selects `Export to Markdown` or `Export to JSON` from the action menu, the caller SHALL prompt for an output path via `prompts.text` (a single-line `text` input) before invoking `ExportCommand`. The prompt message SHALL be `Output path:`. The prompt's `default` value SHALL be `gemini-chat-<chat.id>-<YYYY-MM-DD>.<ext>`, where `<ext>` is `md` for Markdown and `json` for JSON, and `<YYYY-MM-DD>` is `new Date().toISOString().slice(0, 10)`. The user MAY accept the default (by pressing Enter) or supply a custom path. If the supplied value is empty or whitespace-only, the caller SHALL fall back to the default path. The resolved path SHALL be forwarded to `ExportCommand` as `--out <path>`.
+
+#### Scenario: Export to Markdown prompts with the default markdown filename
+- **WHEN** the user selects `Export to Markdown`
+- **THEN** the caller calls `text` with message `Output path:` and a default matching `^gemini-chat-<id>-\d{4}-\d{2}-\d{2}\.md$`
+- **AND** on user input `<path>`, the caller invokes `ExportCommand` with `["<id>", "--format", "markdown", "--out", "<path>"]`
+
+#### Scenario: Export to JSON prompts with the default json filename
+- **WHEN** the user selects `Export to JSON`
+- **THEN** the caller calls `text` with message `Output path:` and a default matching `^gemini-chat-<id>-\d{4}-\d{2}-\d{2}\.json$`
+- **AND** on user input `<path>`, the caller invokes `ExportCommand` with `["<id>", "--format", "json", "--out", "<path>"]`
+
+#### Scenario: Empty export input falls back to the default filename
+- **WHEN** the user submits an empty or whitespace-only path
+- **THEN** the caller uses the default `gemini-chat-<id>-<YYYY-MM-DD>.<ext>` as the resolved path
+- **AND** `ExportCommand` is invoked with `--out <default>`
+
+#### Scenario: Path prompt requires a TTY
+- **WHEN** the user selects Export and `process.stdin.isTTY` is not `true`
+- **THEN** `text` throws `NonInteractiveError` whose message contains `gemiterm new "Your message"`
+- **AND** the process exits with code 1
+
+### Requirement: Delete action bypasses confirmation
+
+When the user selects `Delete conversation` from the action menu, the caller SHALL invoke `DeleteCommand` with the picked `chat.id` and the `--force` flag. The caller SHALL NOT show the standalone-delete confirmation prompt (`prompts.confirm`); the in-browser delete is one-shot and unconfirmed by design. The `DeleteCommand`'s own profile-resolution and per-id error reporting behavior is unchanged from the standalone `gemiterm delete --force` invocation (errors are logged to stderr; on failure the process exits with code 1).
+
+#### Scenario: Delete dispatches to DeleteCommand with --force
+- **WHEN** the user selects `Delete conversation`
+- **THEN** the caller invokes `DeleteCommand` with argv `[<chat.id>, "--force"]`
+- **AND** the caller does NOT call `prompts.confirm` first
+
+#### Scenario: Delete is unconfirmed by design
+- **WHEN** the user selects `Delete conversation`
+- **THEN** no confirmation prompt is shown
+- **AND** the delete is dispatched immediately, matching the standalone `gemiterm delete <id> --force` behavior
+
+#### Scenario: After delete, the deleted chat is removed from the in-memory list
+- **WHEN** the user selects `Delete conversation` and `DeleteCommand` resolves successfully
+- **THEN** the caller removes the picked `chat.id` from the in-memory chat list before re-entering the browser
+- **AND** the next `browser(...)` call receives the chat list with that id absent
+- **AND** the cursor on the re-entered browser starts at the first row of the now-shorter list (the `useEffect` reset on `filteredSorted` in the browser prompt fires because the list reference changed)
+
+#### Scenario: Non-delete actions do not mutate the in-memory list
+- **WHEN** the user selects any action other than `Delete conversation` (e.g. `View full conversation`, `Export to Markdown`, `Export to JSON`, `Copy conversation ID`, `Back to list`, or `Quit`)
+- **THEN** the in-memory chat list is unchanged across the action
+- **AND** the next `browser(...)` call receives the same chat list as the previous one
 
 ### Requirement: Chat-list browser SHALL exit cleanly on quit signals
 
