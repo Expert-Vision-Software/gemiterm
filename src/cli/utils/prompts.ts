@@ -10,6 +10,7 @@ import {
   useState,
   useKeypress,
   useMemo,
+  useEffect,
   makeTheme,
   isUpKey,
   isDownKey,
@@ -156,6 +157,7 @@ export type BrowserAction =
   | "export-markdown"
   | "export-json"
   | "copy-id"
+  | "delete"
   | "back"
   | "quit";
 
@@ -166,6 +168,7 @@ export type BrowserResult =
 export interface BrowserConfig {
   chats: ReadonlyArray<ChatInfo>;
   initialSort?: "recent" | "oldest" | "alpha";
+  pageSize?: number;
 }
 
 function formatDate(timestamp: number): string {
@@ -187,6 +190,7 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
     const [profileFilter, setProfileFilter] = useState<"all" | string>("all");
     const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
     const [active, setActive] = useState<number>(0);
+    const [windowStart, setWindowStart] = useState<number>(0);
 
     const profileNames = useMemo(() => {
       const seen = new Set<string>();
@@ -217,11 +221,26 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       return sorted;
     }, [config.chats, sort, profileFilter, favoritesOnly]);
 
+    const pageSize = useMemo(() => {
+      if (typeof config.pageSize === "number" && config.pageSize > 0) {
+        return config.pageSize;
+      }
+      const rows = process.stdout.rows ?? 24;
+      return Math.max(5, Math.floor((rows - 4) * 0.8));
+    }, [config.pageSize]);
+
+    useEffect(() => {
+      setActive(0);
+      setWindowStart(0);
+    }, [filteredSorted]);
+
     useKeypress((key) => {
       if (key.name === "s") {
         const next =
           sort === "recent" ? "oldest" : sort === "oldest" ? "alpha" : "recent";
         setSort(next);
+        setActive(0);
+        setWindowStart(0);
         return;
       }
 
@@ -234,11 +253,15 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
           const nextIndex = (currentIndex + 1) % cycle.length;
           setProfileFilter(cycle[nextIndex] ?? "all");
         }
+        setActive(0);
+        setWindowStart(0);
         return;
       }
 
       if (key.name === "f") {
         setFavoritesOnly(!favoritesOnly);
+        setActive(0);
+        setWindowStart(0);
         return;
       }
 
@@ -247,6 +270,27 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       if (total === 0) {
         if (key.name === "q" || key.name === "escape") {
           done({ kind: "quit" });
+        }
+        return;
+      }
+
+      if (key.name === "left") {
+        const currentPage = Math.floor(windowStart / pageSize);
+        const newPage = Math.max(0, currentPage - 1);
+        if (newPage !== currentPage) {
+          setWindowStart(newPage * pageSize);
+          setActive(newPage * pageSize);
+        }
+        return;
+      }
+
+      if (key.name === "right") {
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        const currentPage = Math.floor(windowStart / pageSize);
+        const newPage = Math.min(totalPages - 1, currentPage + 1);
+        if (newPage !== currentPage) {
+          setWindowStart(newPage * pageSize);
+          setActive(newPage * pageSize);
         }
         return;
       }
@@ -265,21 +309,41 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       }
 
       if (isUpKey(key)) {
-        setActive(Math.max(0, active - 1));
+        const newActive = Math.max(0, active - 1);
+        setActive(newActive);
+        if (newActive < windowStart) {
+          setWindowStart(newActive);
+        }
         return;
       }
 
       if (isDownKey(key)) {
-        setActive(Math.min(total - 1, active + 1));
+        const newActive = Math.min(total - 1, active + 1);
+        setActive(newActive);
+        if (newActive >= windowStart + pageSize) {
+          setWindowStart(newActive - pageSize + 1);
+        }
         return;
       }
     });
 
+    const safeActive = Math.min(active, Math.max(0, filteredSorted.length - 1));
+    const totalPages = Math.max(
+      1,
+      Math.ceil(filteredSorted.length / pageSize),
+    );
+    const currentPage = Math.min(
+      totalPages,
+      Math.floor(safeActive / pageSize) + 1,
+    );
+    const pageIndicator =
+      totalPages > 1 ? ` | Page: ${currentPage}/${totalPages}` : "";
+
     const titleBar = chalk.bold(
-      `Browse conversations (${filteredSorted.length} chats | Sort: ${sort} | Profile: ${profileFilter} | Favorites: ${favoritesOnly ? "on" : "off"})`,
+      `Browse conversations (${filteredSorted.length} chats${pageIndicator} | Sort: ${sort} | Profile: ${profileFilter} | Favorites: ${favoritesOnly ? "on" : "off"})`,
     );
     const hintLine = chalk.dim(
-      "↑↓ navigate · s sort · p profile · f favorites · enter pick · q quit",
+      "↑↓ navigate · ← → page · s sort · p profile · f favorites · enter pick · q quit",
     );
 
     const renderRow = (item: ChatInfo, isActive: boolean): string => {
@@ -291,14 +355,18 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       return `${cursor}${id}  ${date}  ${title}  ${pin}`;
     };
 
-    const safeActive = Math.min(active, Math.max(0, filteredSorted.length - 1));
-    const rows = filteredSorted
-      .map((chat, i) => renderRow(chat, i === safeActive))
-      .join("\n");
-
     if (filteredSorted.length === 0) {
       return [`${titleBar}\nNo conversations found.`, hintLine];
     }
+
+    const windowEnd = Math.min(
+      filteredSorted.length,
+      windowStart + pageSize,
+    );
+    const visibleItems = filteredSorted.slice(windowStart, windowEnd);
+    const rows = visibleItems
+      .map((item) => renderRow(item, item === filteredSorted[safeActive]))
+      .join("\n");
 
     return [`${titleBar}\n${rows}`, hintLine];
   },

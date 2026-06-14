@@ -11,7 +11,7 @@ import { formatChatList } from "../../infrastructure/formatters.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
 import { GemitermError } from "../../core/errors.ts";
-import { browser, select, type BrowserAction } from "../utils/prompts.ts";
+import { browser, select, text, type BrowserAction } from "../utils/prompts.ts";
 
 interface ListCommandOptions {
   help: boolean;
@@ -166,6 +166,10 @@ export class ListCommand implements CliCommand {
       if (actionResult === "quit") return;
       if (actionResult === "back") continue;
       await this.executeAction(actionResult, result.chat, context);
+      if (actionResult === "delete") {
+        const idx = chats.findIndex((c) => c.id === result.chat.id);
+        if (idx >= 0) chats.splice(idx, 1);
+      }
     }
   }
 
@@ -177,6 +181,11 @@ export class ListCommand implements CliCommand {
         { value: "export-markdown", label: "Export to Markdown" },
         { value: "export-json", label: "Export to JSON" },
         { value: "copy-id", label: "Copy conversation ID" },
+        {
+          value: "delete",
+          label: "Delete conversation",
+          description: "No confirmation",
+        },
         { value: "back", label: "Back to list" },
         { value: "quit", label: "Quit" },
       ],
@@ -185,10 +194,13 @@ export class ListCommand implements CliCommand {
   }
 
   private async executeAction(
-    action: "view" | "export-markdown" | "export-json" | "copy-id",
+    action: BrowserAction,
     chat: ChatInfo,
     context: CliCommandContext,
   ): Promise<void> {
+    if (action === "back" || action === "quit") {
+      return;
+    }
     if (action === "copy-id") {
       console.log(chalk.cyan(`Copied: ${chat.id}`));
       return;
@@ -200,12 +212,27 @@ export class ListCommand implements CliCommand {
       const fetch = registry.getHandler("fetch");
       if (fetch) await fetch.execute([chat.id, "--format", "text"], context);
     } else if (action === "export-markdown") {
+      const outPath = await this.promptExportPath(chat.id, "md");
       const exportCmd = registry.getHandler("export");
-      if (exportCmd) await exportCmd.execute([chat.id, "--format", "markdown"], context);
+      if (exportCmd) await exportCmd.execute([chat.id, "--format", "markdown", "--out", outPath], context);
     } else if (action === "export-json") {
+      const outPath = await this.promptExportPath(chat.id, "json");
       const exportCmd = registry.getHandler("export");
-      if (exportCmd) await exportCmd.execute([chat.id, "--format", "json"], context);
+      if (exportCmd) await exportCmd.execute([chat.id, "--format", "json", "--out", outPath], context);
+    } else if (action === "delete") {
+      const deleteCmd = registry.getHandler("delete");
+      if (deleteCmd) await deleteCmd.execute([chat.id, "--force"], context);
     }
+  }
+
+  private async promptExportPath(chatId: string, ext: "md" | "json"): Promise<string> {
+    const date = new Date().toISOString().slice(0, 10);
+    const defaultPath = `gemini-chat-${chatId}-${date}.${ext}`;
+    const entered = await text({
+      message: "Output path:",
+      default: defaultPath,
+    });
+    return entered.trim() === "" ? defaultPath : entered.trim();
   }
 
   private parseArgs(args: string[]): ListCommandOptions {

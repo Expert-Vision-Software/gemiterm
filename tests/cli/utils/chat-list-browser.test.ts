@@ -76,7 +76,7 @@ describe("browser prompt", () => {
     expect(getScreen()).toContain("Sort: recent");
   });
 
-  test("s keeps the cursor on the same row index when sort changes (clamped to new list length)", async () => {
+  test("s resets the cursor to the top of the new sort", async () => {
     const { events, getScreen } = await render(browserPrompt, { chats: SAMPLE_CHATS });
 
     events.keypress({ name: "down" });
@@ -84,7 +84,7 @@ describe("browser prompt", () => {
 
     events.keypress("s");
     expect(getScreen()).toContain("Sort: oldest");
-    expect(getScreen()).toContain("> abc");
+    expect(getScreen()).toContain("> ghi");
   });
 
   test("p cycles through profile filter (all → work → personal → all)", async () => {
@@ -299,5 +299,342 @@ describe("browser prompt title rendering", () => {
 
     expect(screen).toContain("a".repeat(54));
     expect(screen).toContain("…");
+  });
+});
+
+describe("pagination", () => {
+  let stdinDescriptor: PropertyDescriptor | undefined;
+  let stdoutRowsDescriptor: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+    stdoutRowsDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+    Object.defineProperty(process.stdout, "rows", {
+      value: 20,
+      configurable: true,
+      writable: true,
+    });
+  });
+
+  afterEach(() => {
+    if (stdinDescriptor) {
+      Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+    } else {
+      Reflect.deleteProperty(process.stdin, "isTTY");
+    }
+    if (stdoutRowsDescriptor) {
+      Object.defineProperty(process.stdout, "rows", stdoutRowsDescriptor);
+    } else {
+      Reflect.deleteProperty(process.stdout, "rows");
+    }
+  });
+
+  const buildChats = (n: number): ChatInfo[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `c${i.toString().padStart(2, "0")}`,
+      title: `Chat ${i}`,
+      isPinned: false,
+      timestamp: 1717000000000 + i * 1000,
+    }));
+
+  test("a long list is windowed — not every row is rendered", async () => {
+    const { getScreen } = await render(browserPrompt, { chats: buildChats(50) });
+
+    const screen = getScreen();
+    expect(screen).toContain("> c49");
+    expect(screen).not.toContain("c00");
+  });
+
+  test("right arrow jumps the active row by pageSize", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+
+    const screen = getScreen();
+    expect(screen).toContain("> c14");
+    expect(screen).not.toContain("> c19");
+  });
+
+  test("right arrow clamps at the last page and snaps to its first row", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(10),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+    events.keypress({ name: "right" });
+
+    expect(getScreen()).toContain("> c04");
+  });
+
+  test("left arrow clamps at the first row", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "left" });
+
+    expect(getScreen()).toContain("> c19");
+  });
+
+  test("the BrowserConfig.pageSize override is honored", async () => {
+    const { getScreen } = await render(browserPrompt, {
+      chats: buildChats(10),
+      pageSize: 3,
+    });
+
+    const screen = getScreen();
+    expect(screen).toContain("> c09");
+    expect(screen).toContain("c08");
+    expect(screen).toContain("c07");
+    expect(screen).not.toContain("c00");
+  });
+
+  test("down arrow through a paginated list keeps the cursor on the active row", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+
+    expect(getScreen()).toContain("> c14");
+  });
+
+  test("a filtered list shorter than pageSize renders all items (no empty-state)", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: SAMPLE_CHATS,
+      pageSize: 20,
+    });
+
+    expect(getScreen()).toContain("React hooks");
+
+    events.keypress("f");
+
+    const screen = getScreen();
+    expect(screen).toContain("React hooks");
+    expect(screen).not.toContain("TypeScript types");
+    expect(screen).not.toContain("Bun runtime");
+    expect(screen).not.toContain("No conversations found");
+  });
+
+  test("the hint line advertises the page keys", async () => {
+    const { getScreen } = await render(browserPrompt, { chats: buildChats(5) });
+
+    expect(getScreen()).toContain("← → page");
+  });
+
+  test("pageSize defaults to 80% of (terminal rows - 4), floored at 5", async () => {
+    const { getScreen } = await render(browserPrompt, { chats: buildChats(50) });
+
+    const screen = getScreen();
+    expect(screen).toContain("> c49");
+    expect(screen).not.toContain("c00");
+  });
+
+  test("the title bar shows a Page: X/Y indicator when the list spans multiple pages", async () => {
+    const { getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    expect(getScreen()).toContain("Page: 1/4");
+  });
+
+  test("the page indicator updates when the user pages with →", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+
+    expect(getScreen()).toContain("Page: 2/4");
+  });
+
+  test("the page indicator clamps at the last page when → goes past the end", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(10),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+    events.keypress({ name: "right" });
+
+    expect(getScreen()).toContain("Page: 2/2");
+  });
+
+  test("the page indicator is hidden when the list fits on a single page", async () => {
+    const { getScreen } = await render(browserPrompt, {
+      chats: buildChats(5),
+      pageSize: 20,
+    });
+
+    expect(getScreen()).not.toContain("Page:");
+  });
+
+  test("right arrow snaps the cursor to the first row of the next page", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+
+    expect(getScreen()).toContain("> c14");
+  });
+
+  test("left arrow snaps the cursor to the first row of the previous page", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+    expect(getScreen()).toContain("> c14");
+
+    events.keypress({ name: "left" });
+    expect(getScreen()).toContain("> c19");
+  });
+
+  test("left arrow is a no-op when already on the first page (cursor stays on first row)", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "left" });
+
+    expect(getScreen()).toContain("> c19");
+  });
+
+  test("changing the sort resets the cursor to the top of the new sort", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+    expect(getScreen()).toContain("> c14");
+
+    events.keypress("s");
+    expect(getScreen()).toContain("Sort: oldest");
+    expect(getScreen()).toContain("> c00");
+  });
+
+  test("changing the profile filter resets the cursor to the top of the filtered list", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: SAMPLE_CHATS_WITH_PROFILES,
+      pageSize: 1,
+    });
+
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+
+    events.keypress("p");
+    expect(getScreen()).toContain("Profile: work");
+    expect(getScreen()).toContain("> w1");
+  });
+
+  test("toggling the favorites filter resets the cursor to the top of the filtered list", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: SAMPLE_CHATS,
+      pageSize: 1,
+    });
+
+    events.keypress({ name: "down" });
+
+    events.keypress("f");
+    expect(getScreen()).toContain("Favorites: on");
+    expect(getScreen()).toContain("> abc");
+  });
+
+  test("each page is a clean slice of pageSize items (no overlap with the previous page)", async () => {
+    const { getScreen, events } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    expect(getScreen()).toContain("> c19");
+    expect(getScreen()).toContain("  c15");
+    expect(getScreen()).not.toContain("  c14");
+
+    events.keypress({ name: "right" });
+
+    expect(getScreen()).toContain("> c14");
+    expect(getScreen()).toContain("  c10");
+    expect(getScreen()).not.toContain("  c19");
+    expect(getScreen()).not.toContain("  c15");
+  });
+
+  test("down arrow steps within the page until the cursor reaches the bottom", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c18");
+    expect(getScreen()).toContain("  c19");
+    expect(getScreen()).not.toContain("  c14");
+
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c15");
+    expect(getScreen()).toContain("  c19");
+    expect(getScreen()).not.toContain("  c14");
+  });
+
+  test("down arrow at the bottom of the page scrolls the window by one row", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    for (let i = 0; i < 5; i++) events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c14");
+    expect(getScreen()).toContain("  c18");
+    expect(getScreen()).not.toContain("  c19");
+
+    events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c13");
+    expect(getScreen()).toContain("  c17");
+    expect(getScreen()).not.toContain("  c18");
+  });
+
+  test("up arrow at the top of a scrolled window scrolls the window up by one row", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    for (let i = 0; i < 5; i++) events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c14");
+    expect(getScreen()).toContain("  c18");
+    expect(getScreen()).not.toContain("  c19");
+
+    for (let i = 0; i < 4; i++) events.keypress({ name: "up" });
+    expect(getScreen()).toContain("> c18");
+    expect(getScreen()).toContain("  c14");
+    expect(getScreen()).not.toContain("  c19");
+
+    events.keypress({ name: "up" });
+    expect(getScreen()).toContain("> c19");
+    expect(getScreen()).toContain("  c15");
+    expect(getScreen()).not.toContain("  c14");
   });
 });

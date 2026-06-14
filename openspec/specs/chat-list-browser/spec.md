@@ -70,13 +70,14 @@ The `list` command SHALL accept a `--interactive/-i` flag. When the flag is set,
 
 ### Requirement: Chat-list browser SHALL display the list with cursor navigation
 
-The browser SHALL render the chat list as a table with the columns `ID`, `DATE`, `TITLE`, and `PIN` (and `PROFILE` when `--all-profiles` is set). The browser SHALL render every filtered row in a single scrollable view (no paging; the entire filtered list is always in the body). The user navigates the list with the `↑` and `↓` arrow keys. A cursor indicator (`> `) SHALL mark the active row; the active row's index MUST be clamped to `[0, filteredSorted.length - 1]` and MUST NOT wrap at the ends. The title bar MUST show the total chat count, the current sort mode, the current profile filter, and the current favourites state. The browser SHALL recognise `s` to cycle the sort mode, `p` to cycle the profile filter, and `f` to toggle the favourites filter (each described in its own requirement below).
+The browser SHALL render the chat list as a table with the columns `ID`, `DATE`, `TITLE`, and `PIN` (and `PROFILE` when `--all-profiles` is set). The browser SHALL display the filtered list as a **paged, top-aligned window** of `pageSize` rows, where `pageSize` is derived from the terminal height as `max(5, floor((process.stdout.rows - 4) * 0.8))` (with the `?? 24` fallback when `process.stdout.rows` is `undefined`); the `BrowserConfig.pageSize` test override MAY be used to force a specific value in test fixtures. When the filtered list has fewer rows than `pageSize`, every row is shown. The window is **top-aligned**: after paging with `←` / `→`, the cursor lands on the first row of the new page and the visible window shows exactly the items in that page (a clean slice — no overlap with the previous or next page). The window's `windowStart` is tracked as a `useState<number>` and recomputed by the keypress handlers. For `→` / `←` paging, `windowStart` is set to the first index of the new page (`newPage * pageSize`, clamped to `[0, totalPages - 1]`). For `↑` / `↓` navigation, the window stays still while the cursor moves within it, and scrolls by one row when the cursor reaches the bottom (`↓`) or top (`↑`) edge — the cursor lands at the new edge of the scrolled window. `←` on the first page and `→` on the last page are no-ops (the cursor stays on its current row, since the page did not change). The cursor's row index MUST be clamped to `[0, filteredSorted.length - 1]` and MUST NOT wrap at the ends. A cursor indicator (`> `) SHALL mark the active row. The title bar MUST show the total chat count, the current sort mode, the current profile filter, and the current favourites state. When the filtered list spans more than one page, the title bar MUST additionally show a `Page: X/Y` indicator immediately after the chat count, where `Y = ceil(N / pageSize)` (total pages) and `X = min(Y, floor(active / pageSize) + 1)` (the 1-indexed page the active row is in). When the list fits on a single page, the `Page:` indicator MUST be omitted. The hint line MUST advertise the `←` / `→` page keys adjacent to the existing `↑↓ navigate` label. The browser SHALL recognise `s` to cycle the sort mode, `p` to cycle the profile filter, and `f` to toggle the favourites filter (each described in its own requirement below). Pressing `s`, `p`, or `f` MUST reset both the active row index and `windowStart` to `0` (the first row of the re-sorted / re-filtered list); a `useEffect` watching `[filteredSorted]` enforces the same reset for any future list-mutating path.
 
-#### Scenario: Browser renders the chat list
+#### Scenario: Browser opens with the first page as a top-aligned window
 - **WHEN** the browser opens against a mediator returning N chats
-- **THEN** all N chats are visible in the body
+- **THEN** the visible window is exactly `[0, min(N - 1, pageSize - 1)]` (i.e. the first `pageSize` items, top-aligned, with the cursor on the first item)
 - **AND** the cursor (`> `) marks the first row
 - **AND** the title bar shows the chat count, the sort mode, the profile filter, and the favourites state
+- **AND** when N ≤ `pageSize`, every row is visible
 
 #### Scenario: Down arrow moves the cursor
 - **WHEN** the user presses `↓`
@@ -88,17 +89,91 @@ The browser SHALL render the chat list as a table with the columns `ID`, `DATE`,
 - **THEN** the cursor moves to the previous row
 - **AND** when the cursor is on the first row, pressing `↑` is a no-op
 
+#### Scenario: Down arrow at the bottom of the window scrolls the window by one row
+- **WHEN** the user presses `↓` and the cursor is at the bottom of the visible window
+- **THEN** `windowStart` is incremented by 1 (so the cursor is now on the bottom row of the new window)
+- **AND** the topmost row of the previous window is no longer visible
+
+#### Scenario: Up arrow at the top of a scrolled window scrolls the window up by one row
+- **WHEN** the user presses `↑` and the cursor is at the top of the visible window AND `windowStart > 0`
+- **THEN** `windowStart` is decremented by 1 (so the cursor is now on the top row of the new window)
+- **AND** the bottommost row of the previous window is no longer visible
+
+#### Scenario: Right arrow pages forward and shows the next page as a clean slice
+- **WHEN** the user presses `→` and the current page is not the last page
+- **THEN** the active row index and `windowStart` are both set to `(currentPage + 1) * pageSize` (i.e. the first row of the next page)
+- **AND** the visible window shows exactly the items in the next page — no item from the previous page is visible
+- **AND** the page indicator updates to `Page: (X+1)/Y`
+
+#### Scenario: Left arrow pages backward and shows the previous page as a clean slice
+- **WHEN** the user presses `←` and the current page is not the first page
+- **THEN** the active row index and `windowStart` are both set to `(currentPage - 1) * pageSize` (i.e. the first row of the previous page)
+- **AND** the visible window shows exactly the items in the previous page — no item from the current page is visible
+- **AND** the page indicator updates to `Page: (X-1)/Y`
+
+#### Scenario: Right arrow is a no-op on the last page
+- **WHEN** the user presses `→` and the cursor is already on the last page
+- **THEN** the active row index and `windowStart` do not change
+- **AND** the page indicator does not change
+
+#### Scenario: Left arrow is a no-op on the first page
+- **WHEN** the user presses `←` and the cursor is already on the first page
+- **THEN** the active row index and `windowStart` do not change
+- **AND** the page indicator does not change
+
+#### Scenario: pageSize applies the 80% reduction to (rows - 4)
+- **WHEN** `process.stdout.rows` is `24`
+- **THEN** `pageSize` is `floor((24 - 4) * 0.8) = 16` (i.e. 20% smaller than the un-reduced `(rows - 4)` value of 20)
+
+#### Scenario: pageSize is at least 5 rows
+- **WHEN** `process.stdout.rows` is small enough that `floor((rows - 4) * 0.8) < 5` (e.g. `rows` ≤ 10)
+- **THEN** `pageSize` is `5` (the floor) and at least 5 rows are visible
+
+#### Scenario: pageSize honors the BrowserConfig override
+- **WHEN** `BrowserConfig.pageSize` is a positive integer
+- **THEN** the browser uses that value as `pageSize` and ignores `process.stdout.rows`
+
+#### Scenario: Title bar shows Page: X/Y when the list spans multiple pages
+- **WHEN** the filtered list spans more than one page (i.e. `ceil(N / pageSize) > 1`)
+- **THEN** the title bar contains the substring `Page: 1/Y` immediately after the chat count, where `Y = ceil(N / pageSize)`
+- **AND** the indicator updates to `Page: X/Y` where `X = min(Y, floor(active / pageSize) + 1)` as the user pages with `→` or `←`
+
+#### Scenario: Page indicator is hidden when the list fits on a single page
+- **WHEN** the filtered list fits on a single page (i.e. `N ≤ pageSize`)
+- **THEN** the title bar does NOT contain the substring `Page:`
+- **AND** the chat count, sort mode, profile filter, and favourites state are still shown
+
+#### Scenario: Changing the sort resets the cursor and the window to the top
+- **WHEN** the user is on any row and presses `s`
+- **THEN** the active row index and `windowStart` are both set to `0` (the first row of the re-sorted list)
+- **AND** the visible window shifts to the new first page
+
+#### Scenario: Changing the profile filter resets the cursor and the window to the top
+- **WHEN** the user is on any row and presses `p`
+- **THEN** the active row index and `windowStart` are both set to `0` (the first row of the newly-filtered list)
+- **AND** the visible window shifts to the new first page
+
+#### Scenario: Toggling the favorites filter resets the cursor and the window to the top
+- **WHEN** the user is on any row and presses `f`
+- **THEN** the active row index and `windowStart` are both set to `0` (the first row of the newly-filtered list)
+- **AND** the visible window shifts to the new first page
+
 #### Scenario: Empty list shows the empty message
 - **WHEN** the mediator returns an empty `chats` array
 - **THEN** the browser displays `No conversations found.`
 - **AND** the cursor has no row to land on
 - **AND** pressing `enter` is a no-op
 - **AND** pressing `q` or `esc` resolves the prompt with `{ kind: 'quit' }`
+- **AND** pressing `←` or `→` is a no-op (no rows to navigate)
 - **AND** the `s`, `p`, and `f` toggles still function (so the user can recover from a filter combo that produces no matches in the non-empty case)
+
+#### Scenario: Hint line advertises the page keys
+- **WHEN** the browser renders
+- **THEN** the hint line contains the substring `← → page` adjacent to the existing `↑↓ navigate` label
 
 ### Requirement: Chat-list browser SHALL cycle the sort mode with `s`
 
-Pressing `s` SHALL cycle the sort mode in the order `recent` → `oldest` → `alpha` → `recent`. The current sort mode SHALL be reflected in the title bar. The cursor SHALL remain on the same row index when the sort changes, clamped to the new list length. The cycle SHALL be live: no sub-menu is shown, the list re-renders in place.
+Pressing `s` SHALL cycle the sort mode in the order `recent` → `oldest` → `alpha` → `recent`. The current sort mode SHALL be reflected in the title bar. The cursor SHALL be reset to the first row of the re-sorted list (i.e. `active = 0`); the previous row index is intentionally not preserved across sort changes. The cycle SHALL be live: no sub-menu is shown, the list re-renders in place.
 
 #### Scenario: s cycles through the three sort modes
 - **WHEN** the user presses `s` repeatedly
@@ -108,9 +183,9 @@ Pressing `s` SHALL cycle the sort mode in the order `recent` → `oldest` → `a
 - **WHEN** the user presses `s`
 - **THEN** the title bar reflects the new sort mode (e.g. `Sort: oldest`)
 
-#### Scenario: s keeps the cursor on the same row index
-- **WHEN** the user is on row index `i` and presses `s`
-- **THEN** after the re-sort, the cursor is on the new row index `min(i, newLength - 1)`
+#### Scenario: s resets the cursor to the top of the new sort
+- **WHEN** the user is on any row and presses `s`
+- **THEN** after the re-sort, the cursor is on the first row of the new sort (i.e. the new row index `0`)
 
 #### Scenario: s works even when the visible list is empty
 - **WHEN** the visible list is empty
@@ -164,12 +239,17 @@ Pressing `f` SHALL toggle the favourites filter on and off. When on, the visible
 
 ### Requirement: Chat-list browser SHALL show an action menu after a chat is picked
 
-When the user presses `enter` on a highlighted chat, the browser SHALL resolve with `{ kind: 'pick', chat, action: <pending> }` and the caller SHALL show a `prompts.select` action menu with five options: `View full conversation`, `Export to Markdown`, `Export to JSON`, `Copy conversation ID`, `Back to list`. After the user picks an action, the action SHALL execute and the loop SHALL re-enter the browser.
+When the user presses `enter` on a highlighted chat, the browser SHALL resolve with `{ kind: 'pick', chat, action: <pending> }` and the caller SHALL show a `prompts.select` action menu with seven options, in this order: `View full conversation`, `Export to Markdown`, `Export to JSON`, `Copy conversation ID`, `Delete conversation`, `Back to list`, `Quit`. The `Delete conversation` option SHALL display a `No confirmation` description adjacent to its label. After the user picks an action, the action SHALL execute and the loop SHALL re-enter the browser.
 
 #### Scenario: enter on a chat opens the action menu
 - **WHEN** the user navigates to a chat and presses `enter`
 - **THEN** the browser prompt resolves with `{ kind: 'pick', chat, action: <pending> }`
 - **AND** the caller shows the action menu titled `Selected: <id> — "<title>"`
+
+#### Scenario: action menu lists all seven options in the documented order
+- **WHEN** the caller shows the action menu
+- **THEN** the choice list contains exactly seven entries with values `view`, `export-markdown`, `export-json`, `copy-id`, `delete`, `back`, `quit` in that order
+- **AND** the `delete` entry's label is `Delete conversation` and its description is `No confirmation`
 
 #### Scenario: View action invokes fetch
 - **WHEN** the user selects `View full conversation` from the action menu
@@ -178,18 +258,25 @@ When the user presses `enter` on a highlighted chat, the browser SHALL resolve w
 
 #### Scenario: Export to Markdown action writes a file
 - **WHEN** the user selects `Export to Markdown` from the action menu
-- **THEN** the caller invokes `ExportCommand` with `format: 'markdown'` against the picked `chat.id`
+- **THEN** the caller prompts for an output path (see the *Export action prompts for an output path* requirement)
+- **AND** the caller invokes `ExportCommand` with `format: 'markdown'` and `--out <path>` against the picked `chat.id`
 - **AND** the loop re-enters the browser after the export completes
 
 #### Scenario: Export to JSON action writes a file
 - **WHEN** the user selects `Export to JSON` from the action menu
-- **THEN** the caller invokes `ExportCommand` with `format: 'json'` against the picked `chat.id`
+- **THEN** the caller prompts for an output path (see the *Export action prompts for an output path* requirement)
+- **AND** the caller invokes `ExportCommand` with `format: 'json'` and `--out <path>` against the picked `chat.id`
 - **AND** the loop re-enters the browser after the export completes
 
 #### Scenario: Copy conversation ID action prints the id
 - **WHEN** the user selects `Copy conversation ID` from the action menu
 - **THEN** the caller prints `Copied: <chat.id>` to stdout
 - **AND** the loop re-enters the browser
+
+#### Scenario: Delete conversation action invokes delete with --force
+- **WHEN** the user selects `Delete conversation` from the action menu
+- **THEN** the caller invokes `DeleteCommand` with `--force` against the picked `chat.id` (see the *Delete action bypasses confirmation* requirement)
+- **AND** the loop re-enters the browser after the delete completes
 
 #### Scenario: Back to list returns to the browser
 - **WHEN** the user selects `Back to list` (or presses `esc`) from the action menu
@@ -200,6 +287,55 @@ When the user presses `enter` on a highlighted chat, the browser SHALL resolve w
 - **WHEN** the user selects `Quit` from the action menu
 - **THEN** the browser loop exits
 - **AND** the process exits with code 0
+
+### Requirement: Export action prompts for an output path
+
+When the user selects `Export to Markdown` or `Export to JSON` from the action menu, the caller SHALL prompt for an output path via `prompts.text` (a single-line `text` input) before invoking `ExportCommand`. The prompt message SHALL be `Output path:`. The prompt's `default` value SHALL be `gemini-chat-<chat.id>-<YYYY-MM-DD>.<ext>`, where `<ext>` is `md` for Markdown and `json` for JSON, and `<YYYY-MM-DD>` is `new Date().toISOString().slice(0, 10)`. The user MAY accept the default (by pressing Enter) or supply a custom path. If the supplied value is empty or whitespace-only, the caller SHALL fall back to the default path. The resolved path SHALL be forwarded to `ExportCommand` as `--out <path>`.
+
+#### Scenario: Export to Markdown prompts with the default markdown filename
+- **WHEN** the user selects `Export to Markdown`
+- **THEN** the caller calls `text` with message `Output path:` and a default matching `^gemini-chat-<id>-\d{4}-\d{2}-\d{2}\.md$`
+- **AND** on user input `<path>`, the caller invokes `ExportCommand` with `["<id>", "--format", "markdown", "--out", "<path>"]`
+
+#### Scenario: Export to JSON prompts with the default json filename
+- **WHEN** the user selects `Export to JSON`
+- **THEN** the caller calls `text` with message `Output path:` and a default matching `^gemini-chat-<id>-\d{4}-\d{2}-\d{2}\.json$`
+- **AND** on user input `<path>`, the caller invokes `ExportCommand` with `["<id>", "--format", "json", "--out", "<path>"]`
+
+#### Scenario: Empty export input falls back to the default filename
+- **WHEN** the user submits an empty or whitespace-only path
+- **THEN** the caller uses the default `gemini-chat-<id>-<YYYY-MM-DD>.<ext>` as the resolved path
+- **AND** `ExportCommand` is invoked with `--out <default>`
+
+#### Scenario: Path prompt requires a TTY
+- **WHEN** the user selects Export and `process.stdin.isTTY` is not `true`
+- **THEN** `text` throws `NonInteractiveError` whose message contains `gemiterm new "Your message"`
+- **AND** the process exits with code 1
+
+### Requirement: Delete action bypasses confirmation
+
+When the user selects `Delete conversation` from the action menu, the caller SHALL invoke `DeleteCommand` with the picked `chat.id` and the `--force` flag. The caller SHALL NOT show the standalone-delete confirmation prompt (`prompts.confirm`); the in-browser delete is one-shot and unconfirmed by design. The `DeleteCommand`'s own profile-resolution and per-id error reporting behavior is unchanged from the standalone `gemiterm delete --force` invocation (errors are logged to stderr; on failure the process exits with code 1).
+
+#### Scenario: Delete dispatches to DeleteCommand with --force
+- **WHEN** the user selects `Delete conversation`
+- **THEN** the caller invokes `DeleteCommand` with argv `[<chat.id>, "--force"]`
+- **AND** the caller does NOT call `prompts.confirm` first
+
+#### Scenario: Delete is unconfirmed by design
+- **WHEN** the user selects `Delete conversation`
+- **THEN** no confirmation prompt is shown
+- **AND** the delete is dispatched immediately, matching the standalone `gemiterm delete <id> --force` behavior
+
+#### Scenario: After delete, the deleted chat is removed from the in-memory list
+- **WHEN** the user selects `Delete conversation` and `DeleteCommand` resolves successfully
+- **THEN** the caller removes the picked `chat.id` from the in-memory chat list before re-entering the browser
+- **AND** the next `browser(...)` call receives the chat list with that id absent
+- **AND** the cursor on the re-entered browser starts at the first row of the now-shorter list (the `useEffect` reset on `filteredSorted` in the browser prompt fires because the list reference changed)
+
+#### Scenario: Non-delete actions do not mutate the in-memory list
+- **WHEN** the user selects any action other than `Delete conversation` (e.g. `View full conversation`, `Export to Markdown`, `Export to JSON`, `Copy conversation ID`, `Back to list`, or `Quit`)
+- **THEN** the in-memory chat list is unchanged across the action
+- **AND** the next `browser(...)` call receives the same chat list as the previous one
 
 ### Requirement: Chat-list browser SHALL exit cleanly on quit signals
 

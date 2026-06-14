@@ -6,6 +6,7 @@ import { QUERY_TYPES } from "../../src/core/query-handlers.ts";
 import type { ListChatsQueryResult } from "../../src/core/query-handlers.ts";
 import { NonInteractiveError } from "../../src/cli/utils/prompts.ts";
 import { GemitermError } from "../../src/core/errors.ts";
+import type { ChatInfo } from "../../src/core/types.ts";
 
 const SAMPLE_CHATS = [
   { id: "abc123", title: "Python tips", isPinned: true, timestamp: 1717000000000 },
@@ -503,5 +504,271 @@ describe("ListCommand --interactive flag", () => {
         "Cannot use --interactive with --format or --out.",
       );
     }
+  });
+
+  describe("action menu (single-pick dispatch)", () => {
+    let deleteExecute: ReturnType<typeof mock>;
+    let exportExecute: ReturnType<typeof mock>;
+    let fetchExecute: ReturnType<typeof mock>;
+    let freshChats: ChatInfo[];
+
+    const stdinTty = (): PropertyDescriptor | undefined =>
+      Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    const setStdinTty = (value: boolean): void => {
+      Object.defineProperty(process.stdin, "isTTY", {
+        value,
+        configurable: true,
+        writable: true,
+      });
+    };
+    const restoreStdinTty = (): void => {
+      const desc = stdinTty();
+      if (desc) Object.defineProperty(process.stdin, "isTTY", desc);
+      else Reflect.deleteProperty(process.stdin, "isTTY");
+    };
+
+    beforeEach(() => {
+      freshChats = SAMPLE_CHATS.map((c) => ({ ...c }));
+      deleteExecute = mock(() => Promise.resolve());
+      exportExecute = mock(() => Promise.resolve());
+      fetchExecute = mock(() => Promise.resolve());
+      mock.module("../../src/cli/command-registry.ts", () => ({
+        CommandRegistry: class {
+          registerAllCommands(): void {}
+          getHandler(name: string): { execute: ReturnType<typeof mock> } | undefined {
+            if (name === "delete") return { execute: deleteExecute };
+            if (name === "export") return { execute: exportExecute };
+            if (name === "fetch") return { execute: fetchExecute };
+            return undefined;
+          }
+        },
+      }));
+    });
+
+    afterEach(() => {
+      deleteExecute.mockClear();
+      exportExecute.mockClear();
+      fetchExecute.mockClear();
+      mock.restore();
+    });
+
+    test("action menu offers a Delete option", async () => {
+      setStdinTty(true);
+      try {
+        const browserSpy = spyOn(promptsModule, "browser")
+          .mockResolvedValueOnce({ kind: "pick", chat: SAMPLE_CHATS[0] } as any)
+          .mockResolvedValue({ kind: "quit" } as any);
+        const selectSpy = spyOn(promptsModule, "select").mockResolvedValue("delete" as any);
+        const textSpy = spyOn(promptsModule, "text").mockResolvedValue("./dummy.md");
+
+        const mockHandler = {
+          queryType: QUERY_TYPES.LIST_CHATS,
+          handle: mock(async () => ({ chats: freshChats })),
+        };
+        mediator.registerQueryHandler(mockHandler as any);
+
+        await command.execute(["--interactive"], context);
+
+        const callArg = selectSpy.mock.calls[0][0] as any;
+        const values = (callArg.choices as Array<{ value: string; label: string }>).map(
+          (c) => c.value,
+        );
+        expect(values).toContain("delete");
+        const deleteChoice = (callArg.choices as Array<{ value: string; label: string; description?: string }>).find(
+          (c) => c.value === "delete",
+        );
+        expect(deleteChoice?.label).toBe("Delete conversation");
+        expect(browserSpy).toHaveBeenCalledTimes(2);
+        expect(textSpy).not.toHaveBeenCalled();
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("selecting Delete dispatches to delete with --force and no confirmation", async () => {
+      setStdinTty(true);
+      try {
+        spyOn(promptsModule, "browser")
+          .mockResolvedValueOnce({ kind: "pick", chat: SAMPLE_CHATS[0] } as any)
+          .mockResolvedValue({ kind: "quit" } as any);
+        spyOn(promptsModule, "select").mockResolvedValue("delete" as any);
+        const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(true);
+        spyOn(promptsModule, "text").mockResolvedValue("./dummy.md");
+
+        const mockHandler = {
+          queryType: QUERY_TYPES.LIST_CHATS,
+          handle: mock(async () => ({ chats: freshChats })),
+        };
+        mediator.registerQueryHandler(mockHandler as any);
+
+        await command.execute(["--interactive"], context);
+
+        expect(deleteExecute).toHaveBeenCalledTimes(1);
+        const callArgs = deleteExecute.mock.calls[0][0] as string[];
+        expect(callArgs[0]).toBe(SAMPLE_CHATS[0].id);
+        expect(callArgs).toContain("--force");
+        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(exportExecute).not.toHaveBeenCalled();
+        expect(fetchExecute).not.toHaveBeenCalled();
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("selecting Export to Markdown prompts for a path and forwards --out", async () => {
+      setStdinTty(true);
+      try {
+        spyOn(promptsModule, "browser")
+          .mockResolvedValueOnce({ kind: "pick", chat: SAMPLE_CHATS[0] } as any)
+          .mockResolvedValue({ kind: "quit" } as any);
+        spyOn(promptsModule, "select").mockResolvedValue("export-markdown" as any);
+        const textSpy = spyOn(promptsModule, "text").mockResolvedValue("./my-export.md");
+
+        const mockHandler = {
+          queryType: QUERY_TYPES.LIST_CHATS,
+          handle: mock(async () => ({ chats: freshChats })),
+        };
+        mediator.registerQueryHandler(mockHandler as any);
+
+        await command.execute(["--interactive"], context);
+
+        expect(textSpy).toHaveBeenCalledTimes(1);
+        const textCallArg = textSpy.mock.calls[0][0] as { message: string; default?: string };
+        expect(textCallArg.message).toBe("Output path:");
+        expect(textCallArg.default).toMatch(
+          new RegExp(`^gemini-chat-${SAMPLE_CHATS[0].id}-\\d{4}-\\d{2}-\\d{2}\\.md$`),
+        );
+
+        expect(exportExecute).toHaveBeenCalledTimes(1);
+        const exportArgs = exportExecute.mock.calls[0][0] as string[];
+        expect(exportArgs[0]).toBe(SAMPLE_CHATS[0].id);
+        expect(exportArgs).toContain("--format");
+        expect(exportArgs).toContain("markdown");
+        expect(exportArgs).toContain("--out");
+        expect(exportArgs).toContain("./my-export.md");
+        expect(deleteExecute).not.toHaveBeenCalled();
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("selecting Export to JSON prompts for a path with .json default", async () => {
+      setStdinTty(true);
+      try {
+        spyOn(promptsModule, "browser")
+          .mockResolvedValueOnce({ kind: "pick", chat: SAMPLE_CHATS[0] } as any)
+          .mockResolvedValue({ kind: "quit" } as any);
+        spyOn(promptsModule, "select").mockResolvedValue("export-json" as any);
+        const textSpy = spyOn(promptsModule, "text").mockResolvedValue("./my-export.json");
+
+        const mockHandler = {
+          queryType: QUERY_TYPES.LIST_CHATS,
+          handle: mock(async () => ({ chats: freshChats })),
+        };
+        mediator.registerQueryHandler(mockHandler as any);
+
+        await command.execute(["--interactive"], context);
+
+        const textCallArg = textSpy.mock.calls[0][0] as { default?: string };
+        expect(textCallArg.default).toMatch(
+          new RegExp(`^gemini-chat-${SAMPLE_CHATS[0].id}-\\d{4}-\\d{2}-\\d{2}\\.json$`),
+        );
+
+        const exportArgs = exportExecute.mock.calls[0][0] as string[];
+        expect(exportArgs).toContain("--format");
+        expect(exportArgs).toContain("json");
+        expect(exportArgs).toContain("--out");
+        expect(exportArgs).toContain("./my-export.json");
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("empty export path falls back to the default filename", async () => {
+      setStdinTty(true);
+      try {
+        spyOn(promptsModule, "browser")
+          .mockResolvedValueOnce({ kind: "pick", chat: SAMPLE_CHATS[0] } as any)
+          .mockResolvedValue({ kind: "quit" } as any);
+        spyOn(promptsModule, "select").mockResolvedValue("export-markdown" as any);
+        spyOn(promptsModule, "text").mockResolvedValue("   ");
+
+        const mockHandler = {
+          queryType: QUERY_TYPES.LIST_CHATS,
+          handle: mock(async () => ({ chats: freshChats })),
+        };
+        mediator.registerQueryHandler(mockHandler as any);
+
+        await command.execute(["--interactive"], context);
+
+        const exportArgs = exportExecute.mock.calls[0][0] as string[];
+        const outIdx = exportArgs.indexOf("--out");
+        const outPath = exportArgs[outIdx + 1];
+        expect(outPath).toMatch(
+          new RegExp(`^gemini-chat-${SAMPLE_CHATS[0].id}-\\d{4}-\\d{2}-\\d{2}\\.md$`),
+        );
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("after delete, the chat is removed from the list passed to the next browser call", async () => {
+      setStdinTty(true);
+      try {
+        const deletedId = SAMPLE_CHATS[0].id;
+        let firstCallChatsSnapshot: string[] = [];
+        const browserSpy = spyOn(promptsModule, "browser")
+          .mockImplementationOnce((config: any) => {
+            firstCallChatsSnapshot = (config.chats as ChatInfo[]).map((c) => c.id);
+            return Promise.resolve({ kind: "pick", chat: SAMPLE_CHATS[0] } as any);
+          })
+          .mockResolvedValue({ kind: "quit" } as any);
+        spyOn(promptsModule, "select").mockResolvedValue("delete" as any);
+
+        const mockHandler = {
+          queryType: QUERY_TYPES.LIST_CHATS,
+          handle: mock(async () => ({ chats: freshChats })),
+        };
+        mediator.registerQueryHandler(mockHandler as any);
+
+        await command.execute(["--interactive"], context);
+
+        expect(browserSpy).toHaveBeenCalledTimes(2);
+        const secondChats = (browserSpy.mock.calls[1][0] as { chats: ChatInfo[] }).chats;
+        expect(firstCallChatsSnapshot).toHaveLength(SAMPLE_CHATS.length);
+        expect(firstCallChatsSnapshot).toContain(deletedId);
+        expect(secondChats).toHaveLength(SAMPLE_CHATS.length - 1);
+        expect(secondChats.map((c) => c.id)).not.toContain(deletedId);
+        expect(secondChats.map((c) => c.id)).toEqual(
+          SAMPLE_CHATS.filter((c) => c.id !== deletedId).map((c) => c.id),
+        );
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("after a non-delete action, the chats list is unchanged on the next browser call", async () => {
+      setStdinTty(true);
+      try {
+        const browserSpy = spyOn(promptsModule, "browser")
+          .mockResolvedValueOnce({ kind: "pick", chat: SAMPLE_CHATS[0] } as any)
+          .mockResolvedValue({ kind: "quit" } as any);
+        spyOn(promptsModule, "select").mockResolvedValue("copy-id" as any);
+
+        const mockHandler = {
+          queryType: QUERY_TYPES.LIST_CHATS,
+          handle: mock(async () => ({ chats: freshChats })),
+        };
+        mediator.registerQueryHandler(mockHandler as any);
+
+        await command.execute(["--interactive"], context);
+
+        const secondChats = (browserSpy.mock.calls[1][0] as { chats: ChatInfo[] }).chats;
+        expect(secondChats).toHaveLength(SAMPLE_CHATS.length);
+        expect(secondChats.map((c) => c.id)).toEqual(SAMPLE_CHATS.map((c) => c.id));
+      } finally {
+        restoreStdinTty();
+      }
+    });
   });
 });
