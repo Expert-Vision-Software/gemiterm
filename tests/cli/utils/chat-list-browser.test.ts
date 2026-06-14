@@ -561,4 +561,80 @@ describe("pagination", () => {
     expect(getScreen()).toContain("Favorites: on");
     expect(getScreen()).toContain("> abc");
   });
+
+  test("each page is a clean slice of pageSize items (no overlap with the previous page)", async () => {
+    const { getScreen, events } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    expect(getScreen()).toContain("> c19");
+    expect(getScreen()).toContain("  c15");
+    expect(getScreen()).not.toContain("  c14");
+
+    events.keypress({ name: "right" });
+
+    expect(getScreen()).toContain("> c14");
+    expect(getScreen()).toContain("  c10");
+    expect(getScreen()).not.toContain("  c19");
+    expect(getScreen()).not.toContain("  c15");
+  });
+
+  test("down arrow steps within the page until the cursor reaches the bottom", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c18");
+    expect(getScreen()).toContain("  c19");
+    expect(getScreen()).not.toContain("  c14");
+
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c15");
+    expect(getScreen()).toContain("  c19");
+    expect(getScreen()).not.toContain("  c14");
+  });
+
+  test("down arrow at the bottom of the page scrolls the window by one row", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    for (let i = 0; i < 5; i++) events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c14");
+    expect(getScreen()).toContain("  c18");
+    expect(getScreen()).not.toContain("  c19");
+
+    events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c13");
+    expect(getScreen()).toContain("  c17");
+    expect(getScreen()).not.toContain("  c18");
+  });
+
+  test("up arrow at the top of a scrolled window scrolls the window up by one row", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    for (let i = 0; i < 5; i++) events.keypress({ name: "down" });
+    expect(getScreen()).toContain("> c14");
+    expect(getScreen()).toContain("  c18");
+    expect(getScreen()).not.toContain("  c19");
+
+    for (let i = 0; i < 4; i++) events.keypress({ name: "up" });
+    expect(getScreen()).toContain("> c18");
+    expect(getScreen()).toContain("  c14");
+    expect(getScreen()).not.toContain("  c19");
+
+    events.keypress({ name: "up" });
+    expect(getScreen()).toContain("> c19");
+    expect(getScreen()).toContain("  c15");
+    expect(getScreen()).not.toContain("  c14");
+  });
 });

@@ -11,7 +11,6 @@ import {
   useKeypress,
   useMemo,
   useEffect,
-  usePagination,
   makeTheme,
   isUpKey,
   isDownKey,
@@ -190,6 +189,7 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
     const [profileFilter, setProfileFilter] = useState<"all" | string>("all");
     const [favoritesOnly, setFavoritesOnly] = useState<boolean>(false);
     const [active, setActive] = useState<number>(0);
+    const [windowStart, setWindowStart] = useState<number>(0);
 
     const profileNames = useMemo(() => {
       const seen = new Set<string>();
@@ -230,6 +230,7 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
 
     useEffect(() => {
       setActive(0);
+      setWindowStart(0);
     }, [filteredSorted]);
 
     useKeypress((key) => {
@@ -238,6 +239,7 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
           sort === "recent" ? "oldest" : sort === "oldest" ? "alpha" : "recent";
         setSort(next);
         setActive(0);
+        setWindowStart(0);
         return;
       }
 
@@ -251,12 +253,14 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
           setProfileFilter(cycle[nextIndex] ?? "all");
         }
         setActive(0);
+        setWindowStart(0);
         return;
       }
 
       if (key.name === "f") {
         setFavoritesOnly(!favoritesOnly);
         setActive(0);
+        setWindowStart(0);
         return;
       }
 
@@ -270,9 +274,10 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       }
 
       if (key.name === "left") {
-        const currentPage = Math.floor(active / pageSize);
+        const currentPage = Math.floor(windowStart / pageSize);
         const newPage = Math.max(0, currentPage - 1);
         if (newPage !== currentPage) {
+          setWindowStart(newPage * pageSize);
           setActive(newPage * pageSize);
         }
         return;
@@ -280,9 +285,10 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
 
       if (key.name === "right") {
         const totalPages = Math.max(1, Math.ceil(total / pageSize));
-        const currentPage = Math.floor(active / pageSize);
+        const currentPage = Math.floor(windowStart / pageSize);
         const newPage = Math.min(totalPages - 1, currentPage + 1);
         if (newPage !== currentPage) {
+          setWindowStart(newPage * pageSize);
           setActive(newPage * pageSize);
         }
         return;
@@ -302,12 +308,20 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       }
 
       if (isUpKey(key)) {
-        setActive(Math.max(0, active - 1));
+        const newActive = Math.max(0, active - 1);
+        setActive(newActive);
+        if (newActive < windowStart) {
+          setWindowStart(newActive);
+        }
         return;
       }
 
       if (isDownKey(key)) {
-        setActive(Math.min(total - 1, active + 1));
+        const newActive = Math.min(total - 1, active + 1);
+        setActive(newActive);
+        if (newActive >= windowStart + pageSize) {
+          setWindowStart(newActive - pageSize + 1);
+        }
         return;
       }
     });
@@ -344,13 +358,14 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       return [`${titleBar}\nNo conversations found.`, hintLine];
     }
 
-    const rows = usePagination({
-      items: filteredSorted,
-      active: safeActive,
-      pageSize,
-      loop: false,
-      renderItem: ({ item, isActive }) => renderRow(item, isActive),
-    });
+    const windowEnd = Math.min(
+      filteredSorted.length,
+      windowStart + pageSize,
+    );
+    const visibleItems = filteredSorted.slice(windowStart, windowEnd);
+    const rows = visibleItems
+      .map((item) => renderRow(item, item === filteredSorted[safeActive]))
+      .join("\n");
 
     return [`${titleBar}\n${rows}`, hintLine];
   },
