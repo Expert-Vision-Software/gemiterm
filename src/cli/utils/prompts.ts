@@ -10,6 +10,7 @@ import {
   useState,
   useKeypress,
   useMemo,
+  useEffect,
   usePagination,
   makeTheme,
   isUpKey,
@@ -227,11 +228,16 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       return Math.max(5, Math.floor((rows - 4) * 0.8));
     }, [config.pageSize]);
 
+    useEffect(() => {
+      setActive(0);
+    }, [filteredSorted]);
+
     useKeypress((key) => {
       if (key.name === "s") {
         const next =
           sort === "recent" ? "oldest" : sort === "oldest" ? "alpha" : "recent";
         setSort(next);
+        setActive(0);
         return;
       }
 
@@ -244,11 +250,13 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
           const nextIndex = (currentIndex + 1) % cycle.length;
           setProfileFilter(cycle[nextIndex] ?? "all");
         }
+        setActive(0);
         return;
       }
 
       if (key.name === "f") {
         setFavoritesOnly(!favoritesOnly);
+        setActive(0);
         return;
       }
 
@@ -262,12 +270,21 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       }
 
       if (key.name === "left") {
-        setActive(Math.max(0, active - pageSize));
+        const currentPage = Math.floor(active / pageSize);
+        const newPage = Math.max(0, currentPage - 1);
+        if (newPage !== currentPage) {
+          setActive(newPage * pageSize);
+        }
         return;
       }
 
       if (key.name === "right") {
-        setActive(Math.min(total - 1, active + pageSize));
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        const currentPage = Math.floor(active / pageSize);
+        const newPage = Math.min(totalPages - 1, currentPage + 1);
+        if (newPage !== currentPage) {
+          setActive(newPage * pageSize);
+        }
         return;
       }
 
@@ -331,6 +348,7 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
       items: filteredSorted,
       active: safeActive,
       pageSize,
+      loop: false,
       renderItem: ({ item, isActive }) => renderRow(item, isActive),
     });
 

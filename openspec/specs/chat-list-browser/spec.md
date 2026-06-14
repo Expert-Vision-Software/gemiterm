@@ -70,7 +70,7 @@ The `list` command SHALL accept a `--interactive/-i` flag. When the flag is set,
 
 ### Requirement: Chat-list browser SHALL display the list with cursor navigation
 
-The browser SHALL render the chat list as a table with the columns `ID`, `DATE`, `TITLE`, and `PIN` (and `PROFILE` when `--all-profiles` is set). The browser SHALL display the filtered list as a **paged window** of `pageSize` rows centered on the active row, where `pageSize` is derived from the terminal height as `max(5, floor((process.stdout.rows - 4) * 0.8))` (with the `?? 24` fallback when `process.stdout.rows` is `undefined`); the `BrowserConfig.pageSize` test override MAY be used to force a specific value in test fixtures. When the filtered list has fewer rows than `pageSize`, every row is shown. The user navigates the list with the `↑` and `↓` arrow keys (one row at a time) and pages through the list with the `←` and `→` arrow keys (one `pageSize` at a time). `←` at the first row and `→` at the last row are no-ops on the active cursor position. A cursor indicator (`> `) SHALL mark the active row; the active row's index MUST be clamped to `[0, filteredSorted.length - 1]` and MUST NOT wrap at the ends. The title bar MUST show the total chat count, the current sort mode, the current profile filter, and the current favourites state. When the filtered list spans more than one page, the title bar MUST additionally show a `Page: X/Y` indicator immediately after the chat count, where `Y = ceil(N / pageSize)` (total pages) and `X = min(Y, floor(active / pageSize) + 1)` (the 1-indexed page the active row is in). When the list fits on a single page, the `Page:` indicator MUST be omitted. The hint line MUST advertise the `←` / `→` page keys adjacent to the existing `↑↓ navigate` label. The browser SHALL recognise `s` to cycle the sort mode, `p` to cycle the profile filter, and `f` to toggle the favourites filter (each described in its own requirement below).
+The browser SHALL render the chat list as a table with the columns `ID`, `DATE`, `TITLE`, and `PIN` (and `PROFILE` when `--all-profiles` is set). The browser SHALL display the filtered list as a **paged window** of `pageSize` rows centered on the active row, where `pageSize` is derived from the terminal height as `max(5, floor((process.stdout.rows - 4) * 0.8))` (with the `?? 24` fallback when `process.stdout.rows` is `undefined`); the `BrowserConfig.pageSize` test override MAY be used to force a specific value in test fixtures. When the filtered list has fewer rows than `pageSize`, every row is shown. The user navigates the list with the `↑` and `↓` arrow keys (one row at a time) and pages through the list with the `←` and `→` arrow keys. `←` / `→` MUST snap the cursor to the **first row of the new page** (`(currentPage ± 1) * pageSize`, clamped to `[0, filteredSorted.length - 1]`) — so paging always lands the cursor on a row the user can immediately see. `←` on the first page and `→` on the last page are no-ops (the cursor stays on its current row, since the page does not change). The window is rendered through `@inquirer/core`'s `usePagination` with `loop: false`, so the visible window does not wrap around the ends of the list (the cursor itself is bounded by `[0, filteredSorted.length - 1]` regardless). A cursor indicator (`> `) SHALL mark the active row. The title bar MUST show the total chat count, the current sort mode, the current profile filter, and the current favourites state. When the filtered list spans more than one page, the title bar MUST additionally show a `Page: X/Y` indicator immediately after the chat count, where `Y = ceil(N / pageSize)` (total pages) and `X = min(Y, floor(active / pageSize) + 1)` (the 1-indexed page the active row is in). When the list fits on a single page, the `Page:` indicator MUST be omitted. The hint line MUST advertise the `←` / `→` page keys adjacent to the existing `↑↓ navigate` label. The browser SHALL recognise `s` to cycle the sort mode, `p` to cycle the profile filter, and `f` to toggle the favourites filter (each described in its own requirement below). Pressing `s`, `p`, or `f` MUST reset the active row index to `0` (the first row of the re-sorted / re-filtered list); a `useEffect` watching `[filteredSorted]` enforces the same reset for any future list-mutating path.
 
 #### Scenario: Browser opens with a paged window centered on the first row
 - **WHEN** the browser opens against a mediator returning N chats
@@ -89,23 +89,27 @@ The browser SHALL render the chat list as a table with the columns `ID`, `DATE`,
 - **THEN** the cursor moves to the previous row
 - **AND** when the cursor is on the first row, pressing `↑` is a no-op
 
-#### Scenario: Right arrow pages forward
-- **WHEN** the user presses `→`
-- **THEN** the active row index advances by `pageSize` rows (clamped to `filteredSorted.length - 1`)
-- **AND** the visible window shifts so the new active row is centered
+#### Scenario: Right arrow pages forward and snaps to the first row of the next page
+- **WHEN** the user presses `→` and the current page is not the last page
+- **THEN** the active row index is set to `(currentPage + 1) * pageSize` (i.e. the first row of the next page)
+- **AND** the visible window shifts so the new active row is the top row of the page
+- **AND** the page indicator updates to `Page: (X+1)/Y`
 
-#### Scenario: Left arrow pages backward
-- **WHEN** the user presses `←`
-- **THEN** the active row index retreats by `pageSize` rows (clamped to `0`)
-- **AND** the visible window shifts so the new active row is centered
+#### Scenario: Left arrow pages backward and snaps to the first row of the previous page
+- **WHEN** the user presses `←` and the current page is not the first page
+- **THEN** the active row index is set to `(currentPage - 1) * pageSize` (i.e. the first row of the previous page)
+- **AND** the visible window shifts so the new active row is the top row of the page
+- **AND** the page indicator updates to `Page: (X-1)/Y`
 
-#### Scenario: Right arrow clamps at the last row
-- **WHEN** the active row is within `pageSize` rows of the end and the user presses `→`
-- **THEN** the active row index is set to `filteredSorted.length - 1` and does not exceed it
+#### Scenario: Right arrow is a no-op on the last page
+- **WHEN** the user presses `→` and the cursor is already on the last page
+- **THEN** the active row index does not change
+- **AND** the page indicator does not change
 
-#### Scenario: Left arrow clamps at the first row
-- **WHEN** the active row is within `pageSize` rows of the start and the user presses `←`
-- **THEN** the active row index is set to `0` and does not go below it
+#### Scenario: Left arrow is a no-op on the first page
+- **WHEN** the user presses `←` and the cursor is already on the first page
+- **THEN** the active row index does not change
+- **AND** the page indicator does not change
 
 #### Scenario: pageSize applies the 80% reduction to (rows - 4)
 - **WHEN** `process.stdout.rows` is `24`
@@ -129,6 +133,21 @@ The browser SHALL render the chat list as a table with the columns `ID`, `DATE`,
 - **THEN** the title bar does NOT contain the substring `Page:`
 - **AND** the chat count, sort mode, profile filter, and favourites state are still shown
 
+#### Scenario: Changing the sort resets the cursor to the top of the new sort
+- **WHEN** the user is on any row and presses `s`
+- **THEN** the active row index is set to `0` (the first row of the re-sorted list)
+- **AND** the visible window shifts to the new first row
+
+#### Scenario: Changing the profile filter resets the cursor to the top of the filtered list
+- **WHEN** the user is on any row and presses `p`
+- **THEN** the active row index is set to `0` (the first row of the newly-filtered list)
+- **AND** the visible window shifts to the new first row
+
+#### Scenario: Toggling the favorites filter resets the cursor to the top of the filtered list
+- **WHEN** the user is on any row and presses `f`
+- **THEN** the active row index is set to `0` (the first row of the newly-filtered list)
+- **AND** the visible window shifts to the new first row
+
 #### Scenario: Empty list shows the empty message
 - **WHEN** the mediator returns an empty `chats` array
 - **THEN** the browser displays `No conversations found.`
@@ -144,7 +163,7 @@ The browser SHALL render the chat list as a table with the columns `ID`, `DATE`,
 
 ### Requirement: Chat-list browser SHALL cycle the sort mode with `s`
 
-Pressing `s` SHALL cycle the sort mode in the order `recent` → `oldest` → `alpha` → `recent`. The current sort mode SHALL be reflected in the title bar. The cursor SHALL remain on the same row index when the sort changes, clamped to the new list length. The cycle SHALL be live: no sub-menu is shown, the list re-renders in place.
+Pressing `s` SHALL cycle the sort mode in the order `recent` → `oldest` → `alpha` → `recent`. The current sort mode SHALL be reflected in the title bar. The cursor SHALL be reset to the first row of the re-sorted list (i.e. `active = 0`); the previous row index is intentionally not preserved across sort changes. The cycle SHALL be live: no sub-menu is shown, the list re-renders in place.
 
 #### Scenario: s cycles through the three sort modes
 - **WHEN** the user presses `s` repeatedly
@@ -154,9 +173,9 @@ Pressing `s` SHALL cycle the sort mode in the order `recent` → `oldest` → `a
 - **WHEN** the user presses `s`
 - **THEN** the title bar reflects the new sort mode (e.g. `Sort: oldest`)
 
-#### Scenario: s keeps the cursor on the same row index
-- **WHEN** the user is on row index `i` and presses `s`
-- **THEN** after the re-sort, the cursor is on the new row index `min(i, newLength - 1)`
+#### Scenario: s resets the cursor to the top of the new sort
+- **WHEN** the user is on any row and presses `s`
+- **THEN** after the re-sort, the cursor is on the first row of the new sort (i.e. the new row index `0`)
 
 #### Scenario: s works even when the visible list is empty
 - **WHEN** the visible list is empty

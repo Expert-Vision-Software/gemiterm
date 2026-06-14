@@ -76,7 +76,7 @@ describe("browser prompt", () => {
     expect(getScreen()).toContain("Sort: recent");
   });
 
-  test("s keeps the cursor on the same row index when sort changes (clamped to new list length)", async () => {
+  test("s resets the cursor to the top of the new sort", async () => {
     const { events, getScreen } = await render(browserPrompt, { chats: SAMPLE_CHATS });
 
     events.keypress({ name: "down" });
@@ -84,7 +84,7 @@ describe("browser prompt", () => {
 
     events.keypress("s");
     expect(getScreen()).toContain("Sort: oldest");
-    expect(getScreen()).toContain("> abc");
+    expect(getScreen()).toContain("> ghi");
   });
 
   test("p cycles through profile filter (all → work → personal → all)", async () => {
@@ -363,7 +363,7 @@ describe("pagination", () => {
     expect(screen).not.toContain("> c19");
   });
 
-  test("right arrow clamps at the last row", async () => {
+  test("right arrow clamps at the last page and snaps to its first row", async () => {
     const { events, getScreen } = await render(browserPrompt, {
       chats: buildChats(10),
       pageSize: 5,
@@ -372,7 +372,7 @@ describe("pagination", () => {
     events.keypress({ name: "right" });
     events.keypress({ name: "right" });
 
-    expect(getScreen()).toContain("> c00");
+    expect(getScreen()).toContain("> c04");
   });
 
   test("left arrow clamps at the first row", async () => {
@@ -484,5 +484,81 @@ describe("pagination", () => {
     });
 
     expect(getScreen()).not.toContain("Page:");
+  });
+
+  test("right arrow snaps the cursor to the first row of the next page", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+
+    expect(getScreen()).toContain("> c14");
+  });
+
+  test("left arrow snaps the cursor to the first row of the previous page", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+    expect(getScreen()).toContain("> c14");
+
+    events.keypress({ name: "left" });
+    expect(getScreen()).toContain("> c19");
+  });
+
+  test("left arrow is a no-op when already on the first page (cursor stays on first row)", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "left" });
+
+    expect(getScreen()).toContain("> c19");
+  });
+
+  test("changing the sort resets the cursor to the top of the new sort", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: buildChats(20),
+      pageSize: 5,
+    });
+
+    events.keypress({ name: "right" });
+    expect(getScreen()).toContain("> c14");
+
+    events.keypress("s");
+    expect(getScreen()).toContain("Sort: oldest");
+    expect(getScreen()).toContain("> c00");
+  });
+
+  test("changing the profile filter resets the cursor to the top of the filtered list", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: SAMPLE_CHATS_WITH_PROFILES,
+      pageSize: 1,
+    });
+
+    events.keypress({ name: "down" });
+    events.keypress({ name: "down" });
+
+    events.keypress("p");
+    expect(getScreen()).toContain("Profile: work");
+    expect(getScreen()).toContain("> w1");
+  });
+
+  test("toggling the favorites filter resets the cursor to the top of the filtered list", async () => {
+    const { events, getScreen } = await render(browserPrompt, {
+      chats: SAMPLE_CHATS,
+      pageSize: 1,
+    });
+
+    events.keypress({ name: "down" });
+
+    events.keypress("f");
+    expect(getScreen()).toContain("Favorites: on");
+    expect(getScreen()).toContain("> abc");
   });
 });

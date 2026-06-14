@@ -45,26 +45,35 @@ The override is gated by `> 0` so a caller passing `0` or a negative value falls
 
 ## D4. Keypress handler additions
 
-The new keys are added inside the existing `useKeypress` callback at `src/cli/utils/prompts.ts:220-276`, after the `s` / `p` / `f` short-circuits (lines 221-243) and before the `total === 0` guard (line 247) — because the new keys need `pageSize` and only make sense when the list is non-empty:
+The new keys are added inside the existing `useKeypress` callback at `src/cli/utils/prompts.ts:235-310`, after the `s` / `p` / `f` short-circuits (lines 236-258) and before the `total === 0` guard (line 262) — because the new keys need `pageSize` and only make sense when the list is non-empty:
 
 ```ts
 if (key.name === "left") {
-  setActive(Math.max(0, active - pageSize));
+  const currentPage = Math.floor(active / pageSize);
+  const newPage = Math.max(0, currentPage - 1);
+  if (newPage !== currentPage) {
+    setActive(newPage * pageSize);
+  }
   return;
 }
 if (key.name === "right") {
-  setActive(Math.min(total - 1, active + pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.floor(active / pageSize);
+  const newPage = Math.min(totalPages - 1, currentPage + 1);
+  if (newPage !== currentPage) {
+    setActive(newPage * pageSize);
+  }
   return;
 }
 ```
 
 `@inquirer/core` does not export `isLeftKey` / `isRightKey` (verified at `node_modules/@inquirer/core/dist/index.d.ts:1` — the only key helpers are `isUpKey`, `isDownKey`, `isSpaceKey`, `isBackspaceKey`, `isTabKey`, `isNumberKey`, `isEnterKey`, `isShiftKey`). We use `key.name === "left" | "right"` directly, which is the same pattern the existing code uses for `key.name === "escape"` and `key.name === "s"`. The inquirer keypress event uses readline-style names: `left`, `right`, `up`, `down`, `enter`, `escape`, plus the printable chars.
 
-The clamp matches the existing `↑/↓` clamps: `Math.max(0, …)` for the top boundary, `Math.min(total - 1, …)` for the bottom. No wrap on the cursor position — only the visible window inside `usePagination` wraps via its `loop: true` default (which has no effect at the cursor level).
+The cursor logic was revised after the initial implementation. The original clamp (`Math.max(0, active - pageSize)` / `Math.min(total - 1, active + pageSize)`) preserved the cursor's *offset within the page* but didn't reset it on page change — combined with `usePagination`'s `loop: true` default, the user could end up on a position that wrapped around the list visually, and the cursor would not snap to the first row of the new page. The new logic computes the target page explicitly and snaps the cursor to the first index of that page: `newActive = newPage * pageSize` (where `newPage` is 0-indexed and clamped to `[0, totalPages - 1]`). The `if (newPage !== currentPage)` guard makes `←` on the first page and `→` on the last page no-ops — the cursor stays on its current row, since the page did not change. No wrap on the cursor position — `usePagination` is invoked with `loop: false` (see D7).
 
 ## D5. Render block
 
-The render block at `src/cli/utils/prompts.ts:285-303` is reorganized so the empty-list case is a separate early return, and the `usePagination` call sits in the non-empty case:
+The render block at `src/cli/utils/prompts.ts:340-352` is reorganized so the empty-list case is a separate early return, and the `usePagination` call sits in the non-empty case:
 
 ```ts
 const renderRow = (item: ChatInfo, isActive: boolean): string => { /* unchanged */ };
@@ -78,17 +87,31 @@ const rows = usePagination({
   items: filteredSorted,
   active: safeActive,
   pageSize,
+  loop: false,
   renderItem: ({ item, isActive }) => renderRow(item, isActive),
 });
 
 return [`${titleBar}\n${rows}`, hintLine];
 ```
 
-`usePagination` with an empty `items` array crashes (the `bound` helper at `use-pagination.js:24` divides by `items.length`), so the early return for the empty case is mandatory. The pre-existing `safeActive` clamp on line 294 is preserved: `usePagination` does not clamp `active` defensively (it just uses it as a render hint), so the call site must.
+`usePagination` with an empty `items` array crashes (the `bound` helper at `use-pagination.js:24` divides by `items.length`), so the early return for the empty case is mandatory. The pre-existing `safeActive` clamp is preserved: `usePagination` does not clamp `active` defensively (it just uses it as a render hint), so the call site must.
 
-For test fixtures of 2-4 chats, `pageSize` defaults to 12 (the 80% reduction of `(20 - 4) = 16` for the test's `process.stdout.rows = 20` override) and `usePagination` returns all items plus a tail of empty lines (the hook pads the page to `pageSize` lines). The 18 original tests assert substrings (e.g. `> def`, `Sort: recent`, `No conversations found`), not exact frame sizes, so the empty-line padding is invisible to them. Confirmed by reading the test file.
+The original implementation called `usePagination` with `loop: true` (the default). With `loop: true` and the cursor near the end of the list, `usePagination`'s fill algorithm would wrap around to the start of the list when computing "items under the active row" — so a list of 20 items at `pageSize: 5` with `active: 19` would render `[c18, c19, c00, c01]`. Combined with the "advance by `pageSize`, clamp to ends" cursor logic, this produced a UX bug: the cursor did not snap to the first row of the new page, and the page indicator could disagree with the visible window. The fix is `loop: false` — the fill stops at the list boundaries, so the visible window is always a contiguous slice of the natural list order, and the cursor's `(currentPage ± 1) * pageSize` formula in D4 lines up with what the user actually sees.
 
-## D6. Hint line
+For test fixtures of 2-4 chats, `pageSize` defaults to 12 (the 80% reduction of `(20 - 4) = 16` for the test's `process.stdout.rows = 20` override) and `usePagination` returns all items plus a tail of empty lines (the hook pads the page to `pageSize` lines). The original tests assert substrings (e.g. `> def`, `Sort: recent`, `No conversations found`), not exact frame sizes, so the empty-line padding is invisible to them. Confirmed by reading the test file.
+
+## D6. Resetting the cursor on filter changes
+
+Pressing `s`, `p`, or `f` mutates one of the `useState` values that feeds into the `filteredSorted` `useMemo` — which re-runs and produces a new array. The user reported that the cursor was "stuck" after a sort/filter change: pressing `↓` could not reach the last item and pressing `↑` could not return to the first, because the cursor was carried over from the previous list at an index that did not match the new list's layout.
+
+The fix has two parts:
+
+1. **Explicit `setActive(0)` in the `s` / `p` / `f` handlers.** Both `setSort` (or `setProfileFilter` / `setFavoritesOnly`) and `setActive(0)` are called inside the same `useKeypress` callback, so the `withUpdates` batcher in `@inquirer/core`'s `hook-engine.js:42-58` collapses them into a single re-render. The new render uses `active = 0` from the start, so the user sees the cursor land on the first row of the re-sorted / re-filtered list with no flicker.
+2. **A `useEffect(() => setActive(0), [filteredSorted])` safety net.** The `useMemo` for `filteredSorted` returns a new array reference whenever any of its deps (`config.chats`, `sort`, `profileFilter`, `favoritesOnly`) change. The `useEffect` fires when that reference changes, so any future code path that mutates the list (e.g. a future date-range filter) is also covered. In the common case (sort/profile/favorites), the effect's `setActive(0)` is a no-op because the explicit handler already set `active = 0` in the same render.
+
+The explicit-handler approach was chosen over the `useEffect`-only approach to avoid a one-frame flicker. With `useEffect` only, the user presses `s`, the first render uses the stale `active`, then the effect fires and `setActive(0)` triggers a second render — the user sees a brief flash of the cursor at the wrong row. With the explicit handler + safety net, the first render already has the correct `active = 0`, and the effect's call is a no-op.
+
+## D7. Page indicator in the title bar
 
 Updated from `"↑↓ navigate · s sort · p profile · f favorites · enter pick · q quit"` to `"↑↓ navigate · ← → page · s sort · p profile · f favorites · enter pick · q quit"`. The new segment is inserted adjacent to the existing `↑↓ navigate` token so the visual grouping (movement keys first, then toggles, then actions) is preserved.
 
@@ -148,9 +171,9 @@ Recommendation: this change lands first because (a) it's smaller, (b) it doesn't
 A new `describe("pagination")` block at the end of `tests/cli/utils/chat-list-browser.test.ts`, mirroring the existing TTY stub pattern:
 
 1. **Long list windows correctly** — 50-item fixture, `process.stdout.rows` overridden to 20. Assert: `getScreen()` contains `> c49` (most recent, index 0 in the recent-sorted array) and does NOT contain `c00`.
-2. **`→` jumps active by `pageSize`** — 20-item fixture, `pageSize: 5` override. After `right`, `getScreen()` contains `> c14` (index 5 in the recent-sorted array) and not `> c19`.
-3. **`→` clamps at end** — 10-item fixture, `pageSize: 5`. After two `right`s, `> c00` (oldest, index 9 in the recent-sorted array) is on screen.
-4. **`←` clamps at start** — 20-item fixture, `pageSize: 5`. After `left`, `> c19` is on screen.
+2. **`→` jumps active to the first row of the next page** — 20-item fixture, `pageSize: 5` override. After `right`, `getScreen()` contains `> c14` (index 5 in the recent-sorted array, the first row of page 2) and not `> c19`.
+3. **`→` clamps at the last page and snaps to its first row** — 10-item fixture, `pageSize: 5`. After two `right`s, `> c04` (index 5, the first row of page 2/2) is on screen. The second `→` is a no-op because the page did not change.
+4. **`←` clamps at the first row** — 20-item fixture, `pageSize: 5`. After `left`, `> c19` is on screen. `←` is a no-op because the cursor is already on the first page.
 5. **`pageSize` config override is honored** — 10-item fixture, `pageSize: 3`. Initial screen contains `> c09`, `c08`, `c07`; not `c00`.
 6. **Down arrow through a paginated list keeps the cursor on the active row** — 20-item fixture, `pageSize: 5`. After 5 `down` presses, `> c14` is on screen.
 7. **Filtered list shorter than `pageSize` renders all items** — 3-item fixture, `pageSize: 20`. After `f` (favorites on), the pinned item is visible and the empty-state message is NOT shown.
@@ -160,6 +183,12 @@ A new `describe("pagination")` block at the end of `tests/cli/utils/chat-list-br
 11. **Page indicator updates when paging with `→`** — same fixture. After `right`, `getScreen()` contains `Page: 2/4`.
 12. **Page indicator clamps at the last page when `→` goes past the end** — 10-item fixture, `pageSize: 5`. After two `right`s, `getScreen()` contains `Page: 2/2`.
 13. **Page indicator is hidden when the list fits on a single page** — 5-item fixture, `pageSize: 20`. Assert: `getScreen()` does NOT contain `Page:`.
+14. **`→` snaps the cursor to the first row of the next page** — 20-item fixture, `pageSize: 5`. After `right`, `> c14` (index 5, first row of page 2) is on screen. Distinct from test 2 in that this test pins the behavior to a specific "first row of next page" expectation rather than the broader "jumps by `pageSize`" framing.
+15. **`←` snaps the cursor to the first row of the previous page** — 20-item fixture, `pageSize: 5`. After `right` (active=5, page 2), then `left`, `> c19` (index 0, first row of page 1) is on screen.
+16. **`←` is a no-op on the first page** — 20-item fixture, `pageSize: 5`. After `left`, `> c19` is still on screen (cursor did not move).
+17. **Changing the sort resets the cursor to the top of the new sort** — 20-item fixture, `pageSize: 5`. After `right` (active=5, cursor on c14), then `s`, `> c00` (oldest sort, index 0) is on screen and `Sort: oldest` is in the title bar.
+18. **Changing the profile filter resets the cursor to the top of the filtered list** — `SAMPLE_CHATS_WITH_PROFILES` fixture, `pageSize: 1`. After `down` twice (active=2), then `p` (filter narrows to work profile), `> w1` is on screen.
+19. **Toggling the favorites filter resets the cursor to the top of the filtered list** — `SAMPLE_CHATS` fixture, `pageSize: 1`. After `down` (active=1), then `f` (favorites on), `> abc` is on screen.
 
 Test fixture builder:
 ```ts
@@ -183,4 +212,8 @@ Object.defineProperty(process.stdout, "rows", {
 ```
 And the `afterEach` restores the descriptor.
 
-Expected new test count: 13. New baseline: 690 pass, 0 fail (verified during implementation; the pre-existing 682 baseline already included the in-flight `chat-list-bulk-actions` tests that were present at the start of this change).
+Two of the original `describe("browser prompt")` tests were updated to reflect the new behavior (rather than adding new tests in the same place):
+- "s keeps the cursor on the same row index when sort changes" → renamed to "s resets the cursor to the top of the new sort"; the post-sort assertion changed from `> abc` (old index 1 in the recent sort) to `> ghi` (new index 0 in the oldest sort).
+- "right arrow clamps at the last row" → renamed to "right arrow clamps at the last page and snaps to its first row"; the post-press assertion changed from `> c00` (old: last item of the list) to `> c04` (new: first item of the last page).
+
+Expected new test count: 19 (was 13 before the bug fix). Net delta from the bug fix: +6 tests + 2 renames. New baseline: 701 pass, 0 fail (verified during implementation).
