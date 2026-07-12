@@ -23,12 +23,19 @@ function validateCookies(cookies: Cookie[]): boolean {
 }
 
 function getCookieExpiryTimestamp(cookies: Cookie[]): number | null {
+  let maxExpiry: number | null = null;
   for (const cookie of cookies) {
-    if (cookie.name === "__Secure-1PSIDTS" && cookie.expires > 0) {
-      return cookie.expires * 1000;
+    if (
+      (cookie.name === "__Secure-1PSID" || cookie.name === "__Secure-1PSIDTS") &&
+      cookie.expires > 0
+    ) {
+      const ms = cookie.expires * 1000;
+      if (maxExpiry === null || ms > maxExpiry) {
+        maxExpiry = ms;
+      }
     }
   }
-  return null;
+  return maxExpiry;
 }
 
 function checkCookieFreshness(cookies: Cookie[]): boolean {
@@ -147,8 +154,9 @@ export class ProfileManager {
     }
     try {
       const cookies = this.cookieStorage.load(name);
-      const isActive = validateCookies(cookies) && checkCookieFreshness(cookies);
+      const hasValidCookies = validateCookies(cookies);
       const expiresMs = getCookieExpiryTimestamp(cookies);
+      const isActive = hasValidCookies && (expiresMs === null || expiresMs > Date.now());
       let expiresAt: string | null = null;
       if (expiresMs !== null) {
         expiresAt = new Date(expiresMs).toISOString();
