@@ -1,7 +1,6 @@
 import chalk from "chalk";
 import figures from "@inquirer/figures";
 import {
-  input,
   confirm as inquirerConfirm,
   select as inquirerSelect,
 } from "@inquirer/prompts";
@@ -15,6 +14,7 @@ import {
   isUpKey,
   isDownKey,
   isEnterKey,
+  isBackspaceKey,
   AbortPromptError,
   ExitPromptError,
 } from "@inquirer/core";
@@ -80,15 +80,88 @@ export interface TextOptions {
   validate?: (value: string) => boolean | string | Promise<string | boolean>;
 }
 
+const textInputPrompt = createPrompt<string, TextOptions>(
+  (config, done) => {
+    const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
+    const [defaultValue, setDefaultValue] = useState(
+      String(config.default ?? ""),
+    );
+    const [errorMsg, setError] = useState<string | undefined>(undefined);
+    const [value, setValue] = useState("");
+
+    async function validateValue(val: string): Promise<true | string> {
+      if (typeof config.validate === "function") {
+        return (await config.validate(val)) || "You must provide a valid value";
+      }
+      return true;
+    }
+
+    useKeypress(async (key, rl) => {
+      if (status !== "idle") return;
+
+      if (isEnterKey(key)) {
+        const answer = value || defaultValue;
+        setStatus("loading");
+        const isValid = await validateValue(answer);
+        if (isValid === true) {
+          setValue(answer);
+          setStatus("done");
+          done(answer);
+        } else {
+          rl.write(value);
+          setError(isValid);
+          setStatus("idle");
+        }
+        return;
+      }
+
+      if (isBackspaceKey(key)) {
+        if (!value) {
+          setDefaultValue("");
+        } else if (rl.line === value) {
+          rl.line = value.slice(0, -1);
+          setValue(rl.line);
+        } else {
+          setValue(rl.line);
+        }
+        setError(undefined);
+        return;
+      }
+
+      setValue(rl.line);
+      setError(undefined);
+    });
+
+    const message = theme.style.message(config.message, status);
+    let formattedValue = value;
+    if (status === "done") {
+      formattedValue = theme.style.answer(value);
+    }
+    let defaultStr: string | undefined;
+    if (defaultValue && status !== "done" && !value) {
+      defaultStr = theme.style.defaultAnswer(defaultValue);
+    }
+    let error = "";
+    if (errorMsg) {
+      error = theme.style.error(errorMsg);
+    }
+    return [
+      [theme.prefix.idle, message, defaultStr, formattedValue]
+        .filter((v) => v !== undefined)
+        .join(" "),
+      error,
+    ];
+  },
+);
+
 export async function text(opts: TextOptions): Promise<string> {
   requireTty(`gemiterm new "Your message"`);
   try {
-    return await input(
+    return await textInputPrompt(
       {
         message: opts.message,
         default: opts.default,
         validate: opts.validate,
-        theme,
       },
       { signal: getAbortSignal() },
     );
