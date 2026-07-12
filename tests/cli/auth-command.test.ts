@@ -432,15 +432,96 @@ describe("AuthCommand", () => {
     });
   });
 
+  describe("--renew flag", () => {
+    test("calls renewProfile with existing profile", async () => {
+      listSpy.mockReturnValue(["p1", "p2"]);
+
+      const renewSpy = spyOn(command as any, "renewProfile").mockResolvedValue(undefined);
+      await command.execute(["--renew", "p1"], context);
+
+      expect(renewSpy).toHaveBeenCalledWith("p1", expect.anything(), expect.anything());
+    });
+
+    test("throws when renewing nonexistent profile", async () => {
+      listSpy.mockReturnValue(["p1"]);
+
+      await expect(command.execute(["--renew", "ghost"], context)).rejects.toThrow("does not exist");
+    });
+
+    test("works with -e short flag", async () => {
+      listSpy.mockReturnValue(["p1"]);
+
+      const renewSpy = spyOn(command as any, "renewProfile").mockResolvedValue(undefined);
+      await command.execute(["-e", "p1"], context);
+
+      expect(renewSpy).toHaveBeenCalledWith("p1", expect.anything(), expect.anything());
+    });
+  });
+
   describe("showProfileMenu", () => {
     test("returns null for unknown option", async () => {
-      const promptSpy = spyOn(command as any, "promptInput").mockResolvedValue("Z");
+      spyOn(command as any, "promptInput").mockResolvedValue("Z");
 
       const result = await (command as any).showProfileMenu(["p1"], {
         getStatus: () => ({ name: "p1", exists: true, isActive: true, expiresAt: null, isDefault: true }),
       } as any);
 
       expect(result).toBeNull();
+    });
+
+    test("renew option [E] returns renew type with selected profile", async () => {
+      let call = 0;
+      spyOn(command as any, "promptInput").mockImplementation((prompt: string) => {
+        call++;
+        if (call === 1) return Promise.resolve("E");
+        if (call === 2 && prompt.includes("renew")) return Promise.resolve("p1");
+        return Promise.resolve("");
+      });
+
+      const result = await (command as any).showProfileMenu(["p1", "p2"], {
+        getStatus: () => ({ name: "p1", exists: true, isActive: true, expiresAt: null, isDefault: true }),
+      } as any);
+
+      expect(result).toEqual({ type: "renew", profileName: "p1" });
+    });
+
+    test("renew option [E] rejects nonexistent profile name", async () => {
+      let call = 0;
+      spyOn(command as any, "promptInput").mockImplementation((prompt: string) => {
+        call++;
+        if (call === 1) return Promise.resolve("E");
+        if (call === 2 && prompt.includes("renew")) return Promise.resolve("ghost");
+        return Promise.resolve("");
+      });
+
+      await expect(
+        (command as any).showProfileMenu(["p1"], {
+          getStatus: () => ({ name: "p1", exists: true, isActive: true, expiresAt: null, isDefault: true }),
+        } as any),
+      ).rejects.toThrow("does not exist");
+    });
+  });
+
+  describe("interactive renew from menu", () => {
+    test("execute calls authService.renew when menu returns renew type", async () => {
+      listSpy.mockReturnValue(["p1", "p2"]);
+
+      spyOn(command as any, "showProfileMenu").mockResolvedValue({
+        type: "renew",
+        profileName: "p1",
+      });
+
+      const { AuthService } = await import("../../src/services/auth-service.ts");
+      const origRenew = AuthService.prototype.renew;
+      const mockRenew = mock(async () => ({ cookies: [], expiresAt: null }));
+      AuthService.prototype.renew = mockRenew;
+
+      try {
+        await command.execute([], context);
+        expect(mockRenew).toHaveBeenCalledWith("p1");
+      } finally {
+        AuthService.prototype.renew = origRenew;
+      }
     });
   });
 });

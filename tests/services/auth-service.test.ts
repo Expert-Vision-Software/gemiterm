@@ -6,12 +6,15 @@ import {
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
+import * as io from "../../src/infrastructure/io.ts";
 
 function createMockDriver() {
   return {
     openHeaded: mock(async (_url: string, _profile: string, _session?: string) => {}),
     closeSession: mock(async (_session: string) => {}),
     closeAll: mock(async () => {}),
+    stateLoad: mock(async (_session: string, _path: string) => {}),
+    evalJs: mock(async (_session: string, _expression: string) => ""),
   };
 }
 
@@ -157,6 +160,121 @@ describe("AuthService", () => {
     });
   });
 
+  describe("renew", () => {
+    test("pre-loads existing cookies via stateLoad and reloads page", async () => {
+      const authCookies = makeAuthCookies();
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(authCookies);
+        },
+      );
+
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.renew("test-profile");
+
+      expect(result.cookies).toHaveLength(2);
+      expect(driver.openHeaded).toHaveBeenCalledTimes(1);
+      expect(driver.stateLoad).toHaveBeenCalledTimes(1);
+      expect(driver.stateLoad).toHaveBeenCalledWith("test-profile", expect.stringContaining("storage_state.json"));
+      expect(driver.evalJs).toHaveBeenCalledTimes(1);
+      expect(driver.evalJs).toHaveBeenCalledWith("test-profile", "location.reload()");
+      expect(cookieMonitor.start).toHaveBeenCalledTimes(1);
+      expect(cookieStorage.save).toHaveBeenCalledTimes(1);
+      expect(driver.closeSession).toHaveBeenCalledWith("test-profile");
+
+      existsSpy.mockRestore();
+      logSpy.mockRestore();
+    });
+
+    test("skips stateLoad when no existing cookies file", async () => {
+      const authCookies = makeAuthCookies();
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(authCookies);
+        },
+      );
+
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(false);
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      await svc.renew("test-profile");
+
+      expect(driver.stateLoad).not.toHaveBeenCalled();
+      expect(driver.evalJs).not.toHaveBeenCalled();
+      expect(cookieMonitor.start).toHaveBeenCalledTimes(1);
+      expect(cookieStorage.save).toHaveBeenCalledTimes(1);
+
+      existsSpy.mockRestore();
+      logSpy.mockRestore();
+    });
+
+    test("continues gracefully when stateLoad throws", async () => {
+      const authCookies = makeAuthCookies();
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(authCookies);
+        },
+      );
+      driver.stateLoad.mockRejectedValueOnce(new Error("state-load failed"));
+
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.renew("test-profile");
+
+      expect(result.cookies).toHaveLength(2);
+      expect(cookieStorage.save).toHaveBeenCalledTimes(1);
+
+      existsSpy.mockRestore();
+      logSpy.mockRestore();
+    });
+
+    test("prints renewal success message", async () => {
+      const authCookies = makeAuthCookies();
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(authCookies);
+        },
+      );
+
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(false);
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      await svc.renew("test-profile");
+
+      const all = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(all).toContain("Renewing session");
+      expect(all).toContain("Session renewed");
+
+      existsSpy.mockRestore();
+      logSpy.mockRestore();
+    });
+
+    test("calls closeBrowser in finally even when waitForLogin throws", async () => {
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(false);
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const spy = spyOn(svc, "waitForLogin").mockRejectedValueOnce(new Error("boom"));
+
+      await expect(svc.renew("test-profile")).rejects.toThrow("boom");
+      expect(driver.closeSession).toHaveBeenCalledWith("test-profile");
+
+      spy.mockRestore();
+      existsSpy.mockRestore();
+    });
+
+    test("throws on invalid profile name", async () => {
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      await expect(svc.renew("bad name!")).rejects.toThrow("invalid characters");
+    });
+  });
+
   describe("notifyUser", () => {
     test("prints the URL and a hint about auto-detection", () => {
       const logSpy = spyOn(console, "log").mockImplementation(() => {});
@@ -290,6 +408,23 @@ describe("AuthService", () => {
       const all = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
       expect(all).toContain("__Secure-1PSID");
       expect(all).toContain("❌");
+      logSpy.mockRestore();
+    });
+  });
+
+  describe("confirmRenewSuccess", () => {
+    test("prints renewal success messages, expiry, and __Secure-1PSID check", () => {
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      svc.confirmRenewSuccess(2, new Date("2026-12-31T00:00:00Z"), makeAuthCookies());
+
+      const all = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(all).toContain("Session renewed");
+      expect(all).toContain("Renewal successful");
+      expect(all).toContain("2 cookies");
+      expect(all).toContain("Session expires");
+      expect(all).toContain("__Secure-1PSID");
       logSpy.mockRestore();
     });
   });

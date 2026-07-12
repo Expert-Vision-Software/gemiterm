@@ -21,6 +21,7 @@ interface ParsedFlags {
   delete: string | null;
   rename: { old: string; new: string } | null;
   default: string | null;
+  renew: string | null;
   yes: boolean;
   profileName: string | null;
 }
@@ -76,6 +77,11 @@ export class AuthCommand implements CliCommand {
       return;
     }
 
+    if (flags.renew !== null) {
+      await this.renewProfile(flags.renew, authService, logger);
+      return;
+    }
+
     if (flags.profileName !== null) {
       await this.authenticateToProfile(flags.profileName, profileManager, authService, logger);
       return;
@@ -105,6 +111,9 @@ export class AuthCommand implements CliCommand {
     if (selected.type === "auth") {
       logger.debug("Authenticating with profile", selected.profileName);
       await this.authenticateWithProfile(authService, selected.profileName, profileManager, false);
+    } else if (selected.type === "renew") {
+      logger.debug("Renewing profile", selected.profileName);
+      await authService.renew(selected.profileName);
     }
   }
 
@@ -115,6 +124,7 @@ export class AuthCommand implements CliCommand {
       delete: null,
       rename: null,
       default: null,
+      renew: null,
       yes: false,
       profileName: null,
     };
@@ -143,6 +153,10 @@ export class AuthCommand implements CliCommand {
       } else if (arg === "--default" || arg === "-s") {
         if (i + 1 < args.length && !args[i + 1].startsWith("-")) {
           flags.default = args[++i];
+        }
+      } else if (arg === "--renew" || arg === "-e") {
+        if (i + 1 < args.length && !args[i + 1].startsWith("-")) {
+          flags.renew = args[++i];
         }
       } else if (!arg.startsWith("-")) {
         remaining.push(arg);
@@ -263,6 +277,19 @@ export class AuthCommand implements CliCommand {
     console.log(chalk.green(`Default profile set to '${profileName}'.`));
   }
 
+  private async renewProfile(
+    profileName: string,
+    authService: AuthService,
+    logger: Logger,
+  ): Promise<void> {
+    const profiles = listProfiles();
+    if (!profiles.includes(profileName)) {
+      throw new GemitermError(`Profile '${profileName}' does not exist.`);
+    }
+    logger.debug("Renewing profile:", profileName);
+    await authService.renew(profileName);
+  }
+
   private async authenticateToProfile(
     profileName: string,
     profileManager: ProfileManager,
@@ -280,7 +307,9 @@ export class AuthCommand implements CliCommand {
   private async showProfileMenu(
     profiles: string[],
     profileManager: ProfileManager,
-  ): Promise<{ type: "auth"; profileName: string } | null> {
+  ): Promise<
+    { type: "auth"; profileName: string } | { type: "renew"; profileName: string } | null
+  > {
     console.log(chalk.bold("\nProfile Management"));
     console.log("");
 
@@ -292,6 +321,7 @@ export class AuthCommand implements CliCommand {
       { key: "D", label: "Delete profile" },
       { key: "S", label: "Set default" },
       { key: "R", label: "Rename profile" },
+      { key: "E", label: "Renew session (extend/refresh cookies)" },
       { key: "X", label: "Exit and continue with current default" },
     ];
 
@@ -357,6 +387,14 @@ export class AuthCommand implements CliCommand {
         console.log(chalk.green(`Profile renamed: ${oldTrimmed} → ${newTrimmed}`));
         return { type: "auth", profileName: newTrimmed };
       }
+      case "E": {
+        const name = await this.promptInput("Enter profile name to renew");
+        const trimmed = name.trim();
+        if (!profiles.includes(trimmed)) {
+          throw new GemitermError(`Profile '${trimmed}' does not exist.`);
+        }
+        return { type: "renew", profileName: trimmed };
+      }
       case "X":
       default:
         return null;
@@ -393,6 +431,7 @@ export class AuthCommand implements CliCommand {
     console.log("  -y, --yes                 Skip confirmation prompts");
     console.log("  -r, --rename <old> <new>  Rename a profile");
     console.log("  -s, --default <name>     Set default profile");
+    console.log("  -e, --renew <name>       Renew session (extend/refresh cookies)");
   }
 
   private promptInput(
