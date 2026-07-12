@@ -14,7 +14,6 @@ import {
   isUpKey,
   isDownKey,
   isEnterKey,
-  isBackspaceKey,
   AbortPromptError,
   ExitPromptError,
 } from "@inquirer/core";
@@ -80,94 +79,124 @@ export interface TextOptions {
   validate?: (value: string) => boolean | string | Promise<string | boolean>;
 }
 
-const textInputPrompt = createPrompt<string, TextOptions>(
-  (config, done) => {
-    const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
-    const [defaultValue, setDefaultValue] = useState(
-      String(config.default ?? ""),
-    );
-    const [errorMsg, setError] = useState<string | undefined>(undefined);
-    const [value, setValue] = useState("");
-
-    async function validateValue(val: string): Promise<true | string> {
-      if (typeof config.validate === "function") {
-        return (await config.validate(val)) || "You must provide a valid value";
-      }
-      return true;
-    }
-
-    useKeypress(async (key, rl) => {
-      if (status !== "idle") return;
-
-      if (isEnterKey(key)) {
-        const answer = value || defaultValue;
-        setStatus("loading");
-        const isValid = await validateValue(answer);
-        if (isValid === true) {
-          setValue(answer);
-          setStatus("done");
-          done(answer);
-        } else {
-          rl.write(value);
-          setError(isValid);
-          setStatus("idle");
-        }
-        return;
-      }
-
-      if (isBackspaceKey(key)) {
-        if (!value) {
-          setDefaultValue("");
-        } else if (rl.line === value) {
-          rl.line = value.slice(0, -1);
-          setValue(rl.line);
-        } else {
-          setValue(rl.line);
-        }
-        setError(undefined);
-        return;
-      }
-
-      setValue(rl.line);
-      setError(undefined);
-    });
-
-    const message = theme.style.message(config.message, status);
-    let formattedValue = value;
-    if (status === "done") {
-      formattedValue = theme.style.answer(value);
-    }
-    let defaultStr: string | undefined;
-    if (defaultValue && status !== "done" && !value) {
-      defaultStr = theme.style.defaultAnswer(defaultValue);
-    }
-    let error = "";
-    if (errorMsg) {
-      error = theme.style.error(errorMsg);
-    }
-    return [
-      [theme.prefix.idle, message, defaultStr, formattedValue]
-        .filter((v) => v !== undefined)
-        .join(" "),
-      error,
-    ];
-  },
-);
-
 export async function text(opts: TextOptions): Promise<string> {
   requireTty(`gemiterm new "Your message"`);
-  try {
-    return await textInputPrompt(
-      {
-        message: opts.message,
-        default: opts.default,
-        validate: opts.validate,
-      },
-      { signal: getAbortSignal() },
-    );
-  } catch (error) {
-    mapCancellation(error);
-  }
+
+  return new Promise<string>((resolve, reject) => {
+    const stdin = process.stdin;
+    const stdout = process.stdout;
+
+    const prefix = chalk.cyan("?");
+    const message = chalk.bold(opts.message);
+    let buffer = "";
+    let defaultValue = opts.default ?? "";
+    let finished = false;
+
+    function render(showDefault: boolean): void {
+      const display = showDefault && !buffer && defaultValue
+        ? chalk.dim(defaultValue)
+        : buffer;
+      stdout.write(`\r${"\x1b[K"}${prefix} ${message} ${display}`);
+    }
+
+    function cleanup(): void {
+      stdin.removeListener("data", onData);
+      stdin.setRawMode(false);
+      stdin.resume();
+    }
+
+    function finish(value: string): void {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      stdout.write(`\r${"\x1b[K"}${prefix} ${message} ${chalk.green(value)}\n`);
+      resolve(value);
+    }
+
+    function cancel(): void {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      stdout.write("\n");
+      reject(new CancellationError("User cancelled."));
+    }
+
+    async function onData(data: Buffer): Promise<void> {
+      const bytes = new Uint8Array(data);
+
+      for (let i = 0; i < bytes.length; i++) {
+        const byte = bytes[i];
+
+        if (byte === 0x03) {
+          cancel();
+          return;
+        }
+
+        if (byte === 0x0d || byte === 0x0a) {
+          const answer = buffer || defaultValue;
+          if (opts.validate) {
+            const valid = await opts.validate(answer);
+            if (valid !== true) {
+              stdout.write(
+                `\r${"\x1b[K"}${prefix} ${message} ${buffer} ${chalk.red(String(valid))}\n`,
+              );
+              render(false);
+              return;
+            }
+          }
+          finish(answer);
+          return;
+        }
+
+        if (byte === 0x08 || byte === 0x7f) {
+          if (buffer.length > 0) {
+            buffer = buffer.slice(0, -1);
+            render(false);
+          } else if (defaultValue) {
+            defaultValue = "";
+            render(true);
+          }
+          continue;
+        }
+
+        if (byte === 0x1b) {
+          const next1 = bytes[i + 1];
+          const next2 = bytes[i + 2];
+          if (next1 === 0x5b && next2 === 0x33 && bytes[i + 3] === 0x7e) {
+            i += 3;
+            continue;
+          }
+          if (next1 !== undefined) i += 1;
+          continue;
+        }
+
+        if (byte >= 0x20 && byte !== 0x7f) {
+          let char: string;
+          if (byte < 0x80) {
+            char = String.fromCharCode(byte);
+          } else {
+            const decoder = new TextDecoder();
+            char = "\uFFFD";
+            for (let len = 2; len <= 4; len++) {
+              const decoded = decoder.decode(bytes.slice(i, i + len));
+              if (decoded.length > 0 && !/\uFFFD/.test(decoded)) {
+                char = decoded;
+                i += new TextEncoder().encode(char).length - 1;
+                break;
+              }
+            }
+          }
+          buffer += char;
+          render(false);
+        }
+      }
+    }
+
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.on("data", onData);
+    render(true);
+  });
 }
 
 export interface ConfirmOptions {
