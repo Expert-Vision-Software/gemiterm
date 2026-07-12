@@ -1,7 +1,6 @@
 import type { Mediator } from "../core/mediator.ts";
 import type { ProfileAuthManager } from "../services/profile-auth-manager.ts";
 import { AuthCommand } from "./commands/auth-command.ts";
-import { ProfileCommand } from "./commands/profile-command.ts";
 import { StatusCommand } from "./commands/status-command.ts";
 import { ListCommand } from "./commands/list-command.ts";
 import { FetchCommand } from "./commands/fetch-command.ts";
@@ -51,7 +50,6 @@ export class CommandRegistry {
     const authCommand = new AuthCommand();
     this.register("auth", authCommand);
     this.register("login", authCommand);
-    this.register("profile", new ProfileCommand());
     this.register("status", new StatusCommand());
     this.register("list", new ListCommand());
     this.register("fetch", new FetchCommand());
