@@ -6,6 +6,8 @@ import type { CookieMonitor } from "./cookie-monitor.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
 import { ensureConfigDir, getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
+import { getProfilePath } from "../infrastructure/path-utils.ts";
+import { existsFile } from "../infrastructure/io.ts";
 
 const GEMINI_AUTH_URL = "https://gemini.google.com/app";
 const DEFAULT_AUTH_TIMEOUT_MS = 300_000;
@@ -51,6 +53,45 @@ export class AuthService {
       await this.extractCookies(name, cookies);
       const expiresAt = this.getCookieExpiry(cookies);
       this.confirmAuthSuccess(cookies.length, expiresAt, cookies);
+      return { cookies, expiresAt };
+    } finally {
+      await this.closeBrowser(name);
+    }
+  }
+
+  async renew(profileName?: string): Promise<AuthResult> {
+    const name = profileName ?? getDefaultProfileName();
+    validateProfileName(name);
+
+    this.logger.info(`Starting session renewal for profile: ${name}`);
+
+    try {
+      console.log(
+        chalk.cyan(`\n🔄 Renewing session → ${GEMINI_AUTH_URL}  (profile: ${name})`),
+      );
+      console.log(
+        chalk.dim(
+          "   Loading existing cookies — if expired, log in to extend your session.\n",
+        ),
+      );
+
+      await this.launchBrowser(name);
+
+      const statePath = getProfilePath(name);
+      if (existsFile(statePath)) {
+        try {
+          await this.driver.stateLoad(name, statePath);
+          await this.driver.evalJs(name, "location.reload()");
+          this.logger.info("Pre-loaded existing cookies into browser session");
+        } catch (err) {
+          this.logger.debug(`Could not pre-load cookies: ${err}`);
+        }
+      }
+
+      const cookies = await this.waitForLogin(name, DEFAULT_AUTH_TIMEOUT_MS);
+      await this.extractCookies(name, cookies);
+      const expiresAt = this.getCookieExpiry(cookies);
+      this.confirmRenewSuccess(cookies.length, expiresAt, cookies);
       return { cookies, expiresAt };
     } finally {
       await this.closeBrowser(name);
@@ -108,6 +149,16 @@ export class AuthService {
   confirmAuthSuccess(cookieCount: number, expiresAt: Date | null, cookies: Cookie[] = []): void {
     console.log(chalk.green(`\n✅ Login auto-detected — saving state…`));
     console.log(chalk.green(`\nAuthentication successful! (${cookieCount} cookies captured)`));
+    if (expiresAt) {
+      console.log(chalk.dim(`Session expires: ${expiresAt.toLocaleString()}`));
+    }
+    const hasSid = cookies.some((c) => c.name === "__Secure-1PSID");
+    console.log(chalk.dim(`   Has __Secure-1PSID: ${hasSid ? "✅" : "❌"}`));
+  }
+
+  confirmRenewSuccess(cookieCount: number, expiresAt: Date | null, cookies: Cookie[] = []): void {
+    console.log(chalk.green(`\n✅ Session renewed — saving state…`));
+    console.log(chalk.green(`Renewal successful! (${cookieCount} cookies captured)`));
     if (expiresAt) {
       console.log(chalk.dim(`Session expires: ${expiresAt.toLocaleString()}`));
     }
