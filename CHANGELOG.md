@@ -1,3 +1,20 @@
+## [2.3.0] - 2026-07-13
+
+### Added
+
+- Add session renew (`--renew` / `-e`) flag to auth command for refreshing/extending session cookies without recreating a profile. Launches a headed browser with existing cookies pre-loaded, then runs the cookie monitor to detect active session or wait for manual login.
+- `AuthService.renew()` orchestrates the state-load → reload → cookie-monitor → save flow; `AuthService.confirmRenewSuccess()` prints renewal summary with cookie count, expiry, and `__Secure-1PSID` check.
+
+### Changed
+
+- Consolidated profile command into auth command. The standalone `profile` command is removed; all profile management is now done via auth flags: `gemiterm auth <profileName>` (authenticate to existing profile), `gemiterm auth --list` (list profiles), `gemiterm auth --add <name>` (create and authenticate), `gemiterm auth --delete <name>` (delete profile), `gemiterm auth --rename <old> <new>` (rename profile), `gemiterm auth --default <name>` (set default profile).
+- Use actual session cookie expiry from __Secure-1PSIDTS instead of a fixed 7-day window.
+
+### Fixed
+
+- Backspace not working in text prompts on Windows/Bun — replaced `@inquirer/prompts` input with a custom `textInputPrompt` that explicitly handles backspace via `node:readline` line correction when `rl.line` diverges from the buffer.
+- Text prompt rewrite using raw `process.stdin` instead of readline for proper TTY interactive mode on Windows/Bun. Parses bytes manually (backspace slices buffer, printable chars append, Ctrl+C cancels, Enter submits); bypasses `@inquirer/core createPrompt` entirely.
+
 ## [2.2.0] - 2026-06-14
 
 ### Added
