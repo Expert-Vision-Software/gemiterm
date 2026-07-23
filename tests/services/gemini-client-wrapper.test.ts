@@ -3,27 +3,10 @@ import { Logger } from "../../src/infrastructure/logger.ts";
 import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 import type { Cookie } from "../../src/core/types.ts";
-
-interface RawChatRow {
-  cid: string;
-  title: string;
-  pinned: boolean;
-  timestamp: number;
-}
-
-interface RawChatTurn {
-  role: string;
-  text: string;
-}
+import type { RawChatRow, RawChatTurn, RawAvailableModel } from "../../src/services/gemini-raw-types.ts";
 
 interface RawModelOutput {
   text: { toString(): string };
-}
-
-interface RawAvailableModel {
-  model_id: string;
-  model_name: string;
-  display_name: string;
 }
 
 interface RawChatSession {
@@ -99,6 +82,17 @@ function createMockAvailableModel(overrides?: Partial<RawAvailableModel>): RawAv
   };
 }
 
+function createMockSession(initialCid = "new-cid", responseText = "response text"): RawChatSession {
+  let _cid = initialCid;
+  return {
+    get cid() { return _cid; },
+    set cid(v: string) { _cid = v; },
+    generateContent: mock(async function(this: RawChatSession, _opts: { prompt: string }) {
+      return createMockModelOutput(responseText);
+    }),
+  };
+}
+
 function createMockCookieStorage(profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {}): CookieStorage {
   const storage: CookieStorage = {
     save: () => {},
@@ -129,14 +123,7 @@ function installGeminiReverseMock(overrides?: typeof mockOverrides) {
     mockClientConstructorCallCount++;
     const cookies: Record<string, string> = {};
     if (config?.secure_1psid) cookies["__Secure-1PSID"] = config.secure_1psid;
-    let _cid = "new-cid";
-    const session: RawChatSession = {
-      get cid() { return _cid; },
-      set cid(v: string) { _cid = v; },
-      generateContent: mock(async function(this: RawChatSession, _opts: { prompt: string }) {
-        return createMockModelOutput("response text");
-      }),
-    };
+    const session = createMockSession();
 
     const instance: RawGemini & { cookies: Record<string, string> } = {
       cookies,
@@ -158,14 +145,7 @@ function installGeminiReverseMock(overrides?: typeof mockOverrides) {
         if (mockOverrides?.newChat) {
           return mockOverrides.newChat();
         }
-        const s: RawChatSession = {
-          get cid() { return _cid; },
-          set cid(v: string) { _cid = v; },
-          generateContent: mock(async function(this: RawChatSession, opts: { prompt: string }) {
-            return createMockModelOutput("response text");
-          }),
-        };
-        return s;
+        return session;
       }),
       deleteChat: mock(async function(this: RawGemini, cid: string) {
         if (mockOverrides?.deleteChat) {
@@ -381,11 +361,7 @@ describe("GeminiClientService", () => {
   describe("sendMessage", () => {
     test("returns output.text", async () => {
       installGeminiReverseMock({
-        newChat: () => ({
-          get cid() { return "conv-1"; },
-          set cid(_v: string) {},
-          generateContent: mock(async () => createMockModelOutput("model response")),
-        }),
+        newChat: () => createMockSession("conv-1", "model response"),
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");

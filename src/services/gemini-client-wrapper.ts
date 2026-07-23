@@ -13,17 +13,11 @@ import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
+import type { RawChatRow, RawChatTurn, RawAvailableModel } from "./gemini-raw-types.ts";
 
-interface RawChatRow {
-  cid: string;
-  title: string;
-  pinned: boolean;
-  timestamp: number;
-}
-
-interface RawChatTurn {
-  role: string;
-  text: string;
+interface AxiosLikeError {
+  code?: string;
+  message?: string;
 }
 
 interface GeminiClientConfig {
@@ -77,7 +71,7 @@ export class GeminiClientService
     }));
   }
 
-  private toDomainModelName(model: { model_name?: string; display_name?: string; model_id: string }): string {
+  private toDomainModelName(model: RawAvailableModel & { model_id: string }): string {
     return model.model_name || model.display_name || model.model_id;
   }
 
@@ -87,7 +81,8 @@ export class GeminiClientService
         "Session expired or invalid. Please run 'gemiterm login' again.",
       );
     }
-    if ((e as { code?: string }).code === "ECONNABORTED") {
+    const ax = e as AxiosLikeError;
+    if (ax.code === "ECONNABORTED") {
       return new GeminiAPIError("Request to Gemini timed out");
     }
     if (e instanceof APIError || e instanceof GeminiError) {
