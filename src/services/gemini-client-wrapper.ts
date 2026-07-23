@@ -1,15 +1,7 @@
 import {
-  type ChatInfo as RawChatInfo,
-  type ChatHistory,
-  type ChatSession,
-  type AvailableModel as RawAvailableModel,
-  type InitOptions,
-  type StartChatOptions,
-  type SendMessageOptions,
-  GeminiClient,
+  Gemini,
   AuthError,
   APIError,
-  TimeoutError,
   UsageLimitExceeded,
   ModelInvalid,
   TemporarilyBlocked,
@@ -22,6 +14,18 @@ import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
 
+interface RawChatRow {
+  cid: string;
+  title: string;
+  pinned: boolean;
+  timestamp: number;
+}
+
+interface RawChatTurn {
+  role: string;
+  text: string;
+}
+
 interface GeminiClientConfig {
   secure1psid: string;
   secure1psidts?: string | null;
@@ -30,7 +34,7 @@ interface GeminiClientConfig {
 export class GeminiClientService
   implements IGeminiClientService, IGeminiClientQueryService
 {
-  private client: GeminiClient | null = null;
+  private client: Gemini | null = null;
   private initPromise: Promise<void> | null = null;
   private initialized = false;
   readonly logger: Logger;
@@ -41,45 +45,40 @@ export class GeminiClientService
     this.logger = logger;
     this.cookieStorageService = cookieStorageService;
     this.profileName = profileName;
-    this.client = new GeminiClient({
-      secure_1psid: config.secure1psid,
-      secure_1psidts: config.secure1psidts ?? null,
-    });
+    this.client = new Gemini({ secure_1psid: config.secure1psid, timeout: 300_000, autoClose: false });
+    if (config.secure1psidts) {
+      this.client.cookies["__Secure-1PSIDTS"] = config.secure1psidts;
+    }
   }
 
   async init(): Promise<void> {
     if (this.initialized) return;
     if (this.initPromise) return this.initPromise;
-    this.initPromise = this.client!.init({
-      timeout: 300_000,
-      autoClose: false,
-      autoRefresh: false,
-      refreshInterval: 540_000,
-    });
+    this.initPromise = this.client!.init();
     await this.initPromise;
     this.initialized = true;
   }
 
-  private toDomainChatInfo(raw: RawChatInfo, profileName?: string): ChatInfo {
+  private toDomainChatInfo(raw: RawChatRow, profileName?: string): ChatInfo {
     return {
       id: raw.cid,
       title: raw.title,
-      isPinned: raw.is_pinned,
+      isPinned: raw.pinned,
       timestamp: raw.timestamp * 1000,
       ...(profileName ? { profile: profileName } : {}),
     };
   }
 
-  private toDomainMessages(history: ChatHistory, conversationId: string): Message[] {
-    return history.turns.map((turn) => ({
-      role: turn.role,
+  private toDomainMessages(turns: RawChatTurn[], conversationId: string): Message[] {
+    return turns.map((turn) => ({
+      role: turn.role === "model" ? "model" : "user",
       content: turn.text,
       conversationId,
     }));
   }
 
-  private toDomainModelName(model: RawAvailableModel): string {
-    return model.display_name || model.model_name || model.model_id;
+  private toDomainModelName(model: { model_name?: string; display_name?: string; model_id: string }): string {
+    return model.model_name || model.display_name || model.model_id;
   }
 
   private translateError(e: unknown): GeminiAPIError | AuthenticationError {
@@ -88,8 +87,17 @@ export class GeminiClientService
         "Session expired or invalid. Please run 'gemiterm login' again.",
       );
     }
-    if (e instanceof TimeoutError) {
+    if ((e as { code?: string }).code === "ECONNABORTED") {
       return new GeminiAPIError("Request to Gemini timed out");
+    }
+    if (e instanceof APIError || e instanceof GeminiError) {
+      const msg = e.message;
+      if (/\b(timed out|timeout|stalled)\b/i.test(msg)) {
+        return new GeminiAPIError("Request to Gemini timed out");
+      }
+      const err = new GeminiAPIError(e.message);
+      err.cause = e;
+      return err;
     }
     if (e instanceof UsageLimitExceeded) {
       return new GeminiAPIError("Gemini usage limit reached; try again later or switch model");
@@ -99,16 +107,6 @@ export class GeminiClientService
     }
     if (e instanceof ModelInvalid) {
       return new GeminiAPIError("Model is invalid or unavailable");
-    }
-    if (e instanceof APIError) {
-      const err = new GeminiAPIError(e.message);
-      err.cause = e;
-      return err;
-    }
-    if (e instanceof GeminiError) {
-      const err = new GeminiAPIError(e.message);
-      err.cause = e;
-      return err;
     }
     return new GeminiAPIError("Unexpected error: " + String(e));
   }
@@ -143,7 +141,7 @@ export class GeminiClientService
   }): Promise<ChatInfo[]> {
     await this.init();
     try {
-      const raw = this.client!.listChats();
+      const raw = await this.client!.chats() as RawChatRow[];
       let chats: ChatInfo[] = (raw ?? []).map((c) => this.toDomainChatInfo(c, this.profileName));
 
       if (options?.search) {
@@ -171,9 +169,9 @@ export class GeminiClientService
   async fetchChat(conversationId: string): Promise<Message[]> {
     await this.init();
     try {
-      const history = await this.client!.readChat(conversationId);
-      if (!history) return [];
-      return this.toDomainMessages(history, conversationId);
+      const turns = await this.client!.readChat(conversationId) as RawChatTurn[] | null;
+      if (!turns || turns.length === 0) return [];
+      return this.toDomainMessages(turns, conversationId);
     } catch (e) {
       const err = this.translateError(e);
       this.logger.debug(`fetchChat failed: ${e}`);
@@ -195,8 +193,9 @@ export class GeminiClientService
   async sendMessage(conversationId: string, message: string): Promise<string> {
     await this.init();
     try {
-      const session = this.client!.startChat({ cid: conversationId });
-      const output = await session.sendMessage({ prompt: message });
+      const session = this.client!.newChat();
+      session.cid = conversationId;
+      const output = await session.generateContent({ prompt: message });
       return output.text.toString();
     } catch (e) {
       const err = this.translateError(e);
@@ -208,8 +207,8 @@ export class GeminiClientService
   async startNewChat(message: string): Promise<{ response: string; conversationId: string }> {
     await this.init();
     try {
-      const session = this.client!.startChat();
-      const output = await session.sendMessage({ prompt: message });
+      const session = this.client!.newChat();
+      const output = await session.generateContent({ prompt: message });
       return {
         response: output.text.toString(),
         conversationId: session.cid,
@@ -224,7 +223,7 @@ export class GeminiClientService
   async listModels(): Promise<string[]> {
     await this.init();
     try {
-      const raw = this.client!.listModels();
+      const raw = await this.client!.models();
       return (raw ?? []).map((m) => this.toDomainModelName(m));
     } catch (e) {
       const err = this.translateError(e);
