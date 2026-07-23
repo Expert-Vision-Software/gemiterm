@@ -76,8 +76,7 @@ export class FetchCommand implements CliCommand {
       console.log(chalk.dim("No conversation ID specified. Listing conversations:\n"));
       await listHandler.execute([], context);
     } else {
-      console.error("Could not invoke list command.");
-      process.exit(1);
+      throw new Error("Could not invoke list command.");
     }
   }
 

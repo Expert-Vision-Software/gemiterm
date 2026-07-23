@@ -1,6 +1,6 @@
 {
   "name": "gemiterm",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "module": "index.ts",
   "type": "module",
   "repository": {
@@ -51,6 +51,6 @@
     "chalk": "^5.6.2",
     "cli-table3": "^0.6.5",
     "commander": "^15.0.0",
-    "gemini-reverse": "^1.0.12"
+    "gemini-reverse": "~1.0.12"
   }
 }

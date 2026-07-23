@@ -1,3 +1,11 @@
+## [2.3.1] - 2026-07-23
+
+### Fixed
+
+- Pin `gemini-reverse` to `~1.0.12` to prevent `^1.0.12` from resolving to the breaking `1.1.x` line, which renamed `GeminiClient` → `Gemini` and caused `SyntaxError: Export named 'GeminiClient' not found` on fresh installs. ([#5](https://github.com/Expert-Vision-Software/gemiterm/issues/5))
+
+---
+
 ## [2.3.0] - 2026-07-13
 
 ### Added
