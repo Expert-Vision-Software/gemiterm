@@ -1,8 +1,9 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, mock } from "bun:test";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 import type { Cookie } from "../../src/core/types.ts";
+import type { GeminiClientDeps } from "../../src/services/gemini-client-wrapper.ts";
 
 interface RawChatRow {
   cid: string;
@@ -134,7 +135,7 @@ function createMockCookieStorage(profileCookies: Record<string, { secure_1psid: 
   return storage;
 }
 
-function installGeminiReverseMock(overrides?: typeof mockOverrides) {
+function installGeminiReverseMock(overrides?: typeof mockOverrides): GeminiClientDeps {
   mockClientInstances = [];
   mockClientConstructorCallCount = 0;
   mockOverrides = overrides;
@@ -178,17 +179,15 @@ function installGeminiReverseMock(overrides?: typeof mockOverrides) {
     return instance;
   };
 
-  const mockModule = {
-    get Gemini() { return mockGeminiFactory; },
-    AuthError: MockAuthError,
-    UsageLimitExceeded: MockUsageLimitExceeded,
-    TemporarilyBlocked: MockTemporarilyBlocked,
-    ModelInvalid: MockModelInvalid,
-    APIError: MockAPIError,
-    GeminiError: MockGeminiError,
+  return {
+    Gemini: mockGeminiFactory as unknown as GeminiClientDeps["Gemini"],
+    AuthError: MockAuthError as unknown as GeminiClientDeps["AuthError"],
+    UsageLimitExceeded: MockUsageLimitExceeded as unknown as GeminiClientDeps["UsageLimitExceeded"],
+    TemporarilyBlocked: MockTemporarilyBlocked as unknown as GeminiClientDeps["TemporarilyBlocked"],
+    ModelInvalid: MockModelInvalid as unknown as GeminiClientDeps["ModelInvalid"],
+    APIError: MockAPIError as unknown as GeminiClientDeps["APIError"],
+    GeminiError: MockGeminiError as unknown as GeminiClientDeps["GeminiError"],
   };
-
-  mock.module("gemini-reverse", () => mockModule);
 }
 
 describe("GeminiClientService", () => {
@@ -201,13 +200,9 @@ describe("GeminiClientService", () => {
     cookieStorageService = new CookieStorageService({ cookieStorage: storage, logger });
   });
 
-  afterEach(() => {
-    mock.restore();
-  });
-
   describe("listChats", () => {
     test("maps cid to id and pinned to isPinned", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chats: [
           createMockChatRow({ cid: "chat-1", title: "First Chat", pinned: true, timestamp: 1700000000000 }),
           createMockChatRow({ cid: "chat-2", title: "Second Chat", pinned: false, timestamp: 1699000000000 }),
@@ -215,7 +210,7 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const chats = await service.listChats();
 
@@ -227,7 +222,7 @@ describe("GeminiClientService", () => {
     });
 
     test("applies search filter", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chats: [
           createMockChatRow({ cid: "1", title: "Python Help" }),
           createMockChatRow({ cid: "2", title: "JavaScript Help" }),
@@ -236,7 +231,7 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const chats = await service.listChats({ search: "python" });
 
@@ -246,7 +241,7 @@ describe("GeminiClientService", () => {
     });
 
     test("applies limit and offset", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chats: [
           createMockChatRow({ cid: "1", title: "Chat 1", timestamp: 1700000000 }),
           createMockChatRow({ cid: "2", title: "Chat 2", timestamp: 1699000000 }),
@@ -255,7 +250,7 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const chats = await service.listChats({ limit: 1, offset: 1 });
 
@@ -264,7 +259,7 @@ describe("GeminiClientService", () => {
     });
 
     test("sorts by timestamp descending", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chats: [
           createMockChatRow({ cid: "1", title: "Older", timestamp: 1000000000 }),
           createMockChatRow({ cid: "2", title: "Newer", timestamp: 2000000000 }),
@@ -273,7 +268,7 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const chats = await service.listChats();
 
@@ -283,14 +278,14 @@ describe("GeminiClientService", () => {
     });
 
     test("converts timestamp from seconds to milliseconds", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chats: [
           createMockChatRow({ cid: "1", title: "Chat", timestamp: 1700000000 }),
         ],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const chats = await service.listChats();
 
@@ -298,14 +293,14 @@ describe("GeminiClientService", () => {
     });
 
     test("timestamp produces valid date (not epoch 1970)", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chats: [
           createMockChatRow({ cid: "1", title: "Chat", timestamp: 1700000000 }),
         ],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const chats = await service.listChats();
 
@@ -320,12 +315,12 @@ describe("GeminiClientService", () => {
       const storage = createMockCookieStorage(profileCookies);
       const css = new CookieStorageService({ cookieStorage: storage, logger });
 
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chats: [createMockChatRow({ cid: "1", title: "Profile Chat" })],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
       const profileService = service.forProfile("work");
 
       const chats = await profileService.listChats();
@@ -334,10 +329,10 @@ describe("GeminiClientService", () => {
     });
 
     test("returns empty array when chats returns null", async () => {
-      installGeminiReverseMock({ chats: null });
+      const d = installGeminiReverseMock({ chats: null });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const chats = await service.listChats();
 
@@ -347,7 +342,7 @@ describe("GeminiClientService", () => {
 
   describe("fetchChat", () => {
     test("flattens turns text correctly", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         readChat: (_cid: string) => [
           createMockChatTurn("user", "Hello"),
           createMockChatTurn("model", "Hi there!"),
@@ -355,7 +350,7 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const messages = await service.fetchChat("conv-123");
 
@@ -367,10 +362,10 @@ describe("GeminiClientService", () => {
     });
 
     test("returns empty array when readChat returns null", async () => {
-      installGeminiReverseMock({ readChat: () => null });
+      const d = installGeminiReverseMock({ readChat: () => null });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const messages = await service.fetchChat("nonexistent");
 
@@ -380,12 +375,12 @@ describe("GeminiClientService", () => {
 
   describe("sendMessage", () => {
     test("returns output.text", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         newChat: () => createMockSession("conv-1", "model response"),
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const result = await service.sendMessage("conv-1", "hello");
 
@@ -395,10 +390,10 @@ describe("GeminiClientService", () => {
 
   describe("startNewChat", () => {
     test("returns output.text and session.cid", async () => {
-      installGeminiReverseMock({});
+      const d = installGeminiReverseMock({});
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const result = await service.startNewChat("Hello Gemini");
 
@@ -410,14 +405,14 @@ describe("GeminiClientService", () => {
   describe("deleteChat", () => {
     test("calls client.deleteChat with cid", async () => {
       let deletedCid: string | null = null;
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         deleteChat: async (cid: string) => {
           deletedCid = cid;
         },
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await service.deleteChat("conv-to-delete");
 
@@ -427,14 +422,14 @@ describe("GeminiClientService", () => {
 
   describe("listModels", () => {
     test("returns model_name when present", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         models: [
           createMockAvailableModel({ model_id: "gemini-2.5", model_name: "Gemini 2.5", display_name: "Gemini 2.5 Flash" }),
         ],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const models = await service.listModels();
 
@@ -442,14 +437,14 @@ describe("GeminiClientService", () => {
     });
 
     test("falls back to display_name when model_name is missing", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         models: [
           createMockAvailableModel({ model_id: "gemini-2.5", model_name: "", display_name: "Gemini 2.5 Flash" }),
         ],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const models = await service.listModels();
 
@@ -457,14 +452,14 @@ describe("GeminiClientService", () => {
     });
 
     test("falls back to model_id when model_name and display_name are missing", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         models: [
           createMockAvailableModel({ model_id: "gemini-ultra", model_name: "", display_name: "" }),
         ],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const models = await service.listModels();
 
@@ -472,10 +467,10 @@ describe("GeminiClientService", () => {
     });
 
     test("returns empty array when models returns null", async () => {
-      installGeminiReverseMock({ models: null });
+      const d = installGeminiReverseMock({ models: null });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const models = await service.listModels();
 
@@ -485,20 +480,20 @@ describe("GeminiClientService", () => {
 
   describe("error translations", () => {
     test("AuthError -> AuthenticationError", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chatsImplementation: () => {
           throw new MockAuthError("auth failure");
         },
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await expect(service.listChats()).rejects.toThrow("Session expired or invalid");
     });
 
     test("ECONNABORTED -> GeminiAPIError timeout", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chatsImplementation: () => {
           const e = new Error("request timeout") as Error & { code?: string };
           e.code = "ECONNABORTED";
@@ -507,85 +502,85 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await expect(service.listChats()).rejects.toThrow("Request to Gemini timed out");
     });
 
     test("APIError with stalled timeout message -> GeminiAPIError timeout", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chatsImplementation: () => {
           throw new MockAPIError("Response stalled (zombie stream).");
         },
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await expect(service.listChats()).rejects.toThrow("Request to Gemini timed out");
     });
 
     test("UsageLimitExceeded -> GeminiAPIError", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chatsImplementation: () => {
           throw new MockUsageLimitExceeded("usage exceeded");
         },
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await expect(service.listChats()).rejects.toThrow("Gemini usage limit reached");
     });
 
     test("TemporarilyBlocked -> GeminiAPIError", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chatsImplementation: () => {
           throw new MockTemporarilyBlocked("blocked");
         },
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await expect(service.listChats()).rejects.toThrow("Temporarily blocked by Gemini");
     });
 
     test("ModelInvalid -> GeminiAPIError", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chatsImplementation: () => {
           throw new MockModelInvalid("model invalid");
         },
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await expect(service.listChats()).rejects.toThrow("Model is invalid or unavailable");
     });
 
     test("APIError -> GeminiAPIError", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chatsImplementation: () => {
           throw new MockAPIError("api error occurred");
         },
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await expect(service.listChats()).rejects.toThrow("api error occurred");
     });
 
     test("GeminiError -> GeminiAPIError", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chatsImplementation: () => {
           throw new MockGeminiError("generic gemini error");
         },
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await expect(service.listChats()).rejects.toThrow("generic gemini error");
     });
@@ -599,10 +594,10 @@ describe("GeminiClientService", () => {
       const storage = createMockCookieStorage(profileCookies);
       const css = new CookieStorageService({ cookieStorage: storage, logger });
 
-      installGeminiReverseMock({ chats: [createMockChatRow({ cid: "1", title: "Work Chat" })] });
+      const d = installGeminiReverseMock({ chats: [createMockChatRow({ cid: "1", title: "Work Chat" })] });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css);
+      const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
       const callCountBefore = mockClientConstructorCallCount;
 
       service.forProfile("work");
@@ -619,7 +614,7 @@ describe("GeminiClientService", () => {
       const storage = createMockCookieStorage(profileCookies);
       const css = new CookieStorageService({ cookieStorage: storage, logger });
 
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         initImplementation: (client) => {
           receivedSid = (client as unknown as { cookies?: Record<string, string> }).cookies?.["__Secure-1PSID"] ?? "";
         },
@@ -627,7 +622,7 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css);
+      const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
 
       const profileService = service.forProfile("work");
       await profileService.listChats();
@@ -639,7 +634,7 @@ describe("GeminiClientService", () => {
   describe("init() idempotency", () => {
     test("calls client.init exactly once even when called multiple times", async () => {
       let initCallCount = 0;
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         initImplementation: () => {
           initCallCount++;
         },
@@ -647,7 +642,7 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await service.listChats();
       await service.listChats();
@@ -659,10 +654,10 @@ describe("GeminiClientService", () => {
 
   describe("empty-cookies factory case", () => {
     test("init resolves without throwing when secure1psid is empty string", async () => {
-      installGeminiReverseMock({});
+      const d = installGeminiReverseMock({});
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "" }, logger);
+      const service = new GeminiClientService({ secure1psid: "" }, logger, undefined, undefined, d);
 
       await service.listChats();
       expect(service.isAuthenticated()).toBe(true);
@@ -671,14 +666,14 @@ describe("GeminiClientService", () => {
 
   describe("silent-regression guards", () => {
     test("pinned: true maps to isPinned: true", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         chats: [
           createMockChatRow({ cid: "pinned-chat", title: "Pinned", pinned: true, timestamp: 1000000000 }),
         ],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const chats = await service.listChats();
 
@@ -686,14 +681,14 @@ describe("GeminiClientService", () => {
     });
 
     test("models() prefers model_name over display_name", async () => {
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         models: [
           createMockAvailableModel({ model_id: "gemini-3-pro", model_name: "gemini-3-pro", display_name: "Basic Pro" }),
         ],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       const models = await service.listModels();
 
@@ -702,7 +697,7 @@ describe("GeminiClientService", () => {
 
     test("fetchChat calls readChat with no explicit limit (upstream default of 10)", async () => {
       let capturedLimit: number | undefined;
-      installGeminiReverseMock({
+      const d = installGeminiReverseMock({
         readChat: (_cid: string, limit?: number) => {
           capturedLimit = limit;
           return [createMockChatTurn("user", "hi")];
@@ -710,7 +705,7 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await service.fetchChat("conv-1");
 

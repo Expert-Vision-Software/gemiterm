@@ -1,18 +1,30 @@
-import {
-  Gemini,
-  AuthError,
-  APIError,
-  UsageLimitExceeded,
-  ModelInvalid,
-  TemporarilyBlocked,
-  GeminiError,
-} from "gemini-reverse";
 import type { ChatInfo, Message } from "../core/types.ts";
 import type { IGeminiClientService } from "../core/command-handlers.ts";
 import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
+import type * as GeminiReverse from "gemini-reverse";
+
+export interface GeminiClientDeps {
+  Gemini: typeof GeminiReverse.Gemini;
+  AuthError: typeof GeminiReverse.AuthError;
+  APIError: typeof GeminiReverse.APIError;
+  UsageLimitExceeded: typeof GeminiReverse.UsageLimitExceeded;
+  ModelInvalid: typeof GeminiReverse.ModelInvalid;
+  TemporarilyBlocked: typeof GeminiReverse.TemporarilyBlocked;
+  GeminiError: typeof GeminiReverse.GeminiError;
+}
+
+let _realDeps: GeminiClientDeps | undefined;
+function getRealDeps(): GeminiClientDeps {
+  if (!_realDeps) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const gr = require("gemini-reverse") as GeminiClientDeps;
+    _realDeps = gr;
+  }
+  return _realDeps;
+}
 
 interface AxiosLikeError {
   code?: string;
@@ -45,18 +57,22 @@ interface GeminiClientConfig {
 export class GeminiClientService
   implements IGeminiClientService, IGeminiClientQueryService
 {
-  private client: Gemini | null = null;
+  private client: InstanceType<GeminiClientDeps["Gemini"]> | null = null;
   private initPromise: Promise<void> | null = null;
   private initialized = false;
   readonly logger: Logger;
   readonly cookieStorageService?: CookieStorageService;
   readonly profileName?: string;
+  private readonly deps: GeminiClientDeps;
 
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string) {
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps);
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: "_test");
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps | "_test") {
     this.logger = logger;
     this.cookieStorageService = cookieStorageService;
     this.profileName = profileName;
-    this.client = new Gemini({ secure_1psid: config.secure1psid, timeout: 300_000, autoClose: false });
+    this.deps = (typeof _deps === "object" ? _deps : null) ?? getRealDeps();
+    this.client = new this.deps.Gemini({ secure_1psid: config.secure1psid, timeout: 300_000, autoClose: false });
     if (config.secure1psidts) {
       this.client.cookies["__Secure-1PSIDTS"] = config.secure1psidts;
     }
@@ -93,7 +109,7 @@ export class GeminiClientService
   }
 
   private translateError(e: unknown): GeminiAPIError | AuthenticationError {
-    if (e instanceof AuthError) {
+    if (e instanceof this.deps.AuthError) {
       return new AuthenticationError(
         "Session expired or invalid. Please run 'gemiterm login' again.",
       );
@@ -102,16 +118,16 @@ export class GeminiClientService
     if (ax.code === "ECONNABORTED") {
       return new GeminiAPIError("Request to Gemini timed out");
     }
-    if (e instanceof UsageLimitExceeded) {
+    if (e instanceof this.deps.UsageLimitExceeded) {
       return new GeminiAPIError("Gemini usage limit reached; try again later or switch model");
     }
-    if (e instanceof TemporarilyBlocked) {
+    if (e instanceof this.deps.TemporarilyBlocked) {
       return new GeminiAPIError("Temporarily blocked by Gemini; try a proxy or wait");
     }
-    if (e instanceof ModelInvalid) {
+    if (e instanceof this.deps.ModelInvalid) {
       return new GeminiAPIError("Model is invalid or unavailable");
     }
-    if (e instanceof APIError || e instanceof GeminiError) {
+    if (e instanceof this.deps.APIError || e instanceof this.deps.GeminiError) {
       const msg = e.message;
       if (/\b(timed out|timeout|stalled)\b/i.test(msg)) {
         return new GeminiAPIError("Request to Gemini timed out");
@@ -133,6 +149,7 @@ export class GeminiClientService
       this.logger,
       this.cookieStorageService,
       profileName,
+      this.deps,
     );
   }
 
@@ -237,7 +254,7 @@ export class GeminiClientService
     await this.init();
     try {
       const raw = await this.client!.models();
-      return (raw ?? []).map((m) => this.toDomainModelName(m));
+      return (raw ?? []).map((m: RawAvailableModel) => this.toDomainModelName(m));
     } catch (e) {
       const err = this.translateError(e);
       this.logger.debug(`listModels failed: ${e}`);

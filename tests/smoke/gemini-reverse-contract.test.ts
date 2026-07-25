@@ -5,6 +5,8 @@ let realGeminiReverse: typeof import("gemini-reverse");
 beforeAll(async () => {
   mock.restore();
   realGeminiReverse = await import("gemini-reverse");
+  console.log("[DEBUG] Contract test imported gemini-reverse");
+  console.log("[DEBUG] Gemini.prototype.init:", typeof (realGeminiReverse.Gemini.prototype as any).init);
 });
 
 describe("gemini-reverse surface contract (2.1.0)", () => {
