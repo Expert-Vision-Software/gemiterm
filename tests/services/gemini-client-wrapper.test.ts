@@ -3,7 +3,24 @@ import { Logger } from "../../src/infrastructure/logger.ts";
 import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 import type { Cookie } from "../../src/core/types.ts";
-import type { RawChatRow, RawChatTurn, RawAvailableModel } from "../../src/services/gemini-raw-types.ts";
+
+interface RawChatRow {
+  cid: string;
+  title: string;
+  pinned: boolean;
+  timestamp: number;
+}
+
+interface RawChatTurn {
+  role: string;
+  text: string;
+}
+
+interface RawAvailableModel {
+  model_id: string;
+  model_name?: string;
+  display_name?: string;
+}
 
 interface RawModelOutput {
   text: { toString(): string };
@@ -27,25 +44,28 @@ class MockAuthError extends Error {
   name = "AuthError" as const;
 }
 
-class MockUsageLimitExceeded extends Error {
+class MockGeminiError extends Error {
+  name = "GeminiError" as const;
+  constructor(msg: string) { super(msg); }
+}
+
+class MockUsageLimitExceeded extends MockGeminiError {
   name = "UsageLimitExceeded" as const;
+  constructor(msg: string) { super(msg); }
 }
 
-class MockTemporarilyBlocked extends Error {
+class MockTemporarilyBlocked extends MockGeminiError {
   name = "TemporarilyBlocked" as const;
+  constructor(msg: string) { super(msg); }
 }
 
-class MockModelInvalid extends Error {
+class MockModelInvalid extends MockGeminiError {
   name = "ModelInvalid" as const;
+  constructor(msg: string) { super(msg); }
 }
 
 class MockAPIError extends Error {
   name = "APIError" as const;
-  constructor(msg: string) { super(msg); }
-}
-
-class MockGeminiError extends Error {
-  name = "GeminiError" as const;
   constructor(msg: string) { super(msg); }
 }
 
@@ -680,7 +700,7 @@ describe("GeminiClientService", () => {
       expect(models).toEqual(["gemini-3-pro"]);
     });
 
-    test("fetchChat calls readChat with limit=100 to avoid silent truncation", async () => {
+    test("fetchChat calls readChat with no explicit limit (upstream default of 10)", async () => {
       let capturedLimit: number | undefined;
       installGeminiReverseMock({
         readChat: (_cid: string, limit?: number) => {
@@ -694,7 +714,7 @@ describe("GeminiClientService", () => {
 
       await service.fetchChat("conv-1");
 
-      expect(capturedLimit).toBe(100);
+      expect(capturedLimit).toBeUndefined();
     });
 
 

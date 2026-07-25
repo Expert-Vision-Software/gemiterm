@@ -13,11 +13,28 @@ import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
-import type { RawChatRow, RawChatTurn, RawAvailableModel } from "./gemini-raw-types.ts";
 
 interface AxiosLikeError {
   code?: string;
   message?: string;
+}
+
+interface RawChatRow {
+  cid: string;
+  title: string;
+  pinned: boolean;
+  timestamp: number;
+}
+
+interface RawChatTurn {
+  role: string;
+  text: string;
+}
+
+interface RawAvailableModel {
+  model_id: string;
+  model_name?: string;
+  display_name?: string;
 }
 
 interface GeminiClientConfig {
@@ -85,15 +102,6 @@ export class GeminiClientService
     if (ax.code === "ECONNABORTED") {
       return new GeminiAPIError("Request to Gemini timed out");
     }
-    if (e instanceof APIError || e instanceof GeminiError) {
-      const msg = e.message;
-      if (/\b(timed out|timeout|stalled)\b/i.test(msg)) {
-        return new GeminiAPIError("Request to Gemini timed out");
-      }
-      const err = new GeminiAPIError(e.message);
-      err.cause = e;
-      return err;
-    }
     if (e instanceof UsageLimitExceeded) {
       return new GeminiAPIError("Gemini usage limit reached; try again later or switch model");
     }
@@ -102,6 +110,15 @@ export class GeminiClientService
     }
     if (e instanceof ModelInvalid) {
       return new GeminiAPIError("Model is invalid or unavailable");
+    }
+    if (e instanceof APIError || e instanceof GeminiError) {
+      const msg = e.message;
+      if (/\b(timed out|timeout|stalled)\b/i.test(msg)) {
+        return new GeminiAPIError("Request to Gemini timed out");
+      }
+      const err = new GeminiAPIError(e.message);
+      err.cause = e;
+      return err;
     }
     return new GeminiAPIError("Unexpected error: " + String(e));
   }
@@ -164,7 +181,7 @@ export class GeminiClientService
   async fetchChat(conversationId: string): Promise<Message[]> {
     await this.init();
     try {
-      const raw = (await this.client!.readChat(conversationId, 100)) as RawChatTurn[] | null;
+      const raw = (await this.client!.readChat(conversationId)) as RawChatTurn[] | null;
       const turns = raw ?? [];
       if (turns.length === 0) return [];
       return this.toDomainMessages(turns, conversationId);
