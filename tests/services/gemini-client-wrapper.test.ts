@@ -17,7 +17,7 @@ interface RawChatSession {
 interface RawGemini {
   init(): Promise<void>;
   chats(): Promise<RawChatRow[]>;
-  readChat(cid: string): Promise<RawChatTurn[]>;
+  readChat(cid: string, limit?: number): Promise<RawChatTurn[]>;
   newChat(): RawChatSession;
   deleteChat(cid: string): Promise<void>;
   models(): Promise<RawAvailableModel[]>;
@@ -53,7 +53,7 @@ let mockClientInstances: RawGemini[];
 let mockClientConstructorCallCount: number;
 let mockOverrides: {
   chats?: RawChatRow[] | null;
-  readChat?: (cid: string) => RawChatTurn[] | null;
+  readChat?: (cid: string, limit?: number) => RawChatTurn[] | null;
   newChat?: () => RawChatSession;
   deleteChat?: (cid: string) => Promise<void>;
   models?: RawAvailableModel[] | null;
@@ -138,8 +138,8 @@ function installGeminiReverseMock(overrides?: typeof mockOverrides) {
         }
         return mockOverrides?.chats ?? null;
       }),
-      readChat: mock(async function(this: RawGemini, cid: string) {
-        return mockOverrides?.readChat?.(cid) ?? null;
+      readChat: mock(async function(this: RawGemini, cid: string, limit?: number) {
+        return mockOverrides?.readChat?.(cid, limit) ?? null;
       }),
       newChat: mock(function(this: RawGemini) {
         if (mockOverrides?.newChat) {
@@ -678,6 +678,38 @@ describe("GeminiClientService", () => {
       const models = await service.listModels();
 
       expect(models).toEqual(["gemini-3-pro"]);
+    });
+
+    test("fetchChat calls readChat with limit=100 to avoid silent truncation", async () => {
+      let capturedLimit: number | undefined;
+      installGeminiReverseMock({
+        readChat: (_cid: string, limit?: number) => {
+          capturedLimit = limit;
+          return [createMockChatTurn("user", "hi")];
+        },
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+
+      await service.fetchChat("conv-1");
+
+      expect(capturedLimit).toBe(100);
+    });
+
+    test("fetchChat accepts upstream object-shape response with .turns (v1 compat shim)", async () => {
+      installGeminiReverseMock({
+        readChat: () => ({ turns: [createMockChatTurn("user", "legacy-shape")] }),
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+
+      const messages = await service.fetchChat("conv-1");
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0].role).toBe("user");
+      expect(messages[0].content).toBe("legacy-shape");
     });
   });
 });

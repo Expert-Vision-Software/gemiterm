@@ -164,8 +164,14 @@ export class GeminiClientService
   async fetchChat(conversationId: string): Promise<Message[]> {
     await this.init();
     try {
-      const turns = await this.client!.readChat(conversationId) as RawChatTurn[] | null;
-      if (!turns || turns.length === 0) return [];
+      const raw = await this.client!.readChat(conversationId, 100);
+      const turns = Array.isArray(raw)
+        ? raw
+        : ((raw as { turns?: RawChatTurn[] } | null)?.turns ?? []);
+      this.logger.debug(
+        `fetchChat cid=${conversationId} upstream-returned turns=${turns.length} (raw-type=${Array.isArray(raw) ? "array" : (raw === null || raw === undefined ? "null/undefined" : typeof raw)})`,
+      );
+      if (turns.length === 0) return [];
       return this.toDomainMessages(turns, conversationId);
     } catch (e) {
       const err = this.translateError(e);
