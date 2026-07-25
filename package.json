@@ -1,6 +1,6 @@
 {
   "name": "gemiterm",
-  "version": "2.3.2",
+  "version": "2.4.0",
   "module": "index.ts",
   "type": "module",
   "repository": {
@@ -28,12 +28,12 @@
     "start": "bun run src/cli/index.ts",
     "dev": "bun run src/cli/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
+    "test": "bun test --isolate",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
     "test:parity": "bun test tests/parity",
     "test:smoke": "bun test tests/smoke",
-    "test:all": "bun test",
+    "test:all": "bun test --isolate",
     "lint:mediation": "bash scripts/lint-path-mediation.sh",
     "lint:mediation:ps": "pwsh scripts/lint-path-mediation.ps1",
     "build": "bun run scripts/build.ts",
@@ -51,6 +51,6 @@
     "chalk": "^5.6.2",
     "cli-table3": "^0.6.5",
     "commander": "^15.0.0",
-    "gemini-reverse": "~1.0.12"
+    "gemini-reverse": "2.1.0"
   }
 }

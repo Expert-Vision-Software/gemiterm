@@ -1,3 +1,20 @@
+## [2.4.0] - 2026-07-23
+
+### Changed
+
+- Upgrade `gemini-reverse` from `~1.0.12` to `2.1.0` (exact pin, following the policy established in issue #5 — upstream broke the public API in a 1.x minor and ships no tests or changelog; exact pin + surface contract tests make every future upgrade a deliberate act).
+- `gemiterm models` output now shows `model_name` identifiers (e.g. `gemini-3-pro`) rather than `display_name` tier labels (e.g. `Basic Pro`) when `model_name` is present, reflecting the static Gemini 3 catalog in 2.1.0 vs the prior account-probed registry.
+
+### Internal
+
+- Rewrite `GeminiClientService` internals onto the 2.1.0 API: `GeminiClient` → `Gemini`, `listChats()` → `chats()`, `readChat()` returns plain turn arrays, `startChat({ cid })` → `newChat()` + `session.cid = cid`, `sendMessage` → `generateContent`, `listModels()` → `models()`.
+- Remove `TimeoutError` translation; timeouts now surface as axios `ECONNABORTED` or `APIError`/`GeminiError` with timeout/stalled messages, all mapped to `"Request to Gemini timed out"`.
+- `pinned` field rename (`is_pinned` → `pinned`) in chat row shape now explicitly mapped to `isPinned`.
+- Add surface contract smoke test (`tests/smoke/gemini-reverse-contract.test.ts`) that verifies the `gemini-reverse` export surface; serves as a regression gate for future upstream renames.
+- `bun test` now runs with `--isolate` to prevent `mock.module` cross-file pollution in Bun's test runner.
+
+---
+
 ## [2.3.2] - 2026-07-23
 
 ### Fixed

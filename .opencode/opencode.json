@@ -1,15 +1,12 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "skills": {
+    "paths": ["../.agents/skills/"]
+  },
   "permission": {
     "skill": {
       "intellisearch": "allow"
     },
-    "external_directory": {
-      "C:\\dev\\projects\\github\\webgemini-cli\\src\\**": "allow"
-    },
-    "edit": {
-        "C:\\dev\\projects\\github\\webgemini-cli\\src\\**": "deny"
-    }
   },
   "mcp": {
     "serena": {"enabled": true}

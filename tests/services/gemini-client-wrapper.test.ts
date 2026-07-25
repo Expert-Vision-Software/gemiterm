@@ -4,112 +4,93 @@ import { CookieStorageService } from "../../src/services/cookie-storage-service.
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 import type { Cookie } from "../../src/core/types.ts";
 
-interface RawChatInfo {
+interface RawChatRow {
   cid: string;
   title: string;
-  is_pinned: boolean;
+  pinned: boolean;
   timestamp: number;
 }
 
 interface RawChatTurn {
-  role: "user" | "model";
+  role: string;
   text: string;
-}
-
-interface RawChatHistory {
-  cid: string;
-  turns: RawChatTurn[];
-}
-
-interface RawModelOutput {
-  text: { toString(): string };
-  rcid: string;
 }
 
 interface RawAvailableModel {
   model_id: string;
-  model_name: string;
-  display_name: string;
+  model_name?: string;
+  display_name?: string;
+}
+
+interface RawModelOutput {
+  text: { toString(): string };
 }
 
 interface RawChatSession {
-  sendMessage(opts: { prompt: string }): Promise<RawModelOutput>;
-  readHistory(limit?: number): Promise<RawChatHistory | null>;
   cid: string;
-  rcid: string;
+  generateContent(opts: { prompt: string }): Promise<RawModelOutput>;
 }
 
-interface RawGeminiClient {
-  init(opts?: {
-    timeout?: number;
-    autoClose?: boolean;
-    closeDelay?: number;
-    autoRefresh?: boolean;
-    refreshInterval?: number;
-    verbose?: boolean;
-    watchdogTimeout?: number;
-  }): Promise<void>;
-  listChats(): RawChatInfo[] | null;
-  readChat(cid: string, limit?: number): Promise<RawChatHistory | null>;
-  startChat(opts?: { metadata?: (string | null)[] | null; cid?: string; rid?: string; rcid?: string }): RawChatSession;
+interface RawGemini {
+  init(): Promise<void>;
+  chats(): Promise<RawChatRow[]>;
+  readChat(cid: string, limit?: number): Promise<RawChatTurn[]>;
+  newChat(): RawChatSession;
   deleteChat(cid: string): Promise<void>;
-  listModels(): RawAvailableModel[] | null;
+  models(): Promise<RawAvailableModel[]>;
 }
 
 class MockAuthError extends Error {
   name = "AuthError" as const;
 }
 
-class MockTimeoutError extends Error {
-  name = "TimeoutError" as const;
+class MockGeminiError extends Error {
+  name = "GeminiError" as const;
+  constructor(msg: string) { super(msg); }
 }
 
-class MockUsageLimitExceeded extends Error {
+class MockUsageLimitExceeded extends MockGeminiError {
   name = "UsageLimitExceeded" as const;
+  constructor(msg: string) { super(msg); }
 }
 
-class MockTemporarilyBlocked extends Error {
+class MockTemporarilyBlocked extends MockGeminiError {
   name = "TemporarilyBlocked" as const;
+  constructor(msg: string) { super(msg); }
 }
 
-class MockModelInvalid extends Error {
+class MockModelInvalid extends MockGeminiError {
   name = "ModelInvalid" as const;
+  constructor(msg: string) { super(msg); }
 }
 
 class MockAPIError extends Error {
   name = "APIError" as const;
+  constructor(msg: string) { super(msg); }
 }
 
-class MockGeminiError extends Error {
-  name = "GeminiError" as const;
-}
-
-let mockClientInstances: RawGeminiClient[];
+let mockClientInstances: RawGemini[];
 let mockClientConstructorCallCount: number;
 let mockOverrides: {
-  listChats?: RawChatInfo[] | null;
-  readChat?: (cid: string) => RawChatHistory | null;
-  startChat?: (opts?: { cid?: string }) => RawChatSession;
+  chats?: RawChatRow[] | null;
+  readChat?: (cid: string, limit?: number) => RawChatTurn[] | null;
+  newChat?: () => RawChatSession;
   deleteChat?: (cid: string) => Promise<void>;
-  listModels?: RawAvailableModel[] | null;
-  initImplementation?: (client: RawGeminiClient) => void;
-  listChatsImplementation?: () => never;
+  models?: RawAvailableModel[] | null;
+  initImplementation?: (client: RawGemini) => void;
+  chatsImplementation?: () => never;
 } | undefined;
 
-function createMockChatInfo(overrides?: Partial<RawChatInfo>): RawChatInfo {
-  return { cid: "cid1", title: "Test Chat", is_pinned: false, timestamp: 1700000000000, ...overrides };
-}
-
-function createMockChatHistory(turns: RawChatTurn[]): RawChatHistory {
-  return { cid: "conv1", turns };
+function createMockChatRow(overrides?: Partial<RawChatRow>): RawChatRow {
+  return { cid: "cid1", title: "Test Chat", pinned: false, timestamp: 1700000000000, ...overrides };
 }
 
 function createMockChatTurn(role: "user" | "model", text: string): RawChatTurn {
   return { role, text };
 }
 
-function createMockModelOutput(text: string, rcid = "rcid1"): RawModelOutput {
-  return { text: { toString: () => text }, rcid };
+function createMockModelOutput(text: string): RawModelOutput {
+  return { text: { toString: () => text } };
 }
 
 function createMockAvailableModel(overrides?: Partial<RawAvailableModel>): RawAvailableModel {
@@ -118,6 +99,17 @@ function createMockAvailableModel(overrides?: Partial<RawAvailableModel>): RawAv
     model_name: "Gemini 2.5",
     display_name: "Gemini 2.5 Flash",
     ...overrides,
+  };
+}
+
+function createMockSession(initialCid = "new-cid", responseText = "response text"): RawChatSession {
+  let _cid = initialCid;
+  return {
+    get cid() { return _cid; },
+    set cid(v: string) { _cid = v; },
+    generateContent: mock(async function(this: RawChatSession, _opts: { prompt: string }) {
+      return createMockModelOutput(responseText);
+    }),
   };
 }
 
@@ -147,68 +139,53 @@ function installGeminiReverseMock(overrides?: typeof mockOverrides) {
   mockClientConstructorCallCount = 0;
   mockOverrides = overrides;
 
-  const mockGeminiClientFactory = function(config?: { secure_1psid?: string; secure_1psidts?: string | null }) {
+  const mockGeminiFactory = function(config?: { secure_1psid?: string; timeout?: number; autoClose?: boolean }) {
     mockClientConstructorCallCount++;
-    const instance: RawGeminiClient & { secure_1psid?: string; secure_1psidts?: string | null } = {
-      init: mock(async function(this: RawGeminiClient) {
+    const cookies: Record<string, string> = {};
+    if (config?.secure_1psid) cookies["__Secure-1PSID"] = config.secure_1psid;
+    const session = createMockSession();
+
+    const instance: RawGemini & { cookies: Record<string, string> } = {
+      cookies,
+      init: mock(async function(this: RawGemini) {
         if (mockOverrides?.initImplementation) {
           mockOverrides.initImplementation(instance);
         }
       }),
-      listChats: mock(function(this: RawGeminiClient) {
-        if (mockOverrides?.listChatsImplementation) {
-          throw mockOverrides.listChatsImplementation();
+      chats: mock(async function(this: RawGemini) {
+        if (mockOverrides?.chatsImplementation) {
+          throw mockOverrides.chatsImplementation();
         }
-        return mockOverrides?.listChats ?? null;
+        return mockOverrides?.chats ?? null;
       }),
-      readChat: mock(async function(this: RawGeminiClient, cid: string) {
-        return mockOverrides?.readChat?.(cid) ?? null;
+      readChat: mock(async function(this: RawGemini, cid: string, limit?: number) {
+        return mockOverrides?.readChat?.(cid, limit) ?? null;
       }),
-      startChat: mock(function(this: RawGeminiClient, opts?: { cid?: string }) {
-        const cid = opts?.cid ?? "new-cid";
-        const session: RawChatSession = {
-          sendMessage: mock(async function(this: RawChatSession, _opts: { prompt: string }) {
-            return createMockModelOutput("response text", cid);
-          }),
-          readHistory: mock(async function(this: RawChatSession, _limit?: number) {
-            return null;
-          }),
-          cid,
-          rcid: "rcid-" + cid,
-        };
-        if (mockOverrides?.startChat) {
-          return mockOverrides.startChat(opts) ?? session;
+      newChat: mock(function(this: RawGemini) {
+        if (mockOverrides?.newChat) {
+          return mockOverrides.newChat();
         }
         return session;
       }),
-      deleteChat: mock(async function(this: RawGeminiClient, cid: string) {
+      deleteChat: mock(async function(this: RawGemini, cid: string) {
         if (mockOverrides?.deleteChat) {
           await mockOverrides.deleteChat(cid);
         }
       }),
-      listModels: mock(() => mockOverrides?.listModels ?? null),
+      models: mock(async () => mockOverrides?.models ?? null),
     };
-    instance.secure_1psid = config?.secure_1psid;
-    instance.secure_1psidts = config?.secure_1psidts;
     mockClientInstances.push(instance);
     return instance;
   };
 
   const mockModule = {
-    get GeminiClient() { return mockGeminiClientFactory; },
+    get Gemini() { return mockGeminiFactory; },
     AuthError: MockAuthError,
-    TimeoutError: MockTimeoutError,
     UsageLimitExceeded: MockUsageLimitExceeded,
     TemporarilyBlocked: MockTemporarilyBlocked,
     ModelInvalid: MockModelInvalid,
     APIError: MockAPIError,
     GeminiError: MockGeminiError,
-    ChatInfo: class {},
-    ChatHistory: class {},
-    ChatTurn: class {},
-    ModelOutput: class {},
-    AvailableModel: class {},
-    ChatSession: class {},
   };
 
   mock.module("gemini-reverse", () => mockModule);
@@ -229,11 +206,11 @@ describe("GeminiClientService", () => {
   });
 
   describe("listChats", () => {
-    test("maps cid to id and is_pinned to isPinned", async () => {
+    test("maps cid to id and pinned to isPinned", async () => {
       installGeminiReverseMock({
-        listChats: [
-          createMockChatInfo({ cid: "chat-1", title: "First Chat", is_pinned: true, timestamp: 1700000000000 }),
-          createMockChatInfo({ cid: "chat-2", title: "Second Chat", is_pinned: false, timestamp: 1699000000000 }),
+        chats: [
+          createMockChatRow({ cid: "chat-1", title: "First Chat", pinned: true, timestamp: 1700000000000 }),
+          createMockChatRow({ cid: "chat-2", title: "Second Chat", pinned: false, timestamp: 1699000000000 }),
         ],
       });
 
@@ -251,10 +228,10 @@ describe("GeminiClientService", () => {
 
     test("applies search filter", async () => {
       installGeminiReverseMock({
-        listChats: [
-          createMockChatInfo({ cid: "1", title: "Python Help" }),
-          createMockChatInfo({ cid: "2", title: "JavaScript Help" }),
-          createMockChatInfo({ cid: "3", title: "Python Tips" }),
+        chats: [
+          createMockChatRow({ cid: "1", title: "Python Help" }),
+          createMockChatRow({ cid: "2", title: "JavaScript Help" }),
+          createMockChatRow({ cid: "3", title: "Python Tips" }),
         ],
       });
 
@@ -270,10 +247,10 @@ describe("GeminiClientService", () => {
 
     test("applies limit and offset", async () => {
       installGeminiReverseMock({
-        listChats: [
-          createMockChatInfo({ cid: "1", title: "Chat 1", timestamp: 1700000000 }),
-          createMockChatInfo({ cid: "2", title: "Chat 2", timestamp: 1699000000 }),
-          createMockChatInfo({ cid: "3", title: "Chat 3", timestamp: 1698000000 }),
+        chats: [
+          createMockChatRow({ cid: "1", title: "Chat 1", timestamp: 1700000000 }),
+          createMockChatRow({ cid: "2", title: "Chat 2", timestamp: 1699000000 }),
+          createMockChatRow({ cid: "3", title: "Chat 3", timestamp: 1698000000 }),
         ],
       });
 
@@ -288,10 +265,10 @@ describe("GeminiClientService", () => {
 
     test("sorts by timestamp descending", async () => {
       installGeminiReverseMock({
-        listChats: [
-          createMockChatInfo({ cid: "1", title: "Older", timestamp: 1000000000 }),
-          createMockChatInfo({ cid: "2", title: "Newer", timestamp: 2000000000 }),
-          createMockChatInfo({ cid: "3", title: "Middle", timestamp: 1500000000 }),
+        chats: [
+          createMockChatRow({ cid: "1", title: "Older", timestamp: 1000000000 }),
+          createMockChatRow({ cid: "2", title: "Newer", timestamp: 2000000000 }),
+          createMockChatRow({ cid: "3", title: "Middle", timestamp: 1500000000 }),
         ],
       });
 
@@ -307,8 +284,8 @@ describe("GeminiClientService", () => {
 
     test("converts timestamp from seconds to milliseconds", async () => {
       installGeminiReverseMock({
-        listChats: [
-          createMockChatInfo({ cid: "1", title: "Chat", timestamp: 1700000000 }),
+        chats: [
+          createMockChatRow({ cid: "1", title: "Chat", timestamp: 1700000000 }),
         ],
       });
 
@@ -322,8 +299,8 @@ describe("GeminiClientService", () => {
 
     test("timestamp produces valid date (not epoch 1970)", async () => {
       installGeminiReverseMock({
-        listChats: [
-          createMockChatInfo({ cid: "1", title: "Chat", timestamp: 1700000000 }),
+        chats: [
+          createMockChatRow({ cid: "1", title: "Chat", timestamp: 1700000000 }),
         ],
       });
 
@@ -344,7 +321,7 @@ describe("GeminiClientService", () => {
       const css = new CookieStorageService({ cookieStorage: storage, logger });
 
       installGeminiReverseMock({
-        listChats: [createMockChatInfo({ cid: "1", title: "Profile Chat" })],
+        chats: [createMockChatRow({ cid: "1", title: "Profile Chat" })],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -356,8 +333,8 @@ describe("GeminiClientService", () => {
       expect(chats[0].profile).toBe("work");
     });
 
-    test("returns empty array when listChats returns null", async () => {
-      installGeminiReverseMock({ listChats: null });
+    test("returns empty array when chats returns null", async () => {
+      installGeminiReverseMock({ chats: null });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
@@ -371,11 +348,10 @@ describe("GeminiClientService", () => {
   describe("fetchChat", () => {
     test("flattens turns text correctly", async () => {
       installGeminiReverseMock({
-        readChat: (_cid: string) =>
-          createMockChatHistory([
-            createMockChatTurn("user", "Hello"),
-            createMockChatTurn("model", "Hi there!"),
-          ]),
+        readChat: (_cid: string) => [
+          createMockChatTurn("user", "Hello"),
+          createMockChatTurn("model", "Hi there!"),
+        ],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -405,15 +381,7 @@ describe("GeminiClientService", () => {
   describe("sendMessage", () => {
     test("returns output.text", async () => {
       installGeminiReverseMock({
-        startChat: (opts) => {
-          const cid = opts?.cid ?? "conv-1";
-          return {
-            sendMessage: mock(async () => createMockModelOutput("model response", cid)),
-            readHistory: mock(async () => null),
-            cid,
-            rcid: "rcid-1",
-          };
-        },
+        newChat: () => createMockSession("conv-1", "model response"),
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -426,7 +394,7 @@ describe("GeminiClientService", () => {
   });
 
   describe("startNewChat", () => {
-    test("returns output.text and ChatSession.cid", async () => {
+    test("returns output.text and session.cid", async () => {
       installGeminiReverseMock({});
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -458,25 +426,10 @@ describe("GeminiClientService", () => {
   });
 
   describe("listModels", () => {
-    test("returns display_name when present", async () => {
+    test("returns model_name when present", async () => {
       installGeminiReverseMock({
-        listModels: [
+        models: [
           createMockAvailableModel({ model_id: "gemini-2.5", model_name: "Gemini 2.5", display_name: "Gemini 2.5 Flash" }),
-        ],
-      });
-
-      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
-
-      const models = await service.listModels();
-
-      expect(models).toEqual(["Gemini 2.5 Flash"]);
-    });
-
-    test("falls back to model_name when display_name is missing", async () => {
-      installGeminiReverseMock({
-        listModels: [
-          createMockAvailableModel({ model_id: "gemini-2.5", model_name: "Gemini 2.5", display_name: "" }),
         ],
       });
 
@@ -488,9 +441,24 @@ describe("GeminiClientService", () => {
       expect(models).toEqual(["Gemini 2.5"]);
     });
 
-    test("falls back to model_id when display_name and model_name are missing", async () => {
+    test("falls back to display_name when model_name is missing", async () => {
       installGeminiReverseMock({
-        listModels: [
+        models: [
+          createMockAvailableModel({ model_id: "gemini-2.5", model_name: "", display_name: "Gemini 2.5 Flash" }),
+        ],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+
+      const models = await service.listModels();
+
+      expect(models).toEqual(["Gemini 2.5 Flash"]);
+    });
+
+    test("falls back to model_id when model_name and display_name are missing", async () => {
+      installGeminiReverseMock({
+        models: [
           createMockAvailableModel({ model_id: "gemini-ultra", model_name: "", display_name: "" }),
         ],
       });
@@ -503,8 +471,8 @@ describe("GeminiClientService", () => {
       expect(models).toEqual(["gemini-ultra"]);
     });
 
-    test("returns empty array when listModels returns null", async () => {
-      installGeminiReverseMock({ listModels: null });
+    test("returns empty array when models returns null", async () => {
+      installGeminiReverseMock({ models: null });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
@@ -518,7 +486,7 @@ describe("GeminiClientService", () => {
   describe("error translations", () => {
     test("AuthError -> AuthenticationError", async () => {
       installGeminiReverseMock({
-        listChatsImplementation: () => {
+        chatsImplementation: () => {
           throw new MockAuthError("auth failure");
         },
       });
@@ -529,10 +497,25 @@ describe("GeminiClientService", () => {
       await expect(service.listChats()).rejects.toThrow("Session expired or invalid");
     });
 
-    test("TimeoutError -> GeminiAPIError", async () => {
+    test("ECONNABORTED -> GeminiAPIError timeout", async () => {
       installGeminiReverseMock({
-        listChatsImplementation: () => {
-          throw new MockTimeoutError("timeout");
+        chatsImplementation: () => {
+          const e = new Error("request timeout") as Error & { code?: string };
+          e.code = "ECONNABORTED";
+          throw e;
+        },
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+
+      await expect(service.listChats()).rejects.toThrow("Request to Gemini timed out");
+    });
+
+    test("APIError with stalled timeout message -> GeminiAPIError timeout", async () => {
+      installGeminiReverseMock({
+        chatsImplementation: () => {
+          throw new MockAPIError("Response stalled (zombie stream).");
         },
       });
 
@@ -544,7 +527,7 @@ describe("GeminiClientService", () => {
 
     test("UsageLimitExceeded -> GeminiAPIError", async () => {
       installGeminiReverseMock({
-        listChatsImplementation: () => {
+        chatsImplementation: () => {
           throw new MockUsageLimitExceeded("usage exceeded");
         },
       });
@@ -557,7 +540,7 @@ describe("GeminiClientService", () => {
 
     test("TemporarilyBlocked -> GeminiAPIError", async () => {
       installGeminiReverseMock({
-        listChatsImplementation: () => {
+        chatsImplementation: () => {
           throw new MockTemporarilyBlocked("blocked");
         },
       });
@@ -570,7 +553,7 @@ describe("GeminiClientService", () => {
 
     test("ModelInvalid -> GeminiAPIError", async () => {
       installGeminiReverseMock({
-        listChatsImplementation: () => {
+        chatsImplementation: () => {
           throw new MockModelInvalid("model invalid");
         },
       });
@@ -583,7 +566,7 @@ describe("GeminiClientService", () => {
 
     test("APIError -> GeminiAPIError", async () => {
       installGeminiReverseMock({
-        listChatsImplementation: () => {
+        chatsImplementation: () => {
           throw new MockAPIError("api error occurred");
         },
       });
@@ -596,7 +579,7 @@ describe("GeminiClientService", () => {
 
     test("GeminiError -> GeminiAPIError", async () => {
       installGeminiReverseMock({
-        listChatsImplementation: () => {
+        chatsImplementation: () => {
           throw new MockGeminiError("generic gemini error");
         },
       });
@@ -609,14 +592,14 @@ describe("GeminiClientService", () => {
   });
 
   describe("forProfile", () => {
-    test("creates a brand-new GeminiClient instance", async () => {
+    test("creates a brand-new Gemini instance", async () => {
       const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
         work: { secure_1psid: "work-sid", secure_1psidts: "work-ts" },
       };
       const storage = createMockCookieStorage(profileCookies);
       const css = new CookieStorageService({ cookieStorage: storage, logger });
 
-      installGeminiReverseMock({ listChats: [createMockChatInfo({ cid: "1", title: "Work Chat" })] });
+      installGeminiReverseMock({ chats: [createMockChatRow({ cid: "1", title: "Work Chat" })] });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css);
@@ -638,9 +621,9 @@ describe("GeminiClientService", () => {
 
       installGeminiReverseMock({
         initImplementation: (client) => {
-          receivedSid = (client as unknown as { secure_1psid?: string }).secure_1psid ?? "";
+          receivedSid = (client as unknown as { cookies?: Record<string, string> }).cookies?.["__Secure-1PSID"] ?? "";
         },
-        listChats: [createMockChatInfo({ cid: "work-1", title: "Work Chat" })],
+        chats: [createMockChatRow({ cid: "work-1", title: "Work Chat" })],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -660,7 +643,7 @@ describe("GeminiClientService", () => {
         initImplementation: () => {
           initCallCount++;
         },
-        listChats: [createMockChatInfo()],
+        chats: [createMockChatRow()],
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -684,5 +667,56 @@ describe("GeminiClientService", () => {
       await service.listChats();
       expect(service.isAuthenticated()).toBe(true);
     });
+  });
+
+  describe("silent-regression guards", () => {
+    test("pinned: true maps to isPinned: true", async () => {
+      installGeminiReverseMock({
+        chats: [
+          createMockChatRow({ cid: "pinned-chat", title: "Pinned", pinned: true, timestamp: 1000000000 }),
+        ],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+
+      const chats = await service.listChats();
+
+      expect(chats[0].isPinned).toBe(true);
+    });
+
+    test("models() prefers model_name over display_name", async () => {
+      installGeminiReverseMock({
+        models: [
+          createMockAvailableModel({ model_id: "gemini-3-pro", model_name: "gemini-3-pro", display_name: "Basic Pro" }),
+        ],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+
+      const models = await service.listModels();
+
+      expect(models).toEqual(["gemini-3-pro"]);
+    });
+
+    test("fetchChat calls readChat with no explicit limit (upstream default of 10)", async () => {
+      let capturedLimit: number | undefined;
+      installGeminiReverseMock({
+        readChat: (_cid: string, limit?: number) => {
+          capturedLimit = limit;
+          return [createMockChatTurn("user", "hi")];
+        },
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
+
+      await service.fetchChat("conv-1");
+
+      expect(capturedLimit).toBeUndefined();
+    });
+
+
   });
 });
