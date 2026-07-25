@@ -71,7 +71,7 @@ export class GeminiClientService
     }));
   }
 
-  private toDomainModelName(model: RawAvailableModel & { model_id: string }): string {
+  private toDomainModelName(model: RawAvailableModel): string {
     return model.model_name || model.display_name || model.model_id;
   }
 
@@ -164,13 +164,8 @@ export class GeminiClientService
   async fetchChat(conversationId: string): Promise<Message[]> {
     await this.init();
     try {
-      const raw = await this.client!.readChat(conversationId, 100);
-      const turns = Array.isArray(raw)
-        ? raw
-        : ((raw as { turns?: RawChatTurn[] } | null)?.turns ?? []);
-      this.logger.debug(
-        `fetchChat cid=${conversationId} upstream-returned turns=${turns.length} (raw-type=${Array.isArray(raw) ? "array" : (raw === null || raw === undefined ? "null/undefined" : typeof raw)})`,
-      );
+      const raw = (await this.client!.readChat(conversationId, 100)) as RawChatTurn[] | null;
+      const turns = raw ?? [];
       if (turns.length === 0) return [];
       return this.toDomainMessages(turns, conversationId);
     } catch (e) {

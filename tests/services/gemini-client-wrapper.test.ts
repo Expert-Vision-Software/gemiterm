@@ -697,19 +697,6 @@ describe("GeminiClientService", () => {
       expect(capturedLimit).toBe(100);
     });
 
-    test("fetchChat accepts upstream object-shape response with .turns (v1 compat shim)", async () => {
-      installGeminiReverseMock({
-        readChat: () => ({ turns: [createMockChatTurn("user", "legacy-shape")] }),
-      });
 
-      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger);
-
-      const messages = await service.fetchChat("conv-1");
-
-      expect(messages).toHaveLength(1);
-      expect(messages[0].role).toBe("user");
-      expect(messages[0].content).toBe("legacy-shape");
-    });
   });
 });
