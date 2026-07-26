@@ -18,7 +18,8 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
-      - run: bun test
+      - name: Run tests
+        run: bun test --isolate --isolate
       - run: bun run typecheck
       - name: Enforce path-utils mediation
         run: |

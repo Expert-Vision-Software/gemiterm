@@ -4,24 +4,28 @@ import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
-import type * as GeminiReverse from "gemini-reverse";
 
 export interface GeminiClientDeps {
-  Gemini: typeof GeminiReverse.Gemini;
-  AuthError: typeof GeminiReverse.AuthError;
-  APIError: typeof GeminiReverse.APIError;
-  UsageLimitExceeded: typeof GeminiReverse.UsageLimitExceeded;
-  ModelInvalid: typeof GeminiReverse.ModelInvalid;
-  TemporarilyBlocked: typeof GeminiReverse.TemporarilyBlocked;
-  GeminiError: typeof GeminiReverse.GeminiError;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Gemini: new (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  AuthError: new (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  APIError: new (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  UsageLimitExceeded: new (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ModelInvalid: new (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  TemporarilyBlocked: new (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  GeminiError: new (...args: any[]) => any;
 }
 
 let _realDeps: GeminiClientDeps | undefined;
 function getRealDeps(): GeminiClientDeps {
   if (!_realDeps) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const gr = require("gemini-reverse") as GeminiClientDeps;
-    _realDeps = gr;
+    _realDeps = require("gemini-reverse");
   }
   return _realDeps;
 }
