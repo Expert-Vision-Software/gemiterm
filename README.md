@@ -126,6 +126,46 @@ curl -fsSL https://github.com/expert-vision-software/GemiTerm/releases/latest/do
 
 See [docs/INSTALL.md](docs/INSTALL.md) for the full guide, uninstall instructions, troubleshooting, and build-from-source steps.
 
+## Reset / Clean slate
+
+Use the `-Uninstall` (Windows) or `--uninstall` (Linux/macOS) flag to wipe every trace of GemiTerm from a machine — binary, PATH entries, bun/npm global packages, bun cache, Playwright browser cache, and your config directory (profiles + cookies).
+
+**Windows (PowerShell) — one-liner to uninstall then re-install latest:**
+
+```powershell
+pwsh -Command "irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.ps1 | iex -Args '-Uninstall'; irm https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.ps1 | iex"
+```
+
+**Linux / macOS — one-liner uninstall:**
+
+```bash
+curl -fsSL https://github.com/expert-vision-software/GemiTerm/releases/latest/download/install.sh | bash -s -- --uninstall
+```
+
+**What `-Uninstall` removes:**
+
+| What | Windows | Linux / macOS |
+| --- | --- | --- |
+| Binary | `%LOCALAPPDATA%\GemiTerm\GemiTerm.exe` | `~/.local/bin/gemiterm` |
+| User PATH entry | Registry `Path` (User) | Shell rc files (`~/.bashrc`, `~/.zshrc`) |
+| bun global package | `bun remove -g gemiterm` | `bun remove -g gemiterm` |
+| bun download cache | `~/.bun/install/cache/gemiterm*` | `~/.bun/install/cache/gemiterm*` |
+| npm global package | `npm uninstall -g gemiterm` | `npm uninstall -g gemiterm` |
+| Playwright browser | `%LOCALAPPDATA\ms-playwright` | `~/.cache/ms-playwright` |
+| All profiles & cookies | `%APPDATA\gemiterm\` | `~/gemiterm/` |
+
+**Test a specific pre-release version:**
+
+```powershell
+# Windows
+pwsh -File install.ps1 -Tag v2.4.0-rc.1
+```
+
+```bash
+# Linux/macOS
+GEMITERM_TAG=v2.4.0-rc.1 bash install.sh
+```
+
 ## Prerequisites
 
 - **[Bun](https://bun.sh)** runtime ≥ 1.0.0 (only required for `bunx` / `bun install` use — not needed for install scripts)

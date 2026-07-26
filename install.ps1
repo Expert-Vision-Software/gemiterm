@@ -51,10 +51,11 @@ if (Get-Command pip -ErrorAction SilentlyContinue) {
     }
 }
 
-# --- Uninstall (task 2.2) ---
+# --- Uninstall (task 2.2 + full clean) ---
 if ($Uninstall) {
     Write-Host "Removing GemiTerm..."
 
+    # 1. Binary
     if (Test-Path $ExePath) {
         if ($WhatIf) {
             Write-Host "[WhatIf] Would delete $ExePath"
@@ -66,6 +67,7 @@ if ($Uninstall) {
         Write-Host "  $ExePath not found (already removed)"
     }
 
+    # 2. User PATH
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if ($userPath -and $userPath.ToLower().Contains($InstallDir.ToLower())) {
         $newPath = ($userPath -split ';' | Where-Object { $_ -and $_.ToLower() -ne $InstallDir.ToLower() }) -join ';'
@@ -73,17 +75,82 @@ if ($Uninstall) {
             Write-Host "[WhatIf] Would remove $InstallDir from user PATH"
         } else {
             [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+            $env:Path = ($env:Path -split ';' | Where-Object { $_ -and $_.ToLower() -ne $InstallDir.ToLower() }) -join ';'
             Write-Host "  Removed $InstallDir from PATH"
         }
     }
 
-    if ($WhatIf) {
-        Write-Host "[WhatIf] Would update current session PATH"
-    } else {
-        $env:Path = ($env:Path -split ';' | Where-Object { $_ -and $_.ToLower() -ne $InstallDir.ToLower() }) -join ';'
+    # 3. bun global package
+    if (Get-Command bun -ErrorAction SilentlyContinue) {
+        if ($WhatIf) {
+            Write-Host "[WhatIf] Would run: bun remove -g gemiterm"
+        } else {
+            bun remove -g gemiterm 2>$null
+            Write-Host "  Cleared bun global gemiterm package"
+        }
     }
 
-    Write-Host "GemiTerm uninstall review complete. No changes were made." -ForegroundColor Cyan
+    # 4. npm global package
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+        if ($WhatIf) {
+            Write-Host "[WhatIf] Would run: npm uninstall -g gemiterm"
+        } else {
+            npm uninstall -g gemiterm 2>$null
+            Write-Host "  Cleared npm global gemiterm package"
+        }
+    }
+
+    # 5. bun install cache (download cache)
+    $bunCacheDir = Join-Path $env:USERPROFILE '.bun' 'install' 'cache'
+    $gemitermCache = Get-ChildItem -Path $bunCacheDir -Filter 'gemiterm*' -Directory -ErrorAction SilentlyContinue
+    if ($gemitermCache) {
+        if ($WhatIf) {
+            Write-Host "[WhatIf] Would delete bun cache: $($gemitermCache.FullName)"
+        } else {
+            $gemitermCache | ForEach-Object {
+                Remove-Item $_.FullName -Recurse -Force
+                Write-Host "  Removed bun cache: $($_.FullName)"
+            }
+        }
+    }
+
+    # 6. bun global install dir
+    $bunGlobalDir = Join-Path $env:USERPROFILE '.bun' 'install' 'global'
+    $gemitermGlobal = Get-ChildItem -Path $bunGlobalDir -Filter 'gemiterm*' -Directory -ErrorAction SilentlyContinue
+    if ($gemitermGlobal) {
+        if ($WhatIf) {
+            Write-Host "[WhatIf] Would delete bun global: $($gemitermGlobal.FullName)"
+        } else {
+            $gemitermGlobal | ForEach-Object {
+                Remove-Item $_.FullName -Recurse -Force
+                Write-Host "  Removed bun global: $($_.FullName)"
+            }
+        }
+    }
+
+    # 7. Playwright browser cache
+    $pwCacheDir = Join-Path $env:LOCALAPPDATA 'ms-playwright'
+    if (Test-Path $pwCacheDir) {
+        if ($WhatIf) {
+            Write-Host "[WhatIf] Would delete Playwright cache: $pwCacheDir"
+        } else {
+            Remove-Item $pwCacheDir -Recurse -Force
+            Write-Host "  Removed Playwright cache at $pwCacheDir"
+        }
+    }
+
+    # 8. Config directory (wipes profiles, cookies, everything)
+    $V2ConfigDir = Join-Path $env:APPDATA 'gemiterm'
+    if (Test-Path $V2ConfigDir) {
+        if ($WhatIf) {
+            Write-Host "[WhatIf] Would delete config directory: $V2ConfigDir"
+        } else {
+            Remove-Item $V2ConfigDir -Recurse -Force
+            Write-Host "  Removed config directory: $V2ConfigDir"
+        }
+    }
+
+    Write-Host "GemiTerm uninstall complete." -ForegroundColor Cyan
     exit 0
 }
 

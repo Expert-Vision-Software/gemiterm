@@ -43,35 +43,83 @@ if command -v pip >/dev/null 2>&1 && pip show gemiterm >/dev/null 2>&1; then
     exit 1
 fi
 
-# --- Uninstall (task 3.3) ---
+# --- Uninstall (task 3.3 + full clean) ---
 if [[ "${1:-}" = "--uninstall" ]]; then
     echo "Removing GemiTerm..."
 
+    # 1. Binary
     if [[ -f "$BIN_PATH" ]]; then
         if $WHAT_IF; then echo "[WhatIf] Would delete $BIN_PATH"; else rm -f "$BIN_PATH"; echo "  Removed $BIN_PATH"; fi
     else
         echo "  $BIN_PATH not found (already removed)"
     fi
 
+    # 2. Shell env snippet
     if [[ -f "$ENV_SNIPPET" ]]; then
         if $WHAT_IF; then echo "[WhatIf] Would delete $ENV_SNIPPET"; else rm -f "$ENV_SNIPPET"; echo "  Removed $ENV_SNIPPET"; fi
     fi
 
+    # 3. Shell rc source lines
     if $WHAT_IF; then
-        echo "[WhatIf] Would remove gemiterm/env.sh source line from $HOME/.bashrc"
+        echo "[WhatIf] Would remove gemiterm/env.sh source line from \$HOME/.bashrc"
     else
         remove_source_line "$HOME/.bashrc"
     fi
 
     if [[ -f "$HOME/.zshrc" ]]; then
         if $WHAT_IF; then
-            echo "[WhatIf] Would remove gemiterm/env.sh source line from $HOME/.zshrc"
+            echo "[WhatIf] Would remove gemiterm/env.sh source line from \$HOME/.zshrc"
         else
             remove_source_line "$HOME/.zshrc"
         fi
     fi
 
-    echo "GemiTerm uninstall review complete. No changes were made."
+    # 4. bun global package
+    if command -v bun >/dev/null 2>&1; then
+        if $WHAT_IF; then echo "[WhatIf] Would run: bun remove -g gemiterm"
+        else bun remove -g gemiterm 2>/dev/null || true; echo "  Cleared bun global gemiterm package"; fi
+    fi
+
+    # 5. npm global package
+    if command -v npm >/dev/null 2>&1; then
+        if $WHAT_IF; then echo "[WhatIf] Would run: npm uninstall -g gemiterm"
+        else npm uninstall -g gemiterm 2>/dev/null || true; echo "  Cleared npm global gemiterm package"; fi
+    fi
+
+    # 6. bun install cache (download cache)
+    BUN_CACHE_DIR="$HOME/.bun/install/cache"
+    if [[ -d "$BUN_CACHE_DIR" ]]; then
+        GEMITERM_CACHES=$(find "$BUN_CACHE_DIR" -maxdepth 1 -name 'gemiterm*' -type d 2>/dev/null || true)
+        if [[ -n "$GEMITERM_CACHES" ]]; then
+            if $WHAT_IF; then echo "[WhatIf] Would delete bun cache: $GEMITERM_CACHES"
+            else echo "$GEMITERM_CACHES" | while IFS= read -r cache; do rm -rf "$cache"; echo "  Removed bun cache: $cache"; done; fi
+        fi
+    fi
+
+    # 7. bun global install dir
+    BUN_GLOBAL_DIR="$HOME/.bun/install/global"
+    if [[ -d "$BUN_GLOBAL_DIR" ]]; then
+        GEMITERM_GLOBALS=$(find "$BUN_GLOBAL_DIR" -maxdepth 1 -name 'gemiterm*' -type d 2>/dev/null || true)
+        if [[ -n "$GEMITERM_GLOBALS" ]]; then
+            if $WHAT_IF; then echo "[WhatIf] Would delete bun global: $GEMITERM_GLOBALS"
+            else echo "$GEMITERM_GLOBALS" | while IFS= read -r gdir; do rm -rf "$gdir"; echo "  Removed bun global: $gdir"; done; fi
+        fi
+    fi
+
+    # 8. Playwright browser cache
+    PW_CACHE_DIR="$HOME/.cache/ms-playwright"
+    if [[ -d "$PW_CACHE_DIR" ]]; then
+        if $WHAT_IF; then echo "[WhatIf] Would delete Playwright cache: $PW_CACHE_DIR"
+        else rm -rf "$PW_CACHE_DIR"; echo "  Removed Playwright cache at $PW_CACHE_DIR"; fi
+    fi
+
+    # 9. Config directory (profiles + cookies)
+    if [[ -d "$CONFIG_DIR" ]]; then
+        if $WHAT_IF; then echo "[WhatIf] Would delete config directory: $CONFIG_DIR"
+        else rm -rf "$CONFIG_DIR"; echo "  Removed config directory: $CONFIG_DIR"; fi
+    fi
+
+    echo "GemiTerm uninstall complete."
     exit 0
 fi
 
