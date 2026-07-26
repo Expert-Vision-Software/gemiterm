@@ -25,9 +25,9 @@ export interface GeminiClientDeps {
 let _realDeps: GeminiClientDeps | undefined;
 function getRealDeps(): GeminiClientDeps {
   if (!_realDeps) {
-    _realDeps = require("gemini-reverse");
+    _realDeps = require("gemini-reverse") as GeminiClientDeps;
   }
-  return _realDeps;
+  return _realDeps!;
 }
 
 interface AxiosLikeError {
