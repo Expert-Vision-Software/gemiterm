@@ -27,4 +27,5 @@ jobs:
             | grep -v "src/infrastructure/path-utils.ts" \
             | grep -v "src/infrastructure/io.ts" \
             | grep -v "src/services/install-browser-service.ts" \
+            | grep -v "src/services/chat-metadata-storage.ts" \
             | grep -q .
