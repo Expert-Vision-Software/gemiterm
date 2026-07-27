@@ -430,6 +430,7 @@ describe("GeminiClientService", () => {
         set metadata(v: (string | null)[]) {
           if (!Array.isArray(v)) return;
           _meta = [...v];
+          capturedNewChatMetadata = [...v];
         },
         generateContent: async function(_opts: { prompt: string }) {
           return { text: { toString: () => "model response" }, metadata: [..._meta] };

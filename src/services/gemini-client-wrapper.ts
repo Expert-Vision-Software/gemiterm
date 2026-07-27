@@ -290,11 +290,11 @@ export class GeminiClientService
       if (this.profileName) {
         const stored = this.chatMetadata.lookup(this.profileName, conversationId);
         if (stored) {
-          const metadata: (string | null)[] = [
+          session = this.client!.newChat();
+          session.metadata = [
             conversationId, stored.rid, stored.rcid, null, null, null, null, null, null,
             stored.ctx ?? "",
           ];
-          session = this.client!.newChat({ metadata });
         } else {
           this.logger.debug(
             `sendMessage: no prior metadata for cid='${conversationId}' on profile='${this.profileName}'; falling back to cid-only send.`,
