@@ -7,12 +7,14 @@ import {
   getConfigDir,
   getProfilesDir,
   getProfilePath,
+  getProfileChatMetadataPath,
   getProfileDir,
   getDefaultProfileMarkerPath,
   isWSL,
   getProjectRoot,
   getPackageJson,
   STORAGE_STATE_FILE,
+  CHAT_METADATA_FILE,
   PROFILES_DIR,
   DEFAULT_PROFILE_MARKER,
 } from "../../src/infrastructure/path-utils.ts";
@@ -21,6 +23,10 @@ describe("path-utils", () => {
   describe("constants", () => {
     test("STORAGE_STATE_FILE is storage_state.json", () => {
       expect(STORAGE_STATE_FILE).toBe("storage_state.json");
+    });
+
+    test("CHAT_METADATA_FILE is chat-metadata.json", () => {
+      expect(CHAT_METADATA_FILE).toBe("chat-metadata.json");
     });
 
     test("PROFILES_DIR is profiles", () => {
@@ -170,6 +176,36 @@ describe("path-utils", () => {
       process.env.GEMITERM_CONFIG_DIR = "/tmp/gemiterm";
       expect(getProfilePath("my-profile")).toBe(
         join("/tmp/gemiterm", PROFILES_DIR, "my-profile", STORAGE_STATE_FILE),
+      );
+    });
+  });
+
+  describe("getProfileChatMetadataPath", () => {
+    let originalConfigDir: string | undefined;
+
+    beforeEach(() => {
+      originalConfigDir = process.env.GEMITERM_CONFIG_DIR;
+    });
+
+    afterEach(() => {
+      if (originalConfigDir !== undefined) {
+        process.env.GEMITERM_CONFIG_DIR = originalConfigDir;
+      } else {
+        delete process.env.GEMITERM_CONFIG_DIR;
+      }
+    });
+
+    test("returns profiles/<name>/chat-metadata.json", () => {
+      process.env.GEMITERM_CONFIG_DIR = "/tmp/gemiterm";
+      expect(getProfileChatMetadataPath("default")).toBe(
+        join("/tmp/gemiterm", PROFILES_DIR, "default", CHAT_METADATA_FILE),
+      );
+    });
+
+    test("returns <configDir>/<profileName>/chat-metadata.json", () => {
+      process.env.GEMITERM_CONFIG_DIR = "/tmp/gemiterm";
+      expect(getProfileChatMetadataPath("work")).toBe(
+        join("/tmp/gemiterm", PROFILES_DIR, "work", CHAT_METADATA_FILE),
       );
     });
   });

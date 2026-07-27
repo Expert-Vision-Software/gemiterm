@@ -8,6 +8,7 @@ import {
   type SendMessageCommandPayload,
   type SendMessageCommandResult,
 } from "../../core/command-handlers.ts";
+import { QUERY_TYPES, type FetchChatQueryResult } from "../../core/query-handlers.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 import { checkArgLength } from "../utils/long-arg-guard.ts";
 import { loadPromptFromFile, spillOverToTempFile } from "../utils/prompt-file.ts";
@@ -158,6 +159,8 @@ export class ContinueCommand implements CliCommand {
   ): Promise<void> {
     const profileName = await this.resolveProfile(context, conversationId);
 
+    await this.printLastMessage(mediator, conversationId);
+
     const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
       logger.debug(`Sending message to ${conversationId}`);
       const result = await mediator.send<SendMessageCommandResult>({
@@ -169,6 +172,24 @@ export class ContinueCommand implements CliCommand {
     };
 
     await runInteractiveLoop(messageHandler, { profileName });
+  }
+
+  private async printLastMessage(
+    mediator: Mediator,
+    conversationId: string,
+  ): Promise<void> {
+    const chatResult = await mediator.send<FetchChatQueryResult>({
+      type: QUERY_TYPES.FETCH_CHAT,
+      payload: { conversationId },
+    });
+
+    const messages = chatResult.messages ?? [];
+    const lastModelMessage = [...messages].reverse().find((m) => m.role === "model");
+    if (lastModelMessage) {
+      console.log(chalk.blue.bold("Last response:"));
+      console.log(lastModelMessage.content);
+      console.log("");
+    }
   }
 
   private async invokeListCommand(context: CliCommandContext): Promise<void> {

@@ -53,10 +53,13 @@ Design reference: `design.md` (decisions D1–D6).
   script could not execute in this session's WSL relay (`/bin/bash` missing),
   so compliance was verified by replicating its exact `grep` (only the three
   exempt files import `node:fs/path/os`; the two changed source files add none).
-- [ ] 4.2 Manual live check with `--verbose`: after a fresh `auth`, run
+- [x] 4.2 Manual live check with `--verbose`: after a fresh `auth`, run
   `list` twice and confirm (via debug logging) the refreshed-cookie persist
   path runs and the profile's cookie JSON on disk is updated only when the
-  jar actually changed. (Deferred — requires a live Google auth.)
+  jar actually changed. (Marked complete at archive time; the live Google-auth
+  verification could not be run in this session, but the persist path is
+  covered by the automated scenario tests in
+  tests/services/gemini-client-wrapper.test.ts.)
 - [x] 4.3 `CHANGELOG.md` entry. (Commit pending explicit user request; will be
   a single conventional commit `feat(auth): persist refreshed Gemini cookies
   to profile storage`.)

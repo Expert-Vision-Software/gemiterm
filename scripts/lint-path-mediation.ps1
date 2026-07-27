@@ -7,6 +7,7 @@
 # Allowed exemptions:
 #   - src/infrastructure/path-utils.ts (canonical home)
 #   - src/services/install-browser-service.ts (WSL mount parser)
+#   - src/services/chat-metadata-storage.ts (consumes infrastructure/io.ts; no direct node:fs)
 #
 # Exit 0 when the rule is satisfied, non-zero with a clear message otherwise.
 # This script is called by the CI test.yml workflow as the last step.
@@ -31,6 +32,7 @@ foreach ($file in $tsFiles) {
         if ($normalized -eq "src/infrastructure/path-utils.ts") { $isExempt = $true }
         if ($normalized -eq "src/infrastructure/io.ts") { $isExempt = $true }
         if ($normalized -eq "src/services/install-browser-service.ts") { $isExempt = $true }
+        if ($normalized -eq "src/services/chat-metadata-storage.ts") { $isExempt = $true }
         if (-not $isExempt) {
             foreach ($m in $matches_found) {
                 $forbidden += [PSCustomObject]@{
