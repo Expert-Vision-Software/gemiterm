@@ -228,3 +228,31 @@ describe("CookieStorageService", () => {
     });
   });
 });
+
+describe("CookieStorageService persistence seams", () => {
+  let storage: CookieStorage;
+  let service: CookieStorageService;
+
+  beforeEach(() => {
+    storage = createMockCookieStorage();
+    service = new CookieStorageService({ cookieStorage: storage, logger: new Logger("test") });
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  test("saveCookiesForProfile delegates profile name and cookies to storage.save", () => {
+    const cookies = makeFreshCookies();
+    service.saveCookiesForProfile("default", cookies);
+    expect(storage.save).toHaveBeenCalledTimes(1);
+    expect(storage.save).toHaveBeenCalledWith("default", cookies);
+  });
+
+  test("loadAllCookiesForProfile delegates to storage.load and returns the raw cookie list", () => {
+    const cookies = makeFreshCookies();
+    storage.load = mock(() => cookies) as CookieStorage["load"];
+    expect(service.loadAllCookiesForProfile("default")).toBe(cookies);
+    expect(storage.load).toHaveBeenCalledWith("default");
+  });
+});

@@ -39,6 +39,14 @@ export class CookieStorageService {
     };
   }
 
+  loadAllCookiesForProfile(profileName: string): Cookie[] {
+    return this.cookieStorage.load(profileName);
+  }
+
+  saveCookiesForProfile(profileName: string, cookies: Cookie[]): void {
+    this.cookieStorage.save(profileName, cookies);
+  }
+
   validateCookies(cookies: Cookie[]): boolean {
     const names = new Set(cookies.map((c) => c.name));
     for (const required of REQUIRED_COOKIE_NAMES) {
