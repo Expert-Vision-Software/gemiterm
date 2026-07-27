@@ -154,9 +154,18 @@ function listSubdirectories(path: string): string[] {
   });
 }
 
+function getFileMtime(path: string): Date | null {
+  try {
+    return statSync(path).mtime;
+  } catch {
+    return null;
+  }
+}
+
 export {
   ensureDir,
   existsFile,
+  getFileMtime,
   readTextFile,
   safeReadTextFile,
   writeTextFile,

@@ -86,6 +86,11 @@ export function formatProfileTable(statuses: ProfileStatus[]): string {
       },
     },
     {
+      header: "LAST USED",
+      width: 22,
+      cell: (s) => (s.lastUsedAt ? formatTimestamp(new Date(s.lastUsedAt).getTime()) : chalk.dim("N/A")),
+    },
+    {
       header: "DEFAULT",
       width: 10,
       cell: (s) => (s.isDefault ? chalk.green("Yes") : ""),

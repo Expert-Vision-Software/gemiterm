@@ -3,6 +3,7 @@ export interface ProfileStatus {
   exists: boolean;
   isActive: boolean;
   expiresAt: string | null;
+  lastUsedAt?: string | null;
   isDefault: boolean;
 }
 

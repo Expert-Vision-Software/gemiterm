@@ -128,6 +128,7 @@ describe("formatProfileTable", () => {
     expect(result).toContain("NAME");
     expect(result).toContain("ACTIVE");
     expect(result).toContain("EXPIRES");
+    expect(result).toContain("LAST USED");
     expect(result).toContain("DEFAULT");
     expect(result).toContain("default");
     expect(result).toContain("expired-profile");
@@ -167,6 +168,22 @@ describe("formatProfileTable", () => {
     ];
     const result = formatProfileTable(statuses);
     expect(result).toContain("no-expiry");
+  });
+
+  test("shows LAST USED timestamp when lastUsedAt is provided", () => {
+    const statuses: ProfileStatus[] = [
+      {
+        name: "fresh",
+        exists: true,
+        isActive: true,
+        expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
+        lastUsedAt: new Date(Date.now() - 3600000).toISOString(),
+        isDefault: false,
+      },
+    ];
+    const result = formatProfileTable(statuses);
+    expect(result).toContain("LAST USED");
+    expect(result).not.toContain("N/A");
   });
 });
 

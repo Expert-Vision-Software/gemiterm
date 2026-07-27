@@ -1,3 +1,15 @@
+## [2.4.0-rc.2] - 2026-07-26
+
+### Added
+
+- "Last Used" column in the profile table (`gemiterm auth --list`, `gemiterm status`) showing when each profile's `storage_state.json` was last written — i.e. the last `auth` capture or refreshed-cookie persist. Makes the session-keep-alive from the cookie-persistence fix observable: the timestamp advances each time a command refreshes the profile's cookies.
+
+### Fixed
+
+- Persist refreshed Gemini session cookies (`__Secure-1PSID` / `__Secure-1PSIDTS`) back to the active profile's storage after successful API operations. The `gemini-reverse` 2.1.0 upgrade removed the library's explicit cookie-rotation path, leaving passive `set-cookie` merging (in `client.init()`) as the only refresh mechanism — but gemiterm never wrote those refreshed values back, so the on-disk `__Secure-1PSIDTS` went stale across runs and sessions expired within days of auth. `GeminiClientService` now detects changed cookie values after `init`/`listChats`/`fetchChat`/`sendMessage`/`startNewChat`/`deleteChat`/`listModels`, merges them into the profile's stored cookie list (preserving each entry's domain/path/httpOnly/secure/sameSite, refreshing `expires`), and saves via a new `CookieStorageService.saveCookiesForProfile` seam. Persistence is failure-isolated (logs at debug, never breaks the operation) and skipped for the CLI's non-profile factory client and when values are unchanged.
+
+---
+
 ## [2.4.0-rc.1] - 2026-07-26
 
 ### Changed
