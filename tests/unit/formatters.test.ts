@@ -142,6 +142,7 @@ describe("formatters", () => {
       expect(result).toContain("NAME");
       expect(result).toContain("ACTIVE");
       expect(result).toContain("EXPIRES");
+      expect(result).toContain("LAST USED");
       expect(result).toContain("DEFAULT");
     });
 
@@ -176,7 +177,7 @@ describe("formatters", () => {
 
     test("shows 'Session' for active profile with null expiresAt (session cookie)", () => {
       const statuses: ProfileStatus[] = [
-        { name: "default", exists: true, isActive: true, expiresAt: null, isDefault: false },
+        { name: "default", exists: true, isActive: true, expiresAt: null, lastUsedAt: new Date().toISOString(), isDefault: false },
       ];
       const result = formatProfileTable(statuses);
       expect(result).toContain("Session");

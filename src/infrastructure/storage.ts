@@ -1,4 +1,4 @@
-import { ensureDir, existsFile, readJsonFile, writeTextFile, removeDir, renameDir } from "./io.ts";
+import { ensureDir, existsFile, getFileMtime, readJsonFile, writeTextFile, removeDir, renameDir } from "./io.ts";
 import type { Cookie, ProfileStatus } from "../core/types.ts";
 import {
   getProfilePath,
@@ -143,12 +143,14 @@ export class ProfileManager {
   getStatus(name: string): ProfileStatus {
     const defaultName = getDefaultProfileName();
     const filePath = getProfilePath(name);
+    const lastUsedAt = getFileMtime(filePath)?.toISOString() ?? null;
     if (!existsFile(filePath)) {
       return {
         name,
         exists: false,
         isActive: false,
         expiresAt: null,
+        lastUsedAt,
         isDefault: name === defaultName,
       };
     }
@@ -166,6 +168,7 @@ export class ProfileManager {
         exists: true,
         isActive,
         expiresAt,
+        lastUsedAt,
         isDefault: name === defaultName,
       };
     } catch {
@@ -174,6 +177,7 @@ export class ProfileManager {
         exists: true,
         isActive: false,
         expiresAt: null,
+        lastUsedAt,
         isDefault: name === defaultName,
       };
     }

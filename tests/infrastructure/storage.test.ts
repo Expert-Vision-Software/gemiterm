@@ -219,6 +219,7 @@ describe("ProfileManager", () => {
     expect(status.exists).toBe(true);
     expect(status.isActive).toBe(true);
     expect(status.expiresAt).not.toBeNull();
+    expect(status.lastUsedAt).not.toBeNull();
     expect(status.isDefault).toBe(false);
   });
 
