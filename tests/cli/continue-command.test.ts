@@ -97,4 +97,23 @@ describe("ContinueCommand", () => {
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("Listing conversations");
   });
+
+  test("printLastMessage outputs last model message content", async () => {
+    const mockFetchHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => ({
+        messages: [
+          { role: "user" as const, content: "Hello" },
+          { role: "model" as const, content: "Hi there! How can I help?" },
+        ],
+      })),
+    };
+    mediator.registerQueryHandler(mockFetchHandler as any);
+
+    await command.printLastMessage(mediator, "conv123");
+
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Last response:");
+    expect(output).toContain("Hi there! How can I help?");
+  });
 });
