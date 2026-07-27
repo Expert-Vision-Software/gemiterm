@@ -1,3 +1,17 @@
+## [2.4.0-rc.3] - 2026-07-27
+
+### Fixed
+
+- `gemiterm continue <cid>` now restores chat context across sessions. When resuming a conversation, gemiterm now looks up the stored `rid`/`rcid` metadata and passes it to `session.metadata` before sending, so Gemini retains the full conversation thread instead of starting a new one.
+- `gemiterm continue <cid>` in interactive mode now prints the last model response before the prompt, so users can recall what was said before typing their continuation.
+
+### Added
+
+- `ChatMetadataStorage` service (`src/services/chat-metadata-storage.ts`) with `load`, `lookup`, `save`, `delete`, and `listCids` methods for persisting chat `rid`/`rcid`/`ctx` triples per profile.
+- Wire `ChatMetadataStorage` into `GeminiClientService` to capture metadata after every successful `sendMessage` and `startNewChat`, and restore it on `sendMessage` resume.
+
+---
+
 ## [2.4.0-rc.2] - 2026-07-26
 
 ### Added
