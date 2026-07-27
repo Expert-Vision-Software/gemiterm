@@ -55,6 +55,12 @@ interface RawAvailableModel {
   display_name?: string;
 }
 
+interface RawChatSession {
+  cid: string;
+  metadata?: (string | null)[];
+  generateContent(opts: { prompt: string }): Promise<{ text: { toString(): string }; cid?: string; metadata?: (string | null)[] }>;
+}
+
 interface GeminiClientConfig {
   secure1psid: string;
   secure1psidts?: string | null;
@@ -283,28 +289,33 @@ export class GeminiClientService
     }
   }
 
+  private buildSession(conversationId: string, metadata?: (string | null)[]): RawChatSession {
+    const session = this.client!.newChat(metadata ? { metadata } : undefined);
+    if (!metadata && conversationId) {
+      session.cid = conversationId;
+    }
+    return session;
+  }
+
   async sendMessage(conversationId: string, message: string): Promise<string> {
     await this.init();
     try {
-      let session;
+      let session: RawChatSession;
       if (this.profileName) {
         const stored = this.chatMetadata.lookup(this.profileName, conversationId);
         if (stored) {
-          session = this.client!.newChat();
-          session.metadata = [
+          session = this.buildSession(conversationId, [
             conversationId, stored.rid, stored.rcid, null, null, null, null, null, null,
             stored.ctx ?? "",
-          ];
+          ]);
         } else {
           this.logger.debug(
             `sendMessage: no prior metadata for cid='${conversationId}' on profile='${this.profileName}'; falling back to cid-only send.`,
           );
-          session = this.client!.newChat();
-          session.cid = conversationId;
+          session = this.buildSession(conversationId);
         }
       } else {
-        session = this.client!.newChat();
-        session.cid = conversationId;
+        session = this.buildSession(conversationId);
       }
       const output = await session.generateContent({ prompt: message });
       const captured = extractChatMetadata(output.metadata);
@@ -324,7 +335,7 @@ export class GeminiClientService
   async startNewChat(message: string): Promise<{ response: string; conversationId: string }> {
     await this.init();
     try {
-      const session = this.client!.newChat();
+      const session = this.buildSession("");
       const output = await session.generateContent({ prompt: message });
       const response = output.text.toString();
       const conversationId = output.cid ?? session.cid;
