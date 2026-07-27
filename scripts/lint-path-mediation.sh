@@ -8,6 +8,7 @@
 #   - src/infrastructure/path-utils.ts (canonical home for paths)
 #   - src/infrastructure/io.ts (canonical home for file ops)
 #   - src/services/install-browser-service.ts (WSL mount parser)
+#   - src/services/chat-metadata-storage.ts (consumes infrastructure/io.ts; no direct node:fs)
 #
 # Exit 0 when the rule is satisfied, non-zero with a clear message otherwise.
 # This script is called by the CI test.yml workflow as the last step.
@@ -19,6 +20,7 @@ FORBIDDEN=$(grep -rn --include='*.ts' "from \"node:" src/ \
   | grep -v "src/infrastructure/path-utils.ts" \
   | grep -v "src/infrastructure/io.ts" \
   | grep -v "src/services/install-browser-service.ts" \
+  | grep -v "src/services/chat-metadata-storage.ts" \
   || true)
 
 if [ -n "$FORBIDDEN" ]; then

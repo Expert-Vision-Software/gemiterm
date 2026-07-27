@@ -3,6 +3,8 @@ import type { IGeminiClientService } from "../core/command-handlers.ts";
 import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
+import type { ChatMetadata } from "./chat-metadata-storage.ts";
+import { ChatMetadataStorage } from "./chat-metadata-storage.ts";
 import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
 
 export interface GeminiClientDeps {
@@ -60,6 +62,15 @@ interface GeminiClientConfig {
 
 const COOKIE_EXPIRY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 
+function extractChatMetadata(metadata: (string | null)[] | undefined): ChatMetadata | null {
+  if (!metadata) return null;
+  const rid = metadata[1];
+  const rcid = metadata[2];
+  if (!rid && !rcid) return null;
+  const ctx = metadata[9];
+  return { rid: rid ?? "", rcid: rcid ?? "", ctx: ctx === "" ? null : (ctx ?? null) };
+}
+
 export class GeminiClientService
   implements IGeminiClientService, IGeminiClientQueryService
 {
@@ -72,10 +83,11 @@ export class GeminiClientService
   private readonly deps: GeminiClientDeps;
   private baselineSecure1psid: string;
   private baselineSecure1psidts: string | null;
+  private readonly chatMetadata: ChatMetadataStorage;
 
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps);
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: "_test");
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps | "_test") {
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps, chatMetadata?: ChatMetadataStorage);
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: "_test", chatMetadata?: ChatMetadataStorage);
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps | "_test", chatMetadata?: ChatMetadataStorage) {
     this.logger = logger;
     this.cookieStorageService = cookieStorageService;
     this.profileName = profileName;
@@ -86,6 +98,7 @@ export class GeminiClientService
     }
     this.baselineSecure1psid = config.secure1psid;
     this.baselineSecure1psidts = config.secure1psidts ?? null;
+    this.chatMetadata = chatMetadata ?? new ChatMetadataStorage(logger);
   }
 
   async init(): Promise<void> {
@@ -196,6 +209,7 @@ export class GeminiClientService
       this.cookieStorageService,
       profileName,
       this.deps,
+      this.chatMetadata,
     );
   }
 
@@ -272,9 +286,31 @@ export class GeminiClientService
   async sendMessage(conversationId: string, message: string): Promise<string> {
     await this.init();
     try {
-      const session = this.client!.newChat();
-      session.cid = conversationId;
+      let session;
+      if (this.profileName) {
+        const stored = this.chatMetadata.lookup(this.profileName, conversationId);
+        if (stored) {
+          const metadata: (string | null)[] = [
+            conversationId, stored.rid, stored.rcid, null, null, null, null, null, null,
+            stored.ctx ?? "",
+          ];
+          session = this.client!.newChat({ metadata });
+        } else {
+          this.logger.debug(
+            `sendMessage: no prior metadata for cid='${conversationId}' on profile='${this.profileName}'; falling back to cid-only send.`,
+          );
+          session = this.client!.newChat();
+          session.cid = conversationId;
+        }
+      } else {
+        session = this.client!.newChat();
+        session.cid = conversationId;
+      }
       const output = await session.generateContent({ prompt: message });
+      const captured = extractChatMetadata(output.metadata);
+      if (captured && this.profileName) {
+        this.chatMetadata.save(this.profileName, conversationId, captured);
+      }
       const text = output.text.toString();
       this.persistRefreshedCookies();
       return text;
@@ -291,11 +327,15 @@ export class GeminiClientService
       const session = this.client!.newChat();
       const output = await session.generateContent({ prompt: message });
       const response = output.text.toString();
+      const conversationId = output.cid ?? session.cid;
+      if (this.profileName) {
+        const captured = extractChatMetadata(output.metadata);
+        if (captured) {
+          this.chatMetadata.save(this.profileName, conversationId, captured);
+        }
+      }
       this.persistRefreshedCookies();
-      return {
-        response,
-        conversationId: session.cid,
-      };
+      return { response, conversationId };
     } catch (e) {
       const err = this.translateError(e);
       this.logger.debug(`startNewChat failed: ${e}`);
