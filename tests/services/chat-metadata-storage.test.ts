@@ -5,6 +5,7 @@ import { existsFile, readTextFile } from "../../src/infrastructure/io.ts";
 import { getProfileChatMetadataPath } from "../../src/infrastructure/path-utils.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { tmpdir } from "node:os";
 
 describe("ChatMetadataStorage", () => {
   let storage: ChatMetadataStorage;
@@ -14,7 +15,7 @@ describe("ChatMetadataStorage", () => {
 
   beforeEach(() => {
     originalConfigDir = process.env.GEMITERM_CONFIG_DIR;
-    tempDir = fs.mkdtempSync(path.join(fs.mkdtempSync(""), "gemiterm-test-"));
+    tempDir = fs.mkdtempSync(path.join(tmpdir(), "gemiterm-test-"));
     process.env.GEMITERM_CONFIG_DIR = tempDir;
     logger = new Logger("test");
     storage = new ChatMetadataStorage(logger);
