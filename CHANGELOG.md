@@ -1,14 +1,15 @@
-## [2.4.0-rc.3] - 2026-07-27
+## [2.4.0-rc.4] - 2026-07-28
 
 ### Fixed
 
 - `gemiterm continue <cid>` now restores chat context across sessions. When resuming a conversation, gemiterm now looks up the stored `rid`/`rcid` metadata and passes it to `session.metadata` before sending, so Gemini retains the full conversation thread instead of starting a new one.
 - `gemiterm continue <cid>` in interactive mode now prints the last model response before the prompt, so users can recall what was said before typing their continuation.
+- Auth and browser launch now fail with a clear install message (`"Playwright CLI not found..."`) when neither `playwright-cli` nor `bunx @playwright/cli` is available, instead of silently producing no browser or an opaque error.
 
 ### Added
 
-- `ChatMetadataStorage` service (`src/services/chat-metadata-storage.ts`) with `load`, `lookup`, `save`, `delete`, and `listCids` methods for persisting chat `rid`/`rcid`/`ctx` triples per profile.
-- Wire `ChatMetadataStorage` into `GeminiClientService` to capture metadata after every successful `sendMessage` and `startNewChat`, and restore it on `sendMessage` resume.
+- "Continue conversation" action in the `gemiterm list -i` interactive browser action menu, letting you resume a chat directly from the list without copy-pasting the ID.
+- `ChatMetadataStorage` service for persisting chat `rid`/`rcid`/`ctx` metadata per profile, used by `continue` to restore session context.
 
 ---
 
