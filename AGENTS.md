@@ -48,7 +48,7 @@ bun run build:release      # minified host-target build
 bun run lint:mediation     # bash version — use this on Windows
 ```
 
-> **The PowerShell version of the mediation lint is broken.** `bun run lint:mediation:ps` (and `pwsh -File scripts/lint-path-mediation.ps1`) hardcodes `gemiterm-bun-rewrite/` in its path-normalization step (`scripts/lint-path-mediation.ps1:30`). It will report false positives on every file in `src/infrastructure/` and `src/services/install-browser-service.ts`. **Use `bash scripts/lint-path-mediation.sh` (or `bun run lint:mediation`) on Windows** — that one is correct. CI runs the bash form in `.github/workflows/test.yml:23-29`.
+> **The PowerShell version of the mediation lint is broken.** `bun run lint:mediation:ps` (and `pwsh -File scripts/lint-path-mediation.ps1`) hardcodes `gemiterm-bun-rewrite/` in its path-normalization step (`scripts/lint-path-mediation.ps1:30`). It will report false positives on every file in `src/infrastructure/`. **Use `bash scripts/lint-path-mediation.sh` (or `bun run lint:mediation`) on Windows** — that one is correct. CI runs the bash form in `.github/workflows/test.yml:23-29`.
 
 Test count and the v2.0.0 release date (2026-06-08) are in `CHANGELOG.md`. Update the baseline number in any open change's `tasks.md` if the count moves.
 
@@ -85,11 +85,10 @@ The `gemiterm list -i` (or `--interactive`) flag is the **only** entry point to 
 
 ## Code conventions
 
-**Path and file operations are mandatory mediation.** No file in `src/` outside the three exemptions may import from `node:fs`, `node:path`, or `node:os`. The lint script `scripts/lint-path-mediation.sh` (and the CI step in `.github/workflows/test.yml:23-29`) enforces this. The three exempt files are:
+**Path and file operations are mandatory mediation.** No file in `src/` outside the two exemptions may import from `node:fs`, `node:path`, or `node:os`. The lint script `scripts/lint-path-mediation.sh` (and the CI step in `.github/workflows/test.yml:23-29`) enforces this. The two exempt files are:
 
 - `src/infrastructure/path-utils.ts` — canonical home for path values
 - `src/infrastructure/io.ts` — canonical home for file-system side effects
-- `src/services/install-browser-service.ts` — WSL `9p`/`drvfs` mount parser only
 
 If you need a new path or file-system helper, add it to the appropriate module and consume it from there. Do not bypass the mediation. To add a new exemption, update the file list in **both** `scripts/lint-path-mediation.sh` and `.github/workflows/test.yml` and the `if` block in `scripts/lint-path-mediation.ps1`, with a comment explaining why.
 

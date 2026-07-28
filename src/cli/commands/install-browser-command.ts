@@ -5,7 +5,7 @@ import { InstallBrowserService, InstallBrowserError } from "../../services/insta
 
 export class InstallBrowserCommand implements CliCommand {
   readonly name = "install-browser";
-  readonly description = "Install Chromium browser for Playwright (hidden command)";
+  readonly description = "Install Chrome for Testing browser for Playwright (hidden command)";
 
   async execute(_args: string[], _context: CliCommandContext): Promise<void> {
     const logger = new Logger("install-browser-command");
@@ -24,7 +24,7 @@ export class InstallBrowserCommand implements CliCommand {
           logger.error(`Cause: ${error.cause.message}`);
         }
         console.error(chalk.red("Failed to install browser."));
-        console.error(chalk.dim("You may need to run: bunx @playwright/cli install chromium"));
+        console.error(chalk.dim("You may need to run: bunx @playwright/cli install-browser chrome-for-testing"));
         process.exit(1);
       }
       throw error;

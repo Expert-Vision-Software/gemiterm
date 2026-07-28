@@ -11,7 +11,7 @@ describe("InstallBrowserCommand", () => {
 
   test("has correct name and description", () => {
     expect(command.name).toBe("install-browser");
-    expect(command.description).toContain("Chromium");
+    expect(command.description).toContain("Chrome for Testing");
   });
 
   test("implements CliCommand interface", () => {

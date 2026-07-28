@@ -7,7 +7,6 @@
 # Allowed exemptions:
 #   - src/infrastructure/path-utils.ts (canonical home for paths)
 #   - src/infrastructure/io.ts (canonical home for file ops)
-#   - src/services/install-browser-service.ts (WSL mount parser)
 #   - src/services/chat-metadata-storage.ts (consumes infrastructure/io.ts; no direct node:fs)
 #
 # Exit 0 when the rule is satisfied, non-zero with a clear message otherwise.
@@ -19,7 +18,6 @@ FORBIDDEN=$(grep -rn --include='*.ts' "from \"node:" src/ \
   | grep -E "from \"node:(fs|path|os)\"" \
   | grep -v "src/infrastructure/path-utils.ts" \
   | grep -v "src/infrastructure/io.ts" \
-  | grep -v "src/services/install-browser-service.ts" \
   | grep -v "src/services/chat-metadata-storage.ts" \
   || true)
 
