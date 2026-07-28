@@ -181,6 +181,7 @@ export class ListCommand implements CliCommand {
         { value: "export-markdown", label: "Export to Markdown" },
         { value: "export-json", label: "Export to JSON" },
         { value: "copy-id", label: "Copy conversation ID" },
+        { value: "continue", label: "Continue conversation" },
         {
           value: "delete",
           label: "Delete conversation",
@@ -219,6 +220,9 @@ export class ListCommand implements CliCommand {
       const outPath = await this.promptExportPath(chat.id, "json");
       const exportCmd = registry.getHandler("export");
       if (exportCmd) await exportCmd.execute([chat.id, "--format", "json", "--out", outPath], context);
+    } else if (action === "continue") {
+      const continueCmd = registry.getHandler("continue");
+      if (continueCmd) await continueCmd.execute([chat.id], context);
     } else if (action === "delete") {
       const deleteCmd = registry.getHandler("delete");
       if (deleteCmd) await deleteCmd.execute([chat.id, "--force"], context);
