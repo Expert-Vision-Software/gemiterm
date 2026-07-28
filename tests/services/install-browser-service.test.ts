@@ -19,7 +19,7 @@ describe("InstallBrowserService", () => {
     });
 
     test("resolves successfully when install succeeds", async () => {
-      const runInstallSpy = spyOn(service as any, "runInstall").mockResolvedValue("Chromium downloaded");
+      const runInstallSpy = spyOn(service as any, "runInstall").mockResolvedValue("Chrome for Testing downloaded");
 
       await expect(service.install()).resolves.toBeUndefined();
       runInstallSpy.mockRestore();

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { PlaywrightCliError } from "./playwright-cli-driver.ts";
 import { Logger } from "../infrastructure/logger.ts";
 
-const BROWSER_NAMES = ["chromium"];
+const BROWSER_NAMES = ["chrome-for-testing"];
 
 export class InstallBrowserError extends Error {
   constructor(message: string, public readonly cause?: Error) {
@@ -19,20 +19,20 @@ export class InstallBrowserService {
   }
 
   async install(): Promise<void> {
-    this.logger.info("Installing Chromium via Playwright...");
-    console.log("Installing Chromium via Playwright...");
-    this.logger.info("Running: bunx @playwright/cli install chromium");
+    this.logger.info("Installing Chrome for Testing via Playwright...");
+    console.log("Installing Chrome for Testing via Playwright...");
+    this.logger.info("Running: bunx @playwright/cli install-browser chrome-for-testing");
 
     try {
       const output = await this.runInstall();
       this.logger.info(`Browser installation output: ${output}`);
-      console.log("Chromium installed successfully.");
+      console.log("Chrome for Testing installed successfully.");
     } catch (error) {
       if (error instanceof PlaywrightCliError) {
         throw new InstallBrowserError(error.message, error);
       }
       throw new InstallBrowserError(
-        `Failed to install Chromium: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to install Chrome for Testing: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error : undefined,
       );
     }
@@ -40,7 +40,7 @@ export class InstallBrowserService {
 
   private async runInstall(): Promise<string> {
     return new Promise<string>((resolve, reject) => {
-      const proc = spawn("bunx", ["@playwright/cli", "install", ...BROWSER_NAMES], {
+      const proc = spawn("bunx", ["@playwright/cli", "install-browser", ...BROWSER_NAMES], {
         stdio: ["ignore", "pipe", "pipe"],
         shell: process.platform === "win32",
         env: { ...process.env },
@@ -70,7 +70,7 @@ export class InstallBrowserService {
         const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();
 
         if (code !== 0) {
-          reject(new PlaywrightCliError("install chromium", code ?? -1, stderr));
+          reject(new PlaywrightCliError("install-browser chrome-for-testing", code ?? -1, stderr));
           return;
         }
 
