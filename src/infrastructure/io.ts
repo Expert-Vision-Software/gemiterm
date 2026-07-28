@@ -2,8 +2,7 @@
  * Canonical home for file-system access in `src/`.
  *
  * No other source file in `src/` may import from `node:fs` or `node:path`
- * directly. The only allowed exception is `src/services/install-browser-service.ts`,
- * which keeps a `node:path` import for the WSL `9p`/`drvfs` mount parser.
+ * directly.
  *
  * This module is intentionally small: every function is a thin wrapper around
  * the corresponding `node:fs` call with consistent semantics (always-recursive
@@ -63,7 +62,6 @@ function readTextFile(path: string): string {
  * Note: the `""` return conflates "file does not exist" with "file exists
  * but is empty". This is appropriate for callers that only need a string
  * for `.includes()` / `.trim()` checks (for example, the WSL `/proc/version`
- * probe in `install-browser-service.ts`). Callers that need to distinguish
  * the two cases should use `readTextFile` and handle the `IOError`.
  */
 function safeReadTextFile(path: string): string {

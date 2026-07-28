@@ -6,7 +6,7 @@
 #
 # Allowed exemptions:
 #   - src/infrastructure/path-utils.ts (canonical home)
-#   - src/services/install-browser-service.ts (WSL mount parser)
+#   - src/infrastructure/io.ts (canonical home for file ops)
 #   - src/services/chat-metadata-storage.ts (consumes infrastructure/io.ts; no direct node:fs)
 #
 # Exit 0 when the rule is satisfied, non-zero with a clear message otherwise.
@@ -31,7 +31,6 @@ foreach ($file in $tsFiles) {
         $normalized = $normalized -replace "^.*/gemiterm-bun-rewrite/", ""
         if ($normalized -eq "src/infrastructure/path-utils.ts") { $isExempt = $true }
         if ($normalized -eq "src/infrastructure/io.ts") { $isExempt = $true }
-        if ($normalized -eq "src/services/install-browser-service.ts") { $isExempt = $true }
         if ($normalized -eq "src/services/chat-metadata-storage.ts") { $isExempt = $true }
         if (-not $isExempt) {
             foreach ($m in $matches_found) {

@@ -48,7 +48,7 @@ bash scripts/install-browser.sh   # Linux / macOS
 pwsh scripts/install-browser.ps1  # Windows
 ```
 
-> **Path mediation is mandatory.** No file in `src/` outside the three exemptions may import from `node:fs`, `node:path`, or `node:os`. The `lint:mediation` script and CI enforce this. If you need a new file-system or path helper, add it to `src/infrastructure/io.ts` or `src/infrastructure/path-utils.ts` and consume it from there. The three currently-exempt files are `src/infrastructure/path-utils.ts`, `src/infrastructure/io.ts`, and `src/services/install-browser-service.ts`.
+> **Path mediation is mandatory.** No file in `src/` outside the two exemptions may import from `node:fs`, `node:path`, or `node:os`. The `lint:mediation` script and CI enforce this. If you need a new file-system or path helper, add it to `src/infrastructure/io.ts` or `src/infrastructure/path-utils.ts` and consume it from there. The two currently-exempt files are `src/infrastructure/path-utils.ts` and `src/infrastructure/io.ts`.
 
 ## Building from source
 
