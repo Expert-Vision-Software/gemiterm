@@ -151,6 +151,11 @@ export class ListCommand implements CliCommand {
     console.log(chalk.dim(`Output written to: ${out}`));
   }
 
+  private copyToClipboard(text: string): void {
+    const encoded = Buffer.from(text, "utf-8").toString("base64");
+    process.stdout.write(`\x1b]52;c;${encoded}\x07`);
+  }
+
   private async runInteractiveBrowser(
     chats: ChatInfo[],
     options: ListCommandOptions,
@@ -203,6 +208,7 @@ export class ListCommand implements CliCommand {
       return;
     }
     if (action === "copy-id") {
+      this.copyToClipboard(chat.id);
       console.log(chalk.cyan(`Copied: ${chat.id}`));
       return;
     }
