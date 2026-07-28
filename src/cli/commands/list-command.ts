@@ -151,9 +151,23 @@ export class ListCommand implements CliCommand {
     console.log(chalk.dim(`Output written to: ${out}`));
   }
 
-  private copyToClipboard(text: string): void {
-    const encoded = Buffer.from(text, "utf-8").toString("base64");
-    process.stdout.write(`\x1b]52;c;${encoded}\x07`);
+  private async copyToClipboard(text: string): Promise<boolean> {
+    const cmd = process.platform === "win32"
+      ? ["clip"]
+      : process.platform === "darwin"
+        ? ["pbcopy"]
+        : ["xclip", "-selection", "clipboard"];
+
+    try {
+      const proc = Bun.spawn(cmd, {
+        stdin: new TextEncoder().encode(text),
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      return await proc.exited === 0;
+    } catch {
+      return false;
+    }
   }
 
   private async runInteractiveBrowser(
@@ -208,8 +222,12 @@ export class ListCommand implements CliCommand {
       return;
     }
     if (action === "copy-id") {
-      this.copyToClipboard(chat.id);
-      console.log(chalk.cyan(`Copied: ${chat.id}`));
+      const success = await this.copyToClipboard(chat.id);
+      if (success) {
+        console.log(chalk.cyan(`Copied: ${chat.id}`));
+      } else {
+        console.log(chalk.yellow(`Could not copy to clipboard: ${chat.id}`));
+      }
       return;
     }
     const { CommandRegistry } = await import("../command-registry.ts");
