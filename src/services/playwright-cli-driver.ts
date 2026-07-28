@@ -15,6 +15,16 @@ export class PlaywrightCliError extends Error {
   }
 }
 
+export class PlaywrightCliUnavailableError extends Error {
+  constructor() {
+    super(
+      "Playwright CLI not found. Install it with 'npm i -g @playwright/cli' " +
+        "(or 'bun add -g @playwright/cli'), or ensure 'bunx' is available to run '@playwright/cli'.",
+    );
+    this.name = "PlaywrightCliUnavailableError";
+  }
+}
+
 export interface PlaywrightRunnerResult {
   exitCode: number;
   stdout: string;
@@ -70,18 +80,25 @@ export interface PlaywrightCliDriverOptions {
   logger?: Console;
   runner?: PlaywrightRunner;
   profileDirResolver?: (profileName: string) => string;
+  probeRunners?: PlaywrightRunner[];
 }
 
 export class PlaywrightCliDriver {
   private readonly logger?: Console;
   private runner: PlaywrightRunner;
   private readonly profileDirResolver: (profileName: string) => string;
+  private readonly probeRunners: PlaywrightRunner[];
   private probed = false;
 
   constructor(opts: PlaywrightCliDriverOptions = {}) {
     this.logger = opts.logger;
     this.profileDirResolver = opts.profileDirResolver ?? ((name) => getProfileDir(name));
     this.runner = opts.runner ?? new BunPlaywrightRunner("direct");
+    this.probeRunners = opts.probeRunners ?? [
+      new BunPlaywrightRunner("direct"),
+      new BunPlaywrightRunner("bunx"),
+    ];
+    this.probed = opts.runner !== undefined;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -98,6 +115,12 @@ export class PlaywrightCliDriver {
   }
 
   async runCli(args: string[]): Promise<string> {
+    if (!this.probed) {
+      const ok = await this.isAvailable();
+      if (!ok) {
+        throw new PlaywrightCliUnavailableError();
+      }
+    }
     const result = await this.runner.run(args);
     if (result.exitCode !== 0) {
       throw new PlaywrightCliError(args.join(" "), result.exitCode, result.stderr);
@@ -177,21 +200,17 @@ export class PlaywrightCliDriver {
   }
 
   private async probe(): Promise<boolean> {
-    const direct = new BunPlaywrightRunner("direct");
-    if (await this.tryVersion(direct)) {
-      this.runner = direct;
-      return true;
-    }
-    const bunx = new BunPlaywrightRunner("bunx");
-    if (await this.tryVersion(bunx)) {
-      this.runner = bunx;
-      return true;
+    for (const candidate of this.probeRunners) {
+      if (await this.tryVersion(candidate)) {
+        this.runner = candidate;
+        return true;
+      }
     }
     this.logger?.warn("Neither 'playwright-cli' nor 'bunx @playwright/cli' is available on this system.");
     return false;
   }
 
-  private async tryVersion(r: BunPlaywrightRunner): Promise<boolean> {
+  private async tryVersion(r: PlaywrightRunner): Promise<boolean> {
     try {
       const result = await Promise.race([
         r.run(["--version"]),

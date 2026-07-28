@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import {
   PlaywrightCliDriver,
   PlaywrightCliError,
+  PlaywrightCliUnavailableError,
   type PlaywrightRunner,
   type PlaywrightRunnerResult,
   type PlaywrightStrategy,
@@ -463,6 +464,58 @@ describe("PlaywrightCliDriver", () => {
       expect(d1.strategy).toBe("direct");
       const d2 = new PlaywrightCliDriver({ runner: createMockRunner("bunx") });
       expect(d2.strategy).toBe("bunx");
+    });
+  });
+
+  describe("auto-detection", () => {
+    test("selects bunx strategy when direct probe fails and bunx probe succeeds", async () => {
+      const direct = createMockRunner("direct");
+      direct._run.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "not found" });
+      const bunx = createMockRunner("bunx");
+      bunx._run.mockResolvedValue({ exitCode: 0, stdout: "0.1.17", stderr: "" });
+
+      const d = new PlaywrightCliDriver({ probeRunners: [direct, bunx] });
+
+      await d.runCli(["--version"]);
+
+      expect(d.strategy).toBe("bunx");
+      expect(direct._run).toHaveBeenCalled();
+      expect(bunx._run).toHaveBeenCalled();
+    });
+
+    test("runCli throws PlaywrightCliUnavailableError when all probe candidates fail", async () => {
+      const direct = createMockRunner("direct");
+      direct._run.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "" });
+      const bunx = createMockRunner("bunx");
+      bunx._run.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "" });
+
+      const d = new PlaywrightCliDriver({ probeRunners: [direct, bunx] });
+
+      await expect(d.runCli(["--version"])).rejects.toBeInstanceOf(
+        PlaywrightCliUnavailableError,
+      );
+    });
+
+    test("does not probe when a runner is injected", async () => {
+      const runner = createMockRunner("direct");
+      const probeCandidate = createMockRunner("bunx");
+      const d = new PlaywrightCliDriver({ runner, probeRunners: [probeCandidate] });
+
+      await d.runCli(["--version"]);
+
+      expect(probeCandidate._run).not.toHaveBeenCalled();
+      expect(runner._run).toHaveBeenCalledTimes(1);
+    });
+
+    test("probes at most once across repeated isAvailable calls", async () => {
+      const candidate = createMockRunner("bunx");
+      candidate._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
+      const d = new PlaywrightCliDriver({ probeRunners: [candidate] });
+
+      await d.isAvailable();
+      await d.isAvailable();
+
+      expect(candidate._run).toHaveBeenCalledTimes(1);
     });
   });
 });
