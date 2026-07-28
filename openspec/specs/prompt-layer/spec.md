@@ -1,6 +1,6 @@
 ## Purpose
 
-TBD
+The prompt layer is the single `@inquirer/prompts` facade in `src/cli/utils/prompts.ts`. It is the only module in `src/` permitted to import from `@inquirer/prompts`. It gates every prompt on `process.stdin.isTTY`, exposes `text`, `confirm`, and `select` functions with a shared chalk-based theme, maps `ExitPromptError`/`AbortPromptError` to `CancellationError`, and provides a module-level `AbortSignal` via `getAbortSignal()`.
 
 ## Requirements
 

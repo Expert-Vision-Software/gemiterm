@@ -1,6 +1,6 @@
 ## Purpose
 
-TBD
+The interactive prompt loop is the REPL entry point for `gemiterm new`. It owns the TTY-gated input cycle: printing the prompt banner, awaiting user text input (or a slash command), forwarding non-empty non-slash input to the message handler, and looping until `/exit`, `/quit`, or cancellation. It surfaces validation errors from the prompt layer without consuming the user's message and propagates `CancellationError` as a clean exit with code 0.
 
 ## Requirements
 
