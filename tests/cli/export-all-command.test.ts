@@ -372,4 +372,30 @@ describe("ExportAllCommand", () => {
     expect(indexContent).toContain("New chat");
     expect(indexContent).not.toContain("Old chat");
   });
+
+  test("forwards chat.profile into FETCH_CHAT payload for non-default profiles", async () => {
+    const evsChat = { id: "evs-1", title: "EVS chat", isPinned: false, timestamp: 1717000000000, profile: "evs-diegohb" };
+    const dhbChat = { id: "dhb-1", title: "DHB chat", isPinned: false, timestamp: 1717100000000, profile: "dhb-work" };
+    const listHandler = {
+      queryType: QUERY_TYPES.LIST_CHATS,
+      handle: mock(async () => ({ chats: [evsChat, dhbChat] })),
+    };
+    const fetchHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
+    };
+    mediator.registerQueryHandler(listHandler as any);
+    mediator.registerQueryHandler(fetchHandler as any);
+
+    await command.execute(["--all-profiles", "--out-dir", tempDir], context);
+
+    expect(fetchHandler.handle).toHaveBeenCalledTimes(2);
+    const calls = fetchHandler.handle.mock.calls;
+    const evsCall = calls.find((c) => (c[0] as any).payload.conversationId === "evs-1");
+    const dhbCall = calls.find((c) => (c[0] as any).payload.conversationId === "dhb-1");
+    expect(evsCall).toBeDefined();
+    expect(dhbCall).toBeDefined();
+    expect((evsCall![0] as any).payload.profileName).toBe("evs-diegohb");
+    expect((dhbCall![0] as any).payload.profileName).toBe("dhb-work");
+  });
 });

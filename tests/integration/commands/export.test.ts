@@ -21,7 +21,14 @@ describe("export command integration", () => {
 
   beforeEach(() => {
     command = new ExportCommand();
-    context = { verbose: false, mediator: new Mediator() };
+    const profileAuthManager = {
+      getActiveProfiles: mock(() => ["default"]),
+      findProfileForConversation: mock(() => Promise.resolve(null)),
+      ensureAuthenticated: mock(() => {
+        throw new Error("not used");
+      }),
+    };
+    context = { verbose: false, mediator: new Mediator(), profileAuthManager: profileAuthManager as any };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
     exitSpy = spyOn(process, "exit").mockImplementation((code?: number) => {
@@ -261,6 +268,32 @@ describe("export command integration", () => {
 
       const errorOutput = errorSpy.mock.calls.map((c) => c[0]).join("\n");
       expect(errorOutput).toContain("Network error");
+    });
+  });
+
+  describe("multi-profile routing", () => {
+    test("auto-discovers owning profile and forwards profileName into FETCH_CHAT payload", async () => {
+      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
+
+      await command.execute(["conv-evs"], context);
+
+      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.type).toBe(QUERY_TYPES.FETCH_CHAT);
+      expect(sentQuery.payload.conversationId).toBe("conv-evs");
+      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+    });
+
+    test("--profile overrides auto-discovery", async () => {
+      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("dhb-work");
+
+      await command.execute(["conv-x", "--profile", "evs-diegohb"], context);
+
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+      expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
     });
   });
 });

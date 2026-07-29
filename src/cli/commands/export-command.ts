@@ -13,12 +13,14 @@ import {
 } from "../../infrastructure/formatters.ts";
 import { validateConversationId } from "../../infrastructure/validators.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
+import { resolveProfile } from "../utils/profile-resolution.ts";
 
 interface ExportCommandOptions {
   help: boolean;
   out: string;
   format: "markdown" | "json";
   includeMetadata: boolean;
+  profile: string;
 }
 
 const DEFAULT_OPTIONS: ExportCommandOptions = {
@@ -26,6 +28,7 @@ const DEFAULT_OPTIONS: ExportCommandOptions = {
   out: "",
   format: "markdown",
   includeMetadata: false,
+  profile: "",
 };
 
 export class ExportCommand implements CliCommand {
@@ -57,11 +60,16 @@ export class ExportCommand implements CliCommand {
     }
 
     const mediator: Mediator = context.mediator;
-    const query: FetchChatQueryPayload = { conversationId };
-
-    logger.debug(`Sending fetch-chat query for export: ${JSON.stringify(query)}`);
 
     try {
+      const profileName = await resolveProfile(context, conversationId, options.profile || undefined);
+      const query: FetchChatQueryPayload = {
+        conversationId,
+        profileName: profileName ?? undefined,
+      };
+
+      logger.debug(`Sending fetch-chat query for export: ${JSON.stringify(query)}`);
+
       const result = await mediator.send<FetchChatQueryResult>({
         type: QUERY_TYPES.FETCH_CHAT,
         payload: query,
@@ -119,6 +127,10 @@ export class ExportCommand implements CliCommand {
         case "--include-metadata":
           options.includeMetadata = true;
           break;
+        case "--profile":
+        case "-p":
+          options.profile = args[++i] ?? "";
+          break;
       }
     }
 
@@ -144,6 +156,7 @@ export class ExportCommand implements CliCommand {
       { flag: "--out, -o <path>", desc: "Output file path (default: gemini-chat-<id>-<date>.md)" },
       { flag: "--format, -f <fmt>", desc: "Output format: markdown, json (default: markdown)" },
       { flag: "--include-metadata", desc: "Include metadata header (ID, count, date)" },
+      { flag: "--profile, -p <name>", desc: "Profile that owns the conversation (default: auto-discover)" },
       { flag: "--help, -h", desc: "Show this help message" },
     ];
 

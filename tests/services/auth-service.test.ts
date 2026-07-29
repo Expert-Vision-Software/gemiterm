@@ -7,6 +7,7 @@ import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 import * as io from "../../src/infrastructure/io.ts";
+import * as elevation from "../../src/infrastructure/elevation.ts";
 
 function createMockDriver() {
   return {
@@ -92,12 +93,14 @@ describe("AuthService", () => {
   let cookieMonitor: ReturnType<typeof createMockCookieMonitor>;
   let cookieStorage: ReturnType<typeof createMockCookieStorage>;
   let logger: Logger;
+  let elevationSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     driver = createMockDriver();
     cookieMonitor = createMockCookieMonitor();
     cookieStorage = createMockCookieStorage();
     logger = createTestLogger();
+    elevationSpy = spyOn(elevation, "isRunningElevated").mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -275,9 +278,27 @@ describe("AuthService", () => {
     });
   });
 
+  describe("elevation guard", () => {
+    test("authenticate throws ElevationError when running elevated", async () => {
+      elevationSpy.mockReturnValue(true);
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+
+      await expect(svc.authenticate("test-profile")).rejects.toBeInstanceOf(elevation.ElevationError);
+      expect(driver.openHeaded).not.toHaveBeenCalled();
+      expect(driver.closeSession).not.toHaveBeenCalled();
+    });
+
+    test("renew throws ElevationError when running elevated", async () => {
+      elevationSpy.mockReturnValue(true);
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+
+      await expect(svc.renew("test-profile")).rejects.toBeInstanceOf(elevation.ElevationError);
+      expect(driver.openHeaded).not.toHaveBeenCalled();
+    });
+  });
+
   describe("notifyUser", () => {
-    test("prints the URL and a hint about auto-detection", () => {
-      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    test("prints the URL and a hint about auto-detection", () => {      const logSpy = spyOn(console, "log").mockImplementation(() => {});
 
       const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
       svc.notifyUser("default");

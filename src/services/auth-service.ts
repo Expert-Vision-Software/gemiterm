@@ -8,6 +8,7 @@ import { ensureConfigDir, getDefaultProfileName } from "../infrastructure/config
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { getProfilePath } from "../infrastructure/path-utils.ts";
 import { existsFile } from "../infrastructure/io.ts";
+import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
 
 const GEMINI_AUTH_URL = "https://gemini.google.com/app";
 const DEFAULT_AUTH_TIMEOUT_MS = 300_000;
@@ -43,6 +44,10 @@ export class AuthService {
     const name = profileName ?? getDefaultProfileName();
     validateProfileName(name);
 
+    if (isRunningElevated()) {
+      throw new ElevationError();
+    }
+
     this.logger.info(`Starting authentication for profile: ${name}`);
 
     try {
@@ -62,6 +67,10 @@ export class AuthService {
   async renew(profileName?: string): Promise<AuthResult> {
     const name = profileName ?? getDefaultProfileName();
     validateProfileName(name);
+
+    if (isRunningElevated()) {
+      throw new ElevationError();
+    }
 
     this.logger.info(`Starting session renewal for profile: ${name}`);
 

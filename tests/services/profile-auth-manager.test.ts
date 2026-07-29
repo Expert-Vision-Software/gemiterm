@@ -330,5 +330,32 @@ describe("ProfileAuthManager", () => {
 
       expect(calls).toContainEqual(["work", "abc-123"]);
     });
+
+    test("does not probe profiles whose cookies are expired", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("alive");
+      manager.create("dead");
+      storage.save("alive", makeValidCookies());
+      storage.save("dead", makeExpiredCookies());
+
+      const probedNames: string[] = [];
+      const mockGeminiClient = {
+        async deleteChat() { return; },
+        async sendMessage() { return ""; },
+        async startNewChat() { return { response: "", conversationId: "" }; },
+        async profileHasConversation(profileName: string) {
+          probedNames.push(profileName);
+          return false;
+        },
+        forProfile() { return this as unknown as IGeminiClientService; },
+      };
+
+      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      await mgr.findProfileForConversation("conv-xyz");
+
+      expect(probedNames).toContain("alive");
+      expect(probedNames).not.toContain("dead");
+    });
   });
 });

@@ -125,4 +125,48 @@ describe("DeleteCommand", () => {
     const errorOutput = errorSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(errorOutput).toContain("Network error");
   });
+
+  test("--profile forwards the profile name into DELETE_CONVERSATION payload", async () => {
+    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["evs-diegohb"]);
+
+    const mockHandler = {
+      commandType: COMMAND_TYPES.DELETE_CONVERSATION,
+      handle: mock(async () => ({ success: true })),
+    };
+    mediator.registerCommandHandler(mockHandler as any);
+
+    await command.execute(["abc123", "--force", "--profile", "evs-diegohb"], context);
+
+    expect(mockHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          conversationId: "abc123",
+          profileName: "evs-diegohb",
+        }),
+      }),
+    );
+  });
+
+  test("auto-discovers owning profile and forwards it into DELETE_CONVERSATION payload", async () => {
+    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+    (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
+
+    const mockHandler = {
+      commandType: COMMAND_TYPES.DELETE_CONVERSATION,
+      handle: mock(async () => ({ success: true })),
+    };
+    mediator.registerCommandHandler(mockHandler as any);
+
+    await command.execute(["abc123", "--force"], context);
+
+    expect((context.profileAuthManager as any).findProfileForConversation).toHaveBeenCalledWith("abc123");
+    expect(mockHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          conversationId: "abc123",
+          profileName: "evs-diegohb",
+        }),
+      }),
+    );
+  });
 });

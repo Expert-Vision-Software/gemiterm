@@ -20,7 +20,14 @@ describe("fetch command integration", () => {
 
   beforeEach(() => {
     command = new FetchCommand();
-    context = { verbose: false, mediator: new Mediator() };
+    const profileAuthManager = {
+      getActiveProfiles: mock(() => ["default"]),
+      findProfileForConversation: mock(() => Promise.resolve(null)),
+      ensureAuthenticated: mock(() => {
+        throw new Error("not used");
+      }),
+    };
+    context = { verbose: false, mediator: new Mediator(), profileAuthManager: profileAuthManager as any };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     originalEnv = {
       GEMITERM_CONFIG_DIR: process.env.GEMITERM_CONFIG_DIR,
@@ -233,6 +240,70 @@ describe("fetch command integration", () => {
       mediatorSendSpy.mockRejectedValue(new Error("Network error"));
 
       await expect(command.execute(["conv-abc123"], context)).rejects.toThrow("Network error");
+    });
+  });
+
+  describe("multi-profile routing", () => {
+    test("auto-discovers owning profile and forwards profileName when multiple profiles are active", async () => {
+      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
+
+      await command.execute(["conv-evs"], context);
+
+      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.type).toBe(QUERY_TYPES.FETCH_CHAT);
+      expect(sentQuery.payload.conversationId).toBe("conv-evs");
+      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+      expect((context.profileAuthManager as any).findProfileForConversation).toHaveBeenCalledWith("conv-evs");
+    });
+
+    test("--profile overrides auto-discovery", async () => {
+      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("dhb-work");
+
+      await command.execute(["conv-x", "--profile", "evs-diegohb"], context);
+
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+      expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
+    });
+
+    test("-p short flag also overrides discovery", async () => {
+      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+
+      await command.execute(["conv-x", "-p", "evs-diegohb"], context);
+
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+    });
+
+    test("omits profileName from payload when only one profile is active", async () => {
+      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["default"]);
+      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue(null);
+
+      await command.execute(["conv-1"], context);
+
+      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+      expect(sentQuery.payload.profileName).toBeUndefined();
+      expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
+    });
+
+    test("throws AuthenticationError when --profile names a profile with no valid session", async () => {
+      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work"]);
+
+      await expect(
+        command.execute(["conv-x", "--profile", "expired-profile"], context),
+      ).rejects.toThrow(/has no valid session/);
+    });
+
+    test("throws AuthenticationError when no active profile owns the conversation and --profile is not given", async () => {
+      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue(null);
+
+      await expect(command.execute(["conv-orphan"], context)).rejects.toThrow(
+        /Could not find a profile that owns conversation/,
+      );
     });
   });
 });

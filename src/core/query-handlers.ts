@@ -20,6 +20,7 @@ export interface ListChatsQueryResult {
 
 export interface FetchChatQueryPayload {
   conversationId: string;
+  profileName?: string;
 }
 
 export interface FetchChatQueryResult {
@@ -59,6 +60,7 @@ export interface IGeminiClientQueryService {
   listChats(options?: { limit?: number; offset?: number; search?: string }): Promise<ChatInfo[]>;
   fetchChat(conversationId: string): Promise<Message[]>;
   listModels(): Promise<string[]>;
+  forProfile(profileName: string): IGeminiClientQueryService;
 }
 
 export interface IProfileQueryService {
@@ -111,8 +113,9 @@ export class FetchChatQueryHandler
   }
 
   async handle(query: Query<FetchChatQueryPayload>): Promise<FetchChatQueryResult> {
-    const { conversationId } = extractPayload(query);
-    const messages = await this.geminiClient.fetchChat(conversationId);
+    const { conversationId, profileName } = extractPayload(query);
+    const client = profileName ? this.geminiClient.forProfile(profileName) : this.geminiClient;
+    const messages = await client.fetchChat(conversationId);
     return { messages };
   }
 }
