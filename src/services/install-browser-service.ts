@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { PlaywrightCliError } from "./playwright-cli-driver.ts";
 import { Logger } from "../infrastructure/logger.ts";
+import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
 
 const BROWSER_NAMES = ["chrome-for-testing"];
 
@@ -19,6 +20,9 @@ export class InstallBrowserService {
   }
 
   async install(): Promise<void> {
+    if (isRunningElevated()) {
+      throw new ElevationError();
+    }
     this.logger.info("Installing Chrome for Testing via Playwright...");
     console.log("Installing Chrome for Testing via Playwright...");
     this.logger.info("Running: bunx @playwright/cli install-browser chrome-for-testing");
