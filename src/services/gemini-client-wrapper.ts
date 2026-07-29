@@ -290,8 +290,10 @@ export class GeminiClientService
   }
 
   private buildSession(conversationId: string, metadata?: (string | null)[]): RawChatSession {
-    const session = this.client!.newChat(metadata ? { metadata } : undefined);
-    if (!metadata && conversationId) {
+    const session = this.client!.newChat();
+    if (metadata) {
+      session.metadata = metadata;
+    } else if (conversationId) {
       session.cid = conversationId;
     }
     return session;

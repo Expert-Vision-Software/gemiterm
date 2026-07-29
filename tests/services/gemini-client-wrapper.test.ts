@@ -479,6 +479,67 @@ describe("GeminiClientService", () => {
       expect(capturedNewChatMetadata).toEqual(["existing-conv-xyz", "rid-xyz", "rcid-xyz", null, null, null, null, null, null, ""]);
     });
 
+    test("sendMessage uses session.metadata setter (not newChat opts) to restore prior metadata", async () => {
+      let newChatCalledWithMetadata = false;
+      let setterCalledWith: (string | null)[] | null = null;
+      let _meta: (string | null)[] = ["", "", "", null, null, null, null, null, null, ""];
+
+      const mockSession: RawChatSession = {
+        get cid() { return "existing-conv-xyz"; },
+        set cid(v: string) {},
+        get metadata() { return _meta; },
+        set metadata(v: (string | null)[]) {
+          if (!Array.isArray(v)) return;
+          _meta = [...v];
+          setterCalledWith = [...v];
+        },
+        generateContent: async function(_opts: { prompt: string }) {
+          return { text: { toString: () => "model response" }, metadata: [..._meta] };
+        },
+      };
+
+      const mockClient = {
+        cookies: { "__Secure-1PSID": "sid" },
+        init: async () => {},
+        chats: async () => [],
+        readChat: async () => null,
+        newChat: (opts?: { metadata?: (string | null)[] }) => {
+          if (opts?.metadata) {
+            newChatCalledWithMetadata = true;
+          }
+          return mockSession;
+        },
+        deleteChat: async () => {},
+        models: async () => [],
+      };
+
+      const d: GeminiClientDeps = {
+        Gemini: function() { return mockClient; },
+        AuthError: MockAuthError,
+        GeminiError: MockGeminiError,
+        UsageLimitExceeded: MockUsageLimitExceeded,
+        TemporarilyBlocked: MockTemporarilyBlocked,
+        ModelInvalid: MockModelInvalid,
+        APIError: MockAPIError,
+      };
+
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        testprofile: { secure_1psid: "sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const chatMetadata = new ChatMetadataStorage(logger);
+      chatMetadata.save("testprofile", "existing-conv-xyz", { rid: "rid-xyz", rcid: "rcid-xyz", ctx: null });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "sid" }, logger, css, "testprofile", d, chatMetadata);
+
+      await service.sendMessage("existing-conv-xyz", "hello");
+
+      expect(newChatCalledWithMetadata).toBe(false);
+      expect(setterCalledWith).toEqual(["existing-conv-xyz", "rid-xyz", "rcid-xyz", null, null, null, null, null, null, ""]);
+    });
+
     test.skip("sendMessage falls back to cid-only when no prior metadata exists", async () => {
       let capturedNewChatMetadata: (string | null)[] | null = null;
       let _meta: (string | null)[] = ["", "", "", null, null, null, null, null, null, ""];
