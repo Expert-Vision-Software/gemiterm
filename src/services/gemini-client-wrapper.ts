@@ -47,6 +47,8 @@ interface RawChatRow {
 interface RawChatTurn {
   role: string;
   text: string;
+  rid?: string;
+  rcid?: string;
 }
 
 interface RawAvailableModel {
@@ -267,6 +269,16 @@ export class GeminiClientService
     try {
       const raw = (await this.client!.readChat(conversationId)) as RawChatTurn[] | null;
       const turns = raw ?? [];
+      if (turns.length > 0) {
+        const lastModelTurn = [...turns].reverse().find((t) => t.role === "model");
+        if (lastModelTurn?.rid && this.profileName) {
+          this.chatMetadata.save(this.profileName, conversationId, {
+            rid: lastModelTurn.rid,
+            rcid: lastModelTurn.rcid ?? "",
+            ctx: null,
+          });
+        }
+      }
       const messages = turns.length === 0 ? [] : this.toDomainMessages(turns, conversationId);
       this.persistRefreshedCookies();
       return messages;

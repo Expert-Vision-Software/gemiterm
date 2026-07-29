@@ -16,6 +16,8 @@ interface RawChatRow {
 interface RawChatTurn {
   role: string;
   text: string;
+  rid?: string;
+  rcid?: string;
 }
 
 interface RawAvailableModel {
@@ -90,8 +92,8 @@ function createMockChatRow(overrides?: Partial<RawChatRow>): RawChatRow {
   return { cid: "cid1", title: "Test Chat", pinned: false, timestamp: 1700000000000, ...overrides };
 }
 
-function createMockChatTurn(role: "user" | "model", text: string): RawChatTurn {
-  return { role, text };
+function createMockChatTurn(role: "user" | "model", text: string, rid?: string, rcid?: string): RawChatTurn {
+  return { role, text, rid, rcid };
 }
 
 function createMockModelOutput(text: string): RawModelOutput {
@@ -403,6 +405,83 @@ describe("GeminiClientService", () => {
 
       expect(messages).toEqual([]);
     });
+
+    test("saves rid/rcid from last model turn to ChatMetadataStorage", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        testprofile: { secure_1psid: "sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const chatMetadata = new ChatMetadataStorage(logger);
+
+      const d: GeminiClientDeps = {
+        Gemini: function() {
+          return {
+            cookies: { "__Secure-1PSID": "sid" },
+            init: async () => {},
+            chats: async () => [],
+            readChat: async (_cid: string) => [
+              createMockChatTurn("user", "Hello", "r_user1"),
+              createMockChatTurn("model", "Hi there!", "r_model1", "rc_model1"),
+            ],
+            newChat: () => createMockSession(),
+            deleteChat: async () => {},
+            models: async () => [],
+          };
+        },
+        AuthError: MockAuthError,
+        GeminiError: MockGeminiError,
+        UsageLimitExceeded: MockUsageLimitExceeded,
+        TemporarilyBlocked: MockTemporarilyBlocked,
+        ModelInvalid: MockModelInvalid,
+        APIError: MockAPIError,
+      };
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "sid" }, logger, css, "testprofile", d, chatMetadata);
+
+      await service.fetchChat("conv-abc");
+
+      const saved = chatMetadata.lookup("testprofile", "conv-abc");
+      expect(saved).toEqual({ rid: "r_model1", rcid: "rc_model1", ctx: null });
+    });
+
+    test("does not save metadata when readChat returns empty array", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        "testprofile-empty": { secure_1psid: "sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const chatMetadata = new ChatMetadataStorage(logger);
+
+      const d: GeminiClientDeps = {
+        Gemini: function() {
+          return {
+            cookies: { "__Secure-1PSID": "sid" },
+            init: async () => {},
+            chats: async () => [],
+            readChat: async () => [],
+            newChat: () => createMockSession(),
+            deleteChat: async () => {},
+            models: async () => [],
+          };
+        },
+        AuthError: MockAuthError,
+        GeminiError: MockGeminiError,
+        UsageLimitExceeded: MockUsageLimitExceeded,
+        TemporarilyBlocked: MockTemporarilyBlocked,
+        ModelInvalid: MockModelInvalid,
+        APIError: MockAPIError,
+      };
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "sid" }, logger, css, "testprofile-empty", d, chatMetadata);
+
+      await service.fetchChat("conv-empty");
+
+      const saved = chatMetadata.lookup("testprofile-empty", "conv-empty");
+      expect(saved).toBeNull();
+    });
   });
 
   describe("sendMessage", () => {
@@ -654,6 +733,63 @@ describe("GeminiClientService", () => {
 
       const saved = chatMetadata.lookup("testprofile", "existing-conv-xyz");
       expect(saved).toEqual({ rid: "new-rid", rcid: "new-rcid", ctx: null });
+    });
+
+    test("sendMessage uses metadata warmed by fetchChat", async () => {
+      let sessionMetadataUsed: (string | null)[] | null = null;
+      let _meta: (string | null)[] = ["", "", "", null, null, null, null, null, null, ""];
+
+      const mockSession: RawChatSession = {
+        get cid() { return "conv-xyz"; },
+        set cid(_v: string) {},
+        get metadata() { return _meta; },
+        set metadata(v: (string | null)[]) {
+          if (!Array.isArray(v)) return;
+          _meta = [...v];
+        },
+        generateContent: async function(_opts: { prompt: string }) {
+          sessionMetadataUsed = [...this.metadata];
+          return { text: { toString: () => "model response" }, cid: "conv-xyz" };
+        },
+      };
+
+      const mockClient = {
+        cookies: { "__Secure-1PSID": "sid" },
+        init: async () => {},
+        chats: async () => [],
+        readChat: async (_cid: string) => [
+          createMockChatTurn("user", "Hello", "r_u1"),
+          createMockChatTurn("model", "Hi!", "r_m1", "rc_m1"),
+        ],
+        newChat: () => mockSession,
+        deleteChat: async () => {},
+        models: async () => [],
+      };
+
+      const d: GeminiClientDeps = {
+        Gemini: function() { return mockClient; },
+        AuthError: MockAuthError,
+        GeminiError: MockGeminiError,
+        UsageLimitExceeded: MockUsageLimitExceeded,
+        TemporarilyBlocked: MockTemporarilyBlocked,
+        ModelInvalid: MockModelInvalid,
+        APIError: MockAPIError,
+      };
+
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        testprofile: { secure_1psid: "sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const chatMetadata = new ChatMetadataStorage(logger);
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "sid" }, logger, css, "testprofile", d, chatMetadata);
+
+      await service.fetchChat("conv-xyz");
+      await service.sendMessage("conv-xyz", "continue this chat");
+
+      expect(sessionMetadataUsed).toEqual(["conv-xyz", "r_m1", "rc_m1", null, null, null, null, null, null, ""]);
     });
   });
 
