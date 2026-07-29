@@ -3,22 +3,24 @@ import { confirm } from "../utils/prompts.ts";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import { AuthenticationError } from "../../core/errors.ts";
 import {
   COMMAND_TYPES,
   type DeleteConversationCommandPayload,
   type DeleteConversationCommandResult,
 } from "../../core/command-handlers.ts";
 import { validateConversationId } from "../../infrastructure/validators.ts";
+import { resolveProfile } from "../utils/profile-resolution.ts";
 
 interface DeleteCommandOptions {
   help: boolean;
   force: boolean;
+  profile: string;
 }
 
 const DEFAULT_OPTIONS: DeleteCommandOptions = {
   help: false,
   force: false,
+  profile: "",
 };
 
 export class DeleteCommand implements CliCommand {
@@ -49,7 +51,7 @@ export class DeleteCommand implements CliCommand {
       process.exit(1);
     }
 
-    const profileName = await this.resolveProfile(context, conversationId);
+    const profileName = await resolveProfile(context, conversationId, options.profile || undefined);
 
     if (!options.force) {
       const confirmed = await this.promptConfirmation(conversationId);
@@ -84,20 +86,6 @@ export class DeleteCommand implements CliCommand {
     }
   }
 
-  private async resolveProfile(context: CliCommandContext, conversationId: string): Promise<string | null> {
-    const profiles = context.profileAuthManager.getActiveProfiles();
-    if (profiles.length <= 1) {
-      return null;
-    }
-    const profileName = await context.profileAuthManager.findProfileForConversation(conversationId);
-    if (profileName === null) {
-      throw new AuthenticationError(
-        `Could not find a profile that owns conversation '${conversationId}'. Run 'gemiterm list --all-profiles' to see which profile it belongs to, then 'gemiterm delete ${conversationId} --profile <name>' to specify the profile explicitly.`,
-      );
-    }
-    return profileName;
-  }
-
   private extractConversationId(args: string[]): string | null {
     for (const arg of args) {
       if (arg.startsWith("--") || arg.startsWith("-")) continue;
@@ -119,6 +107,10 @@ export class DeleteCommand implements CliCommand {
         case "--force":
         case "-f":
           options.force = true;
+          break;
+        case "--profile":
+        case "-p":
+          options.profile = args[++i] ?? "";
           break;
       }
     }
@@ -142,6 +134,7 @@ export class DeleteCommand implements CliCommand {
 
     const flags = [
       { flag: "--force, -f", desc: "Skip confirmation prompt" },
+      { flag: "--profile, -p <name>", desc: "Profile that owns the conversation (default: auto-discover)" },
       { flag: "--help, -h", desc: "Show this help message" },
     ];
 

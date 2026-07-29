@@ -88,7 +88,10 @@ export class ExportAllCommand implements CliCommand {
         try {
           const fetchResult = await mediator.send<FetchChatQueryResult>({
             type: QUERY_TYPES.FETCH_CHAT,
-            payload: { conversationId: chat.id } as FetchChatQueryPayload,
+            payload: {
+              conversationId: chat.id,
+              profileName: chat.profile,
+            } as FetchChatQueryPayload,
           } as Query<FetchChatQueryPayload>);
 
           const filename = this.sanitizeFilename(chat.title || chat.id);

@@ -9,17 +9,20 @@ import {
 } from "../../core/query-handlers.ts";
 import type { Message } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
+import { resolveProfile } from "../utils/profile-resolution.ts";
 
 interface FetchCommandOptions {
   help: boolean;
   format: "text" | "json";
   out: string;
+  profile: string;
 }
 
 const DEFAULT_OPTIONS: FetchCommandOptions = {
   help: false,
   format: "text",
   out: "",
+  profile: "",
 };
 
 export class FetchCommand implements CliCommand {
@@ -42,8 +45,13 @@ export class FetchCommand implements CliCommand {
       return;
     }
 
+    const profileName = await resolveProfile(context, conversationId, options.profile || undefined);
+
     const mediator: Mediator = context.mediator;
-    const query: FetchChatQueryPayload = { conversationId };
+    const query: FetchChatQueryPayload = {
+      conversationId,
+      profileName: profileName ?? undefined,
+    };
 
     logger.debug(`Sending fetch-chat query: ${JSON.stringify(query)}`);
     const result = await mediator.send<FetchChatQueryResult>({
@@ -138,6 +146,10 @@ export class FetchCommand implements CliCommand {
         case "-o":
           options.out = args[++i] ?? "";
           break;
+        case "--profile":
+        case "-p":
+          options.profile = args[++i] ?? "";
+          break;
       }
     }
 
@@ -160,6 +172,7 @@ export class FetchCommand implements CliCommand {
     const flags = [
       { flag: "--format, -f <fmt>", desc: "Output format: text, json (default: text)" },
       { flag: "--out, -o <path>", desc: "Write output to file" },
+      { flag: "--profile, -p <name>", desc: "Profile that owns the conversation (default: auto-discover)" },
       { flag: "--help, -h", desc: "Show this help message" },
     ];
 

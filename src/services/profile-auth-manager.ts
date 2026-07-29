@@ -48,7 +48,7 @@ export class ProfileAuthManager {
   }
 
   async findProfileForConversation(conversationId: string): Promise<string | null> {
-    const profiles = this.profileManager.list();
+    const profiles = this.getActiveProfiles();
     for (const name of profiles) {
       try {
         const hasConversation = await this.geminiClient.profileHasConversation(name, conversationId);

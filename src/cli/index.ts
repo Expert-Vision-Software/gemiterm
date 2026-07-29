@@ -85,11 +85,13 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
     async listChats(options) { return getGeminiClient().listChats(options); },
     async fetchChat(id) { return getGeminiClient().fetchChat(id); },
     async listModels() { return getGeminiClient().listModels(); },
+    forProfile(name) { return getGeminiClient().forProfile(name); },
   }));
   mediator.registerQueryHandler(new ListModelsQueryHandler({
     async listChats(options) { return getGeminiClient().listChats(options); },
     async fetchChat(id) { return getGeminiClient().fetchChat(id); },
     async listModels() { return getGeminiClient().listModels(); },
+    forProfile(name) { return getGeminiClient().forProfile(name); },
   }));
   mediator.registerCommandHandler(new AuthenticateCommandHandler(null as any));
   mediator.registerCommandHandler(new DeleteProfileCommandHandler(null as any));

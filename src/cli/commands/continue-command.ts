@@ -2,7 +2,6 @@ import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import { AuthenticationError } from "../../core/errors.ts";
 import {
   COMMAND_TYPES,
   type SendMessageCommandPayload,
@@ -13,15 +12,18 @@ import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interact
 import { checkArgLength } from "../utils/long-arg-guard.ts";
 import { loadPromptFromFile, spillOverToTempFile } from "../utils/prompt-file.ts";
 import { removeFile } from "../../infrastructure/io.ts";
+import { resolveProfile } from "../utils/profile-resolution.ts";
 
 interface ContinueCommandOptions {
   help: boolean;
   promptFile: string | null;
+  profile: string | null;
 }
 
 const DEFAULT_OPTIONS: ContinueCommandOptions = {
   help: false,
   promptFile: null,
+  profile: null,
 };
 
 export class ContinueCommand implements CliCommand {
@@ -76,6 +78,8 @@ export class ContinueCommand implements CliCommand {
       return;
     }
 
+    const profileName = await resolveProfile(context, conversationId, options.profile ?? undefined);
+
     let effectivePromptFile: string | null = null;
     let isSpillover = false;
     if (options.promptFile) {
@@ -113,9 +117,9 @@ export class ContinueCommand implements CliCommand {
     const mediator: Mediator = context.mediator;
 
     if (message) {
-      await this.sendNonInteractive(mediator, conversationId, message, logger, context);
+      await this.sendNonInteractive(mediator, conversationId, message, logger, context, profileName);
     } else {
-      await this.startInteractive(mediator, conversationId, logger, context);
+      await this.startInteractive(mediator, conversationId, logger, context, profileName);
     }
   }
 
@@ -124,9 +128,9 @@ export class ContinueCommand implements CliCommand {
     conversationId: string,
     message: string,
     logger: Logger,
-    context: CliCommandContext,
+    _context: CliCommandContext,
+    profileName: string | null,
   ): Promise<void> {
-    const profileName = await this.resolveProfile(context, conversationId);
     logger.debug(`Sending message to ${conversationId}`);
     const result = await mediator.send<SendMessageCommandResult>({
       type: COMMAND_TYPES.SEND_MESSAGE,
@@ -137,29 +141,14 @@ export class ContinueCommand implements CliCommand {
     console.log(result.response);
   }
 
-  private async resolveProfile(context: CliCommandContext, conversationId: string): Promise<string | null> {
-    const profiles = context.profileAuthManager.getActiveProfiles();
-    if (profiles.length <= 1) {
-      return null;
-    }
-    const profileName = await context.profileAuthManager.findProfileForConversation(conversationId);
-    if (profileName === null) {
-      throw new AuthenticationError(
-        `Could not find a profile that owns conversation '${conversationId}'. Run 'gemiterm list --all-profiles' to see which profile it belongs to, then 'gemiterm continue ${conversationId} <msg> --profile <name>' to specify the profile explicitly.`,
-      );
-    }
-    return profileName;
-  }
-
   private async startInteractive(
     mediator: Mediator,
     conversationId: string,
     logger: Logger,
-    context: CliCommandContext,
+    _context: CliCommandContext,
+    profileName: string | null,
   ): Promise<void> {
-    const profileName = await this.resolveProfile(context, conversationId);
-
-    await this.printLastMessage(mediator, conversationId);
+    await this.printLastMessage(mediator, conversationId, profileName);
 
     const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
       logger.debug(`Sending message to ${conversationId}`);
@@ -177,10 +166,11 @@ export class ContinueCommand implements CliCommand {
   private async printLastMessage(
     mediator: Mediator,
     conversationId: string,
+    profileName: string | null,
   ): Promise<void> {
     const chatResult = await mediator.send<FetchChatQueryResult>({
       type: QUERY_TYPES.FETCH_CHAT,
-      payload: { conversationId },
+      payload: { conversationId, profileName: profileName ?? undefined },
     });
 
     const messages = chatResult.messages ?? [];
@@ -222,6 +212,15 @@ export class ContinueCommand implements CliCommand {
           console.error(chalk.red(`Error: --prompt-file requires a path`));
           process.exit(1);
         }
+      } else if (arg === "--profile" || arg === "-p") {
+        const next = args[i + 1];
+        if (next && !next.startsWith("-")) {
+          options.profile = next;
+          i++;
+        } else {
+          console.error(chalk.red(`Error: --profile requires a profile name`));
+          process.exit(1);
+        }
       }
     }
 
@@ -241,9 +240,12 @@ export class ContinueCommand implements CliCommand {
     console.log("");
     console.log(chalk.bold("Options:"));
     console.log(
-      `  ${chalk.cyan("--prompt-file, -f <path>".padEnd(22))}${chalk.dim("Read the message from a file (bypasses the 2048 code unit arg limit)")}`,
+      `  ${chalk.cyan("--prompt-file, -f <path>".padEnd(26))}${chalk.dim("Read the message from a file (bypasses the 2048 code unit arg limit)")}`,
     );
-    console.log(`  ${chalk.cyan("--help, -h".padEnd(22))}${chalk.dim("Show this help message")}`);
+    console.log(
+      `  ${chalk.cyan("--profile, -p <name>".padEnd(26))}${chalk.dim("Profile that owns the conversation (default: auto-discover)")}`,
+    );
+    console.log(`  ${chalk.cyan("--help, -h".padEnd(26))}${chalk.dim("Show this help message")}`);
     console.log("");
     console.log(chalk.dim("If no conversation_id is provided, the list command will be invoked."));
     console.log(chalk.dim("If no message is provided, an interactive chat session will start."));
