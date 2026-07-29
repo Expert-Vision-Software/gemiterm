@@ -27,7 +27,7 @@ export interface GeminiClientDeps {
 let _realDeps: GeminiClientDeps | undefined;
 function getRealDeps(): GeminiClientDeps {
   if (!_realDeps) {
-    _realDeps = require("gemini-reverse") as GeminiClientDeps;
+    _realDeps = require("gemini-web-sdk") as GeminiClientDeps;
   }
   return _realDeps!;
 }
