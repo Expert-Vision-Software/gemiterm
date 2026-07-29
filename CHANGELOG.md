@@ -1,3 +1,17 @@
+## [2.4.0-rc.5] - 2026-07-29
+
+### Fixed
+
+- `gemiterm fetch <cid>` and `gemiterm export <cid>` now resolve the profile that owns a conversation instead of always querying the default profile. Previously, any conversation belonging to a non-default profile was fetched with the default profile's cookies, so Gemini returned an empty history and the CLI printed "No messages found." despite the conversation having messages. Both commands now auto-discover the owning profile across all valid profiles (mirroring `continue`/`delete`), and accept a new `-p, --profile <name>` flag to specify the profile explicitly.
+- `gemiterm export-all --all-profiles` now fetches each conversation with its own profile. The listing step already enumerated chats across profiles, but the per-conversation fetch loop discarded the profile and queried the default profile, so non-default conversations exported as empty files (silently counted as OK). Each chat is now fetched with its already-known `profile`.
+- `gemiterm continue` and `gemiterm delete` now accept a `-p, --profile <name>` flag, making their existing error messages (which referenced `--profile`) truthful. An explicit profile short-circuits auto-discovery.
+
+### Changed
+
+- `ProfileAuthManager.findProfileForConversation` now probes only valid (active) profiles rather than all configured profiles, matching the "configured & valid" intent and avoiding wasted network calls on profiles with expired sessions.
+
+---
+
 ## [2.4.0-rc.4] - 2026-07-28
 
 ### Fixed
