@@ -27,7 +27,7 @@ export interface GeminiClientDeps {
 let _realDeps: GeminiClientDeps | undefined;
 function getRealDeps(): GeminiClientDeps {
   if (!_realDeps) {
-    _realDeps = require("gemini-reverse") as GeminiClientDeps;
+    _realDeps = require("gemini-web-sdk") as GeminiClientDeps;
   }
   return _realDeps!;
 }
@@ -47,6 +47,8 @@ interface RawChatRow {
 interface RawChatTurn {
   role: string;
   text: string;
+  rid?: string;
+  rcid?: string;
 }
 
 interface RawAvailableModel {
@@ -267,6 +269,16 @@ export class GeminiClientService
     try {
       const raw = (await this.client!.readChat(conversationId)) as RawChatTurn[] | null;
       const turns = raw ?? [];
+      if (turns.length > 0) {
+        const lastModelTurn = [...turns].reverse().find((t) => t.role === "model");
+        if (lastModelTurn?.rid && this.profileName) {
+          this.chatMetadata.save(this.profileName, conversationId, {
+            rid: lastModelTurn.rid,
+            rcid: lastModelTurn.rcid ?? "",
+            ctx: null,
+          });
+        }
+      }
       const messages = turns.length === 0 ? [] : this.toDomainMessages(turns, conversationId);
       this.persistRefreshedCookies();
       return messages;
@@ -290,8 +302,10 @@ export class GeminiClientService
   }
 
   private buildSession(conversationId: string, metadata?: (string | null)[]): RawChatSession {
-    const session = this.client!.newChat(metadata ? { metadata } : undefined);
-    if (!metadata && conversationId) {
+    const session = this.client!.newChat();
+    if (metadata) {
+      session.metadata = metadata;
+    } else if (conversationId) {
       session.cid = conversationId;
     }
     return session;

@@ -1,3 +1,15 @@
+## [2.4.0-rc.6] - 2026-07-29
+
+### Changed
+
+- Switch from `gemini-reverse` to `gemini-web-sdk@^2.2.0` as the underlying Gemini client library. The new package includes the `rid`/`rcid` exposure fix that enables proper conversation continuation via `gemiterm continue`.
+
+### Fixed
+
+- `gemiterm continue <cid>` now warms conversation metadata on `fetchChat`, so subsequent `sendMessage` calls correctly resume the conversation instead of starting a new one. Previously, metadata was only persisted after `sendMessage` response, missing the warming step needed when `continue` is used standalone.
+
+---
+
 ## [2.4.0-rc.5] - 2026-07-29
 
 ### Fixed

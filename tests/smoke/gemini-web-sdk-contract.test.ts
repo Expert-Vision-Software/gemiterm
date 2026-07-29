@@ -1,15 +1,15 @@
 import { describe, test, expect, mock, beforeAll } from "bun:test";
 
-let realGeminiReverse: typeof import("gemini-reverse");
+let realGeminiReverse: typeof import("gemini-web-sdk");
 
 beforeAll(async () => {
   mock.restore();
-  realGeminiReverse = await import("gemini-reverse");
-  console.log("[DEBUG] Contract test imported gemini-reverse");
+  realGeminiReverse = await import("gemini-web-sdk");
+  console.log("[DEBUG] Contract test imported gemini-web-sdk");
   console.log("[DEBUG] Gemini.prototype.init:", typeof (realGeminiReverse.Gemini.prototype as any).init);
 });
 
-describe("gemini-reverse surface contract (2.1.0)", () => {
+describe("gemini-web-sdk surface contract (2.2.0)", () => {
   describe("named exports exist and are the right kind", () => {
     test("Gemini is a constructible function", () => {
       expect(realGeminiReverse.Gemini).toBeDefined();

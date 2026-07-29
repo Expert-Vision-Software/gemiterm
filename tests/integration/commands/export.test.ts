@@ -275,25 +275,35 @@ describe("export command integration", () => {
     test("auto-discovers owning profile and forwards profileName into FETCH_CHAT payload", async () => {
       (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
       (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
+      const outputPath = join(tmpdir(), `export-multi-profile-${Date.now()}.md`);
 
-      await command.execute(["conv-evs"], context);
+      try {
+        await command.execute(["conv-evs", "--out", outputPath], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.type).toBe(QUERY_TYPES.FETCH_CHAT);
-      expect(sentQuery.payload.conversationId).toBe("conv-evs");
-      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+        expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+        const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+        expect(sentQuery.type).toBe(QUERY_TYPES.FETCH_CHAT);
+        expect(sentQuery.payload.conversationId).toBe("conv-evs");
+        expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+      } finally {
+        if (existsSync(outputPath)) unlinkSync(outputPath);
+      }
     });
 
     test("--profile overrides auto-discovery", async () => {
       (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
       (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("dhb-work");
+      const outputPath = join(tmpdir(), `export-override-${Date.now()}.md`);
 
-      await command.execute(["conv-x", "--profile", "evs-diegohb"], context);
+      try {
+        await command.execute(["conv-x", "--profile", "evs-diegohb", "--out", outputPath], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
-      expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
+        const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
+        expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+        expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
+      } finally {
+        if (existsSync(outputPath)) unlinkSync(outputPath);
+      }
     });
   });
 });
