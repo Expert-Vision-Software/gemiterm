@@ -1,62 +1,28 @@
-## [2.4.0-rc.6] - 2026-07-29
-
-### Changed
-
-- Switch from `gemini-reverse` to `gemini-web-sdk@^2.2.0` as the underlying Gemini client library. The new package includes the `rid`/`rcid` exposure fix that enables proper conversation continuation via `gemiterm continue`.
-
-### Fixed
-
-- `gemiterm continue <cid>` now warms conversation metadata on `fetchChat`, so subsequent `sendMessage` calls correctly resume the conversation instead of starting a new one. Previously, metadata was only persisted after `sendMessage` response, missing the warming step needed when `continue` is used standalone.
-
----
-
-## [2.4.0-rc.5] - 2026-07-29
-
-### Fixed
-
-- `gemiterm fetch <cid>` and `gemiterm export <cid>` now resolve the profile that owns a conversation instead of always querying the default profile. Previously, any conversation belonging to a non-default profile was fetched with the default profile's cookies, so Gemini returned an empty history and the CLI printed "No messages found." despite the conversation having messages. Both commands now auto-discover the owning profile across all valid profiles (mirroring `continue`/`delete`), and accept a new `-p, --profile <name>` flag to specify the profile explicitly.
-- `gemiterm export-all --all-profiles` now fetches each conversation with its own profile. The listing step already enumerated chats across profiles, but the per-conversation fetch loop discarded the profile and queried the default profile, so non-default conversations exported as empty files (silently counted as OK). Each chat is now fetched with its already-known `profile`.
-- `gemiterm continue` and `gemiterm delete` now accept a `-p, --profile <name>` flag, making their existing error messages (which referenced `--profile`) truthful. An explicit profile short-circuits auto-discovery.
-
-### Changed
-
-- `ProfileAuthManager.findProfileForConversation` now probes only valid (active) profiles rather than all configured profiles, matching the "configured & valid" intent and avoiding wasted network calls on profiles with expired sessions.
-
----
-
-## [2.4.0-rc.4] - 2026-07-28
-
-### Fixed
-
-- `gemiterm continue <cid>` now restores chat context across sessions. When resuming a conversation, gemiterm now looks up the stored `rid`/`rcid` metadata and passes it to `session.metadata` before sending, so Gemini retains the full conversation thread instead of starting a new one.
-- `gemiterm continue <cid>` in interactive mode now prints the last model response before the prompt, so users can recall what was said before typing their continuation.
-- Auth and browser launch now fail with a clear install message (`"Playwright CLI not found..."`) when neither `playwright-cli` nor `bunx @playwright/cli` is available, instead of silently producing no browser or an opaque error.
+## [2.4.0] - 2026-07-29
 
 ### Added
 
 - "Continue conversation" action in the `gemiterm list -i` interactive browser action menu, letting you resume a chat directly from the list without copy-pasting the ID.
 - `ChatMetadataStorage` service for persisting chat `rid`/`rcid`/`ctx` metadata per profile, used by `continue` to restore session context.
-
----
-
-## [2.4.0-rc.2] - 2026-07-26
-
-### Added
-
 - "Last Used" column in the profile table (`gemiterm auth --list`, `gemiterm status`) showing when each profile's `storage_state.json` was last written — i.e. the last `auth` capture or refreshed-cookie persist. Makes the session-keep-alive from the cookie-persistence fix observable: the timestamp advances each time a command refreshes the profile's cookies.
-
-### Fixed
-
-- Persist refreshed Gemini session cookies (`__Secure-1PSID` / `__Secure-1PSIDTS`) back to the active profile's storage after successful API operations. The `gemini-reverse` 2.1.0 upgrade removed the library's explicit cookie-rotation path, leaving passive `set-cookie` merging (in `client.init()`) as the only refresh mechanism — but gemiterm never wrote those refreshed values back, so the on-disk `__Secure-1PSIDTS` went stale across runs and sessions expired within days of auth. `GeminiClientService` now detects changed cookie values after `init`/`listChats`/`fetchChat`/`sendMessage`/`startNewChat`/`deleteChat`/`listModels`, merges them into the profile's stored cookie list (preserving each entry's domain/path/httpOnly/secure/sameSite, refreshing `expires`), and saves via a new `CookieStorageService.saveCookiesForProfile` seam. Persistence is failure-isolated (logs at debug, never breaks the operation) and skipped for the CLI's non-profile factory client and when values are unchanged.
-
----
-
-## [2.4.0-rc.1] - 2026-07-26
 
 ### Changed
 
+- Switch from `gemini-reverse` to `gemini-web-sdk@^2.2.0` as the underlying Gemini client library. The new package includes the `rid`/`rcid` exposure fix that enables proper conversation continuation via `gemiterm continue`.
+- `ProfileAuthManager.findProfileForConversation` now probes only valid (active) profiles rather than all configured profiles, matching the "configured & valid" intent and avoiding wasted network calls on profiles with expired sessions.
 - Upgrade `gemini-reverse` from `~1.0.12` to `2.1.0` (exact pin, following the policy established in issue #5 — upstream broke the public API in a 1.x minor and ships no tests or changelog; exact pin + surface contract tests make every future upgrade a deliberate act).
 - `gemiterm models` output now shows `model_name` identifiers (e.g. `gemini-3-pro`) rather than `display_name` tier labels (e.g. `Basic Pro`) when `model_name` is present, reflecting the static Gemini 3 catalog in 2.1.0 vs the prior account-probed registry.
+
+### Fixed
+
+- `gemiterm continue <cid>` now warms conversation metadata on `fetchChat`, so subsequent `sendMessage` calls correctly resume the conversation instead of starting a new one. Previously, metadata was only persisted after `sendMessage` response, missing the warming step needed when `continue` is used standalone.
+- `gemiterm fetch <cid>` and `gemiterm export <cid>` now resolve the profile that owns a conversation instead of always querying the default profile. Previously, any conversation belonging to a non-default profile was fetched with the default profile's cookies, so Gemini returned an empty history and the CLI printed "No messages found." despite the conversation having messages. Both commands now auto-discover the owning profile across all valid profiles (mirroring `continue`/`delete`), and accept a new `-p, --profile <name>` flag to specify the profile explicitly.
+- `gemiterm export-all --all-profiles` now fetches each conversation with its own profile. The listing step already enumerated chats across profiles, but the per-conversation fetch loop discarded the profile and queried the default profile, so non-default conversations exported as empty files (silently counted as OK). Each chat is now fetched with its already-known `profile`.
+- `gemiterm continue` and `gemiterm delete` now accept a `-p, --profile <name>` flag, making their existing error messages (which referenced `--profile`) truthful. An explicit profile short-circuits auto-discovery.
+- `gemiterm continue <cid>` now restores chat context across sessions. When resuming a conversation, gemiterm now looks up the stored `rid`/`rcid` metadata and passes it to `session.metadata` before sending, so Gemini retains the full conversation thread instead of starting a new one.
+- `gemiterm continue <cid>` in interactive mode now prints the last model response before the prompt, so users can recall what was said before typing their continuation.
+- Auth and browser launch now fail with a clear install message (`"Playwright CLI not found..."`) when neither `playwright-cli` nor `bunx @playwright/cli` is available, instead of silently producing no browser or an opaque error.
+- Persist refreshed Gemini session cookies (`__Secure-1PSID` / `__Secure-1PSIDTS`) back to the active profile's storage after successful API operations. The `gemini-reverse` 2.1.0 upgrade removed the library's explicit cookie-rotation path, leaving passive `set-cookie` merging (in `client.init()`) as the only refresh mechanism — but gemiterm never wrote those refreshed values back, so the on-disk `__Secure-1PSIDTS` went stale across runs and sessions expired within days of auth. `GeminiClientService` now detects changed cookie values after `init`/`listChats`/`fetchChat`/`sendMessage`/`startNewChat`/`deleteChat`/`listModels`, merges them into the profile's stored cookie list (preserving each entry's domain/path/httpOnly/secure/sameSite, refreshing `expires`), and saves via a new `CookieStorageService.saveCookiesForProfile` seam. Persistence is failure-isolated (logs at debug, never breaks the operation) and skipped for the CLI's non-profile factory client and when values are unchanged.
 
 ### Internal
 
