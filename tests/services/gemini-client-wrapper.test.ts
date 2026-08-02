@@ -1206,9 +1206,36 @@ describe("GeminiClientService", () => {
       await expect(service.profileHasConversation("work", "abc-123")).rejects.toThrow("Session expired or invalid");
     });
 
-    test("passes limit to listChats for targeted lookup", async () => {
+    test("passes limit:1 to listChats for targeted lookup", async () => {
       const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
         work: { secure_1psid: "work-sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+      let capturedOptions: { limit?: number; offset?: number; search?: string } | undefined;
+      const d = installGeminiReverseMock({
+        chats: [createMockChatRow({ cid: "abc-123" })],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const originalListChats = GeminiClientService.prototype.listChats;
+      GeminiClientService.prototype.listChats = function(options: { limit?: number }) {
+        capturedOptions = options;
+        return originalListChats.call(this, options);
+      };
+
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
+
+      await service.profileHasConversation("work", "abc-123");
+
+      GeminiClientService.prototype.listChats = originalListChats;
+      expect(capturedOptions?.limit).toBe(1);
+    });
+
+    test("does not mutate the calling instance's cookie config", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        work: { secure_1psid: "work-sid", secure_1psidts: "work-ts" },
       };
       const storage = createMockCookieStorage(profileCookies);
       const css = new CookieStorageService({ cookieStorage: storage, logger });
@@ -1218,11 +1245,13 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
+      const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, "main", d);
+      const authBefore = service.isAuthenticated();
 
-      const result = await service.profileHasConversation("work", "abc-123");
+      await service.profileHasConversation("work", "abc-123");
 
-      expect(result).toBe(true);
+      const authAfter = service.isAuthenticated();
+      expect(authBefore).toBe(authAfter);
     });
   });
 

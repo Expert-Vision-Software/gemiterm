@@ -94,43 +94,40 @@ export class ListChatsQueryHandler
     const client = this.getGeminiClient();
 
     let chats: ChatInfo[];
-    try {
-      if (profile) {
-        chats = await client.forProfile(profile).listChats(options);
-      } else if (allProfiles) {
-        const allProfilesList = this.profileManager.list();
-        const authenticated = allProfilesList.filter((name) => {
-          const valid = this.profileManager.hasValidCookies(name);
-          if (!valid) {
-            this.logger.warn(`Skipping unauthenticated profile '${name}'`);
-          }
-          return valid;
-        });
-
-        if (authenticated.length === 0) {
-          chats = [];
-        } else {
-          const results = await Promise.allSettled(
-            authenticated.map((name) => client.forProfile(name).listChats(options)),
-          );
-          chats = [];
-          for (const result of results) {
-            if (result.status === "fulfilled") {
-              chats.push(...result.value);
-            } else {
-              const err = result.reason as Error;
-              const profileName = result.reason?.profileName ?? "unknown";
-              this.logger.warn(`Failed to list chats for profile '${profileName}': ${err.message}`);
-            }
-          }
-          chats.sort((a, b) => b.timestamp - a.timestamp);
+    if (profile) {
+      chats = await client.forProfile(profile).listChats(options);
+    } else if (allProfiles) {
+      const allProfilesList = this.profileManager.list();
+      const authenticated = allProfilesList.filter((name) => {
+        const valid = this.profileManager.hasValidCookies(name);
+        if (!valid) {
+          this.logger.warn(`Skipping unauthenticated profile '${name}'`);
         }
+        return valid;
+      });
+
+      if (authenticated.length === 0) {
+        chats = [];
       } else {
-        chats = await client.listChats(options);
+        const results = await Promise.allSettled(
+          authenticated.map((name) =>
+            client.forProfile(name).listChats(options),
+          ),
+        );
+        chats = [];
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          if (result.status === "fulfilled") {
+            chats.push(...result.value);
+          } else {
+            const err = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
+            this.logger.warn(`Failed to list chats for profile '${authenticated[i]}': ${err.message}`);
+          }
+        }
+        chats.sort((a, b) => b.timestamp - a.timestamp);
       }
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      throw err;
+    } else {
+      chats = await client.listChats(options);
     }
     return { chats };
   }
