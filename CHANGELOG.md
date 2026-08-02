@@ -1,3 +1,27 @@
+## [2.5.0] - 2026-08-02
+
+### Added
+
+- **`gemiterm login`** now automatically extends an existing session silently before it expires, rather than requiring manual re-authentication. `AuthService.silentRefresh()` launches a headless browser, loads stored cookies, and waits for Gemini to merge refreshed session cookies (via `__Secure-1PSIDTS`). If silent refresh succeeds, the command completes without a browser window appearing.
+- Interactive re-authentication flow (`gemiterm login` or any command) now prompts with `"Session for profile 'X' has expired. Would you like to launch browser to re-authenticate?"` instead of immediately failing. Answers `y`/`yes` launch the browser; `n`/`no` or `Ctrl+C` re-throws the original `AuthenticationError`.
+- `ProfileAuthManager.ensureAuthenticated()` is now `async` and orchestrates the silent-refresh → reauth-prompt chain before surfacing an error to callers.
+
+### Changed
+
+- Cookie freshness threshold reduced from **7 days to 1 hour**. Sessions approaching the 1-hour window before `__Secure-1PSIDTS` expiry are treated as stale, triggering silent refresh on next command invocation. `ProfileManager.getStatus()` now reflects near-expiry state (`isActive: false` with `reason: "session_stale"`).
+- `gemiterm list --all-profiles` now filters out unauthenticated profiles before calling `listChats`, preventing stale-profile errors from contaminating results across all profiles. Results are collected via `Promise.allSettled` so one profile's failure does not block others.
+- `gemiterm list` throws `GemitermError("Gemini returned no data — session may be expired")` instead of returning an empty list when the SDK returns `null`/`undefined` from `chats()`.
+- `profileHasConversation` now propagates errors from `listChats` (e.g. auth failures) instead of swallowing them and returning `false`.
+
+### Internal
+
+- New `src/cli/utils/reauth.ts` facades `AuthService` + inquirer `confirm` for testability.
+- `src/cli/index.ts` `setupMediator` refactored: `getGeminiClient()` is now `async`, uses `ProfileAuthManager.ensureAuthenticated()` for all auth decisions, and shares a single `clientService` interface across `FetchChatQueryHandler` / `ListModelsQueryHandler`.
+- `CookieStorageService` and `GeminiClientService` cookie-merge paths no longer overwrite the `expires` field of stored cookies, preserving the original expiry set by the browser during auth.
+- Added `PlaywrightCliDriver.openHeadless()` for headless browser launches used by silent refresh.
+
+---
+
 ## [2.4.2] - 2026-08-01
 
 ### Added
