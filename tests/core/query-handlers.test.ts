@@ -36,7 +36,7 @@ describe("ListChatsQueryHandler", () => {
       error: () => {},
     } as Logger;
     mockProfileManager = {
-      hasValidCookies: mock(() => true),
+      hasStoredCookies: mock(() => true),
       list: mock(() => ["work", "personal", "test"]),
     };
   });
@@ -126,7 +126,7 @@ describe("ListChatsQueryHandler", () => {
   test("allProfiles filters out unauthenticated profiles", async () => {
     const chats = [{ id: "1", title: "Chat", isPinned: false, timestamp: 1000 }];
     mockClient.listChats = mock(() => Promise.resolve(chats));
-    mockProfileManager.hasValidCookies = mock((name: string) => name !== "personal");
+    mockProfileManager.hasStoredCookies = mock((name: string) => name !== "personal");
     mockProfileManager.list = mock(() => ["work", "personal", "test"]);
 
     const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
@@ -139,7 +139,7 @@ describe("ListChatsQueryHandler", () => {
   });
 
   test("allProfiles with no authenticated profiles returns empty chats", async () => {
-    mockProfileManager.hasValidCookies = mock(() => false);
+    mockProfileManager.hasStoredCookies = mock(() => false);
     mockProfileManager.list = mock(() => ["work", "personal"]);
 
     const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
@@ -152,6 +152,21 @@ describe("ListChatsQueryHandler", () => {
       "Skipping unauthenticated profile 'work'",
       "Skipping unauthenticated profile 'personal'",
     ]);
+  });
+
+  test("allProfiles includes profiles with near-expiry cookies (no freshness gate for listing)", async () => {
+    const chats = [{ id: "1", title: "Chat", isPinned: false, timestamp: 1000 }];
+    mockClient.listChats = mock(() => Promise.resolve(chats));
+    mockProfileManager.hasStoredCookies = mock(() => true);
+    mockProfileManager.list = mock(() => ["work", "personal"]);
+
+    const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
+    const result = await handler.handle(
+      makeQuery(QUERY_TYPES.LIST_CHATS, { allProfiles: true }),
+    );
+
+    expect(result.chats).toHaveLength(2);
+    expect(warnCalls).toEqual([]);
   });
 
   test("allProfiles with allSettled — partial results on one profile failure", async () => {
@@ -174,7 +189,7 @@ describe("ListChatsQueryHandler", () => {
       return personalClient as any;
     });
 
-    mockProfileManager.hasValidCookies = mock(() => true);
+    mockProfileManager.hasStoredCookies = mock(() => true);
     mockProfileManager.list = mock(() => ["work", "test", "personal"]);
 
     const handler = new ListChatsQueryHandler(
@@ -194,7 +209,7 @@ describe("ListChatsQueryHandler", () => {
   });
 
   test("allProfiles where all profiles reject returns empty chats with warnings", async () => {
-    mockProfileManager.hasValidCookies = mock(() => true);
+    mockProfileManager.hasStoredCookies = mock(() => true);
     mockProfileManager.list = mock(() => ["work", "personal"]);
 
     const forProfileSpy = mock((_name: string) => ({
@@ -232,7 +247,7 @@ describe("ListChatsQueryHandler", () => {
       makeQuery(QUERY_TYPES.LIST_CHATS, { profile: "work" }),
     )).rejects.toThrow("Profile-specific API failure");
 
-    expect(mockProfileManager.hasValidCookies).not.toHaveBeenCalled();
+    expect(mockProfileManager.hasStoredCookies).not.toHaveBeenCalled();
   });
 });
 

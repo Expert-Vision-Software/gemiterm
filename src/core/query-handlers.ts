@@ -70,7 +70,7 @@ export interface IProfileQueryService {
 }
 
 export interface ProfileManagerForQuery {
-  hasValidCookies(name: string): boolean;
+  hasStoredCookies(name: string): boolean;
   list(): string[];
 }
 
@@ -99,11 +99,11 @@ export class ListChatsQueryHandler
     } else if (allProfiles) {
       const allProfilesList = this.profileManager.list();
       const authenticated = allProfilesList.filter((name) => {
-        const valid = this.profileManager.hasValidCookies(name);
-        if (!valid) {
+        const stored = this.profileManager.hasStoredCookies(name);
+        if (!stored) {
           this.logger.warn(`Skipping unauthenticated profile '${name}'`);
         }
-        return valid;
+        return stored;
       });
 
       if (authenticated.length === 0) {

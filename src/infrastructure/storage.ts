@@ -193,9 +193,26 @@ export class ProfileManager {
   }
 
   hasValidCookies(profileName: string): boolean {
+    return this.hasValidStoredCookies(profileName) && this.hasFreshCookies(profileName);
+  }
+
+  hasStoredCookies(profileName: string): boolean {
+    return this.hasValidStoredCookies(profileName);
+  }
+
+  private hasValidStoredCookies(profileName: string): boolean {
     try {
       const cookies = this.cookieStorage.load(profileName);
-      return validateCookies(cookies) && checkCookieFreshness(cookies);
+      return validateCookies(cookies);
+    } catch {
+      return false;
+    }
+  }
+
+  private hasFreshCookies(profileName: string): boolean {
+    try {
+      const cookies = this.cookieStorage.load(profileName);
+      return checkCookieFreshness(cookies);
     } catch {
       return false;
     }

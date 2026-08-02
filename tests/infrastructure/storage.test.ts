@@ -402,6 +402,46 @@ describe("ProfileManager", () => {
     expect(manager.hasValidCookies("nope")).toBe(false);
   });
 
+  test("hasStoredCookies returns true for fresh cookies", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    storage.save("fresh", makeValidCookies());
+
+    expect(mgr.hasStoredCookies("fresh")).toBe(true);
+  });
+
+  test("hasStoredCookies returns true for near-expiry cookies (no freshness gate)", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    storage.save("near-expiry", makeNearExpiryCookies());
+
+    expect(mgr.hasStoredCookies("near-expiry")).toBe(true);
+  });
+
+  test("hasStoredCookies returns false for expired cookies missing required cookie names", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    const partialCookies: Cookie[] = [
+      {
+        name: "__Secure-1PSID",
+        value: "only-psid",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ];
+    storage.save("partial", partialCookies);
+
+    expect(mgr.hasStoredCookies("partial")).toBe(false);
+  });
+
+  test("hasStoredCookies returns false for missing profile", () => {
+    expect(manager.hasStoredCookies("nope")).toBe(false);
+  });
+
   test("loadCookiesForApi returns cookie values", () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);

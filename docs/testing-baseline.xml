@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <TestingBaseline>
     <Metadata>
-        <LastUpdated>2026-08-02T12:40:00Z</LastUpdated>
+        <LastUpdated>2026-08-02T12:55:00Z</LastUpdated>
         <BaselineId>BL-004</BaselineId>
         <Framework>Bun + TypeScript CLI</Framework>
     </Metadata>
@@ -10,12 +10,12 @@
         <UnitTests>
             <Framework>bun test</Framework>
             <TestFiles>53</TestFiles>
-            <Passed>863</Passed>
+            <Passed>868</Passed>
             <Failed>0</Failed>
             <Skipped>2</Skipped>
-            <Total>865</Total>
-            <Duration>11.95</Duration>
-            <ExpectCalls>1758</ExpectCalls>
+            <Total>870</Total>
+            <Duration>11.80</Duration>
+            <ExpectCalls>1764</ExpectCalls>
         </UnitTests>
         <IntegrationTests>
             <Framework>bun test</Framework>
