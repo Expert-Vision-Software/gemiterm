@@ -1,3 +1,12 @@
+## [2.4.1] - 2026-08-01
+
+### Added
+
+- Add GitHub stars badge to README.
+- Add `keywords` to package.json (agent-tools, ai, cli, gemini-api).
+
+---
+
 ## [2.4.0] - 2026-07-29
 
 ### Added
