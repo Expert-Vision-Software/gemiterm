@@ -1,3 +1,11 @@
+## [Unreleased]
+
+### Added
+
+- Phantom-authentication regression suite (`tests/services/phantom-auth.test.ts`) that locks the post-2h silent-empty-list symptom at the `ProfileAuthManager` seam.
+
+---
+
 ## [2.5.0] - 2026-08-02
 
 ### Added

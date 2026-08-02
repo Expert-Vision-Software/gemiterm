@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <TestingBaseline>
     <Metadata>
-        <LastUpdated>2026-08-02T12:55:00Z</LastUpdated>
+        <LastUpdated>2026-08-02T23:10:00Z</LastUpdated>
         <BaselineId>BL-004</BaselineId>
         <Framework>Bun + TypeScript CLI</Framework>
     </Metadata>
@@ -9,11 +9,11 @@
     <Solution>
         <UnitTests>
             <Framework>bun test</Framework>
-            <TestFiles>53</TestFiles>
+            <TestFiles>54</TestFiles>
             <Passed>868</Passed>
-            <Failed>0</Failed>
+            <Failed>5</Failed>
             <Skipped>2</Skipped>
-            <Total>870</Total>
+            <Total>875</Total>
             <Duration>11.80</Duration>
             <ExpectCalls>1764</ExpectCalls>
         </UnitTests>
@@ -90,6 +90,12 @@
     </Dependencies>
 
     <Changelog>
+        <Entry>
+            <BaselineId>BL-005</BaselineId>
+            <Date>2026-08-02</Date>
+            <Changes>Updated baseline: 868 unit pass, 5 fail (phantom-auth regression suite, expected against pre-fix code), 2 skip, 875 total, 54 files</Changes>
+            <Reason>Added phantom-auth regression suite (tests/services/phantom-auth.test.ts); 5 new tests lock the post-2h silent-empty-list symptom at ProfileAuthManager + GeminiClientService seam</Reason>
+        </Entry>
         <Entry>
             <BaselineId>BL-004</BaselineId>
             <Date>2026-08-02</Date>
