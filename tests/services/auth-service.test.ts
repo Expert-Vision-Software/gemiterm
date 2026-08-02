@@ -3,6 +3,7 @@ import {
   AuthService,
   AuthServiceTimeoutError,
 } from "../../src/services/auth-service.ts";
+import { CookieMonitor } from "../../src/services/cookie-monitor.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
@@ -12,6 +13,7 @@ import * as elevation from "../../src/infrastructure/elevation.ts";
 function createMockDriver() {
   return {
     openHeaded: mock(async (_url: string, _profile: string, _session?: string) => {}),
+    openHeadless: mock(async (_url: string, _profile: string, _session?: string) => {}),
     closeSession: mock(async (_session: string) => {}),
     closeAll: mock(async () => {}),
     stateLoad: mock(async (_session: string, _path: string) => {}),
@@ -85,6 +87,7 @@ function buildService(
     cookieMonitor: cookieMonitor as never,
     cookieStorage: cookieStorage as never,
     logger,
+    silentRefreshMonitorFactory: () => cookieMonitor as never,
   });
 }
 
@@ -466,6 +469,124 @@ describe("AuthService", () => {
       const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
       await expect(svc.closeBrowser("default")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("silentRefresh", () => {
+    test("launches headless browser, loads state, and returns true on monitor success", async () => {
+      cookieMonitor.start.mockImplementationOnce(async (_session, callback) => {
+        callback(makeAuthCookies());
+      });
+
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(true);
+      expect(driver.openHeadless).toHaveBeenCalledTimes(1);
+      expect(driver.openHeadless).toHaveBeenCalledWith(
+        "https://gemini.google.com/app",
+        "test-profile",
+        "test-profile",
+      );
+      expect(driver.stateLoad).toHaveBeenCalledTimes(1);
+      expect(driver.stateLoad).toHaveBeenCalledWith(
+        "test-profile",
+        expect.stringContaining("storage_state.json"),
+      );
+      expect(cookieMonitor.start).toHaveBeenCalledTimes(1);
+      const startArgs = cookieMonitor.start.mock.calls[0]!;
+      expect(startArgs[0]).toBe("test-profile");
+      expect(startArgs[2]).toBe(30_000);
+      expect(driver.closeSession).toHaveBeenCalledWith("test-profile");
+
+      existsSpy.mockRestore();
+    });
+
+    test("returns false on cookie-monitor timeout", async () => {
+      cookieMonitor.start.mockImplementationOnce(async () => {});
+
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+
+      const result = await svc.silentRefresh("test-profile", 50);
+
+      expect(result).toBe(false);
+      expect(cookieMonitor.start).toHaveBeenCalledTimes(1);
+      const startArgs = cookieMonitor.start.mock.calls[0]!;
+      expect(startArgs[2]).toBe(50);
+      expect(cookieMonitor.stop).toHaveBeenCalled();
+      expect(driver.closeSession).toHaveBeenCalledWith("test-profile");
+
+      existsSpy.mockRestore();
+    });
+
+    test("returns false when openHeadless throws", async () => {
+      driver.openHeadless.mockRejectedValueOnce(new Error("browser failed to launch"));
+
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(false);
+      expect(driver.closeSession).toHaveBeenCalledWith("test-profile");
+      expect(cookieMonitor.start).not.toHaveBeenCalled();
+
+      existsSpy.mockRestore();
+    });
+
+    test("returns false when no saved cookies file exists", async () => {
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(false);
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+
+      const result = await svc.silentRefresh("new-profile");
+
+      expect(result).toBe(false);
+      expect(driver.openHeadless).toHaveBeenCalledTimes(1);
+      expect(driver.stateLoad).not.toHaveBeenCalled();
+      expect(cookieMonitor.start).not.toHaveBeenCalled();
+      expect(driver.closeSession).toHaveBeenCalledWith("new-profile");
+
+      existsSpy.mockRestore();
+    });
+
+    test("returns false when stateLoad fails", async () => {
+      driver.stateLoad.mockRejectedValueOnce(new Error("state-load failed"));
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(false);
+      expect(cookieMonitor.start).not.toHaveBeenCalled();
+      expect(driver.closeSession).toHaveBeenCalledWith("test-profile");
+
+      existsSpy.mockRestore();
+    });
+
+    test("does not print to stdout", async () => {
+      cookieMonitor.start.mockImplementationOnce(async (_session, callback) => {
+        callback(makeAuthCookies());
+      });
+
+      const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      await svc.silentRefresh("test-profile");
+
+      expect(logSpy).not.toHaveBeenCalled();
+      logSpy.mockRestore();
+      existsSpy.mockRestore();
+    });
+
+    test("returns false on invalid profile name (never throws)", async () => {
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("bad name!");
+      expect(result).toBe(false);
+      expect(driver.openHeadless).not.toHaveBeenCalled();
     });
   });
 });

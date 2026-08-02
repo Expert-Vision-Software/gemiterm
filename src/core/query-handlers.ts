@@ -78,11 +78,11 @@ export class ListChatsQueryHandler
   implements QueryHandler<ListChatsQueryPayload, ListChatsQueryResult>
 {
   readonly queryType = QUERY_TYPES.LIST_CHATS;
-  private readonly getGeminiClient: () => IGeminiClientService;
+  private readonly getGeminiClient: () => Promise<IGeminiClientService>;
   private readonly profileManager: ProfileManagerForQuery;
   private readonly logger: Logger;
 
-  constructor(getGeminiClient: () => IGeminiClientService, profileManager: ProfileManagerForQuery, logger: Logger) {
+  constructor(getGeminiClient: () => Promise<IGeminiClientService>, profileManager: ProfileManagerForQuery, logger: Logger) {
     this.getGeminiClient = getGeminiClient;
     this.profileManager = profileManager;
     this.logger = logger;
@@ -91,7 +91,7 @@ export class ListChatsQueryHandler
   async handle(query: Query<ListChatsQueryPayload>): Promise<ListChatsQueryResult> {
     const { limit, offset, search, allProfiles, profile } = extractPayload(query);
     const options = { limit, offset, search };
-    const client = this.getGeminiClient();
+    const client = await this.getGeminiClient();
 
     let chats: ChatInfo[];
     if (profile) {

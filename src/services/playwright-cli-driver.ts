@@ -153,6 +153,25 @@ export class PlaywrightCliDriver {
     await this.runCli(args);
   }
 
+  buildOpenHeadlessArgs(url: string, profile: string, session?: string): string[] {
+    const args: string[] = [];
+    if (session) {
+      args.push(`-s=${session}`);
+    }
+    args.push(
+      "open",
+      "--browser=chromium",
+      `--profile=${this.profileDirResolver(profile)}`,
+      url,
+    );
+    return args;
+  }
+
+  async openHeadless(url: string, profile: string, session?: string): Promise<void> {
+    const args = this.buildOpenHeadlessArgs(url, profile, session);
+    await this.runCli(args);
+  }
+
   async evalJs(session: string, expression: string): Promise<string> {
     return this.runCli(this.withSession(session, ["eval", expression, "--raw"]));
   }
