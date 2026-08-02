@@ -68,8 +68,6 @@ interface GeminiClientConfig {
   secure1psidts?: string | null;
 }
 
-const COOKIE_EXPIRY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
-
 function extractChatMetadata(metadata: (string | null)[] | undefined): ChatMetadata | null {
   if (!metadata) return null;
   const rid = metadata[1];
@@ -129,16 +127,15 @@ export class GeminiClientService
       if (!changed1psid && !changed1psidts) return;
 
       const stored = this.cookieStorageService.loadAllCookiesForProfile(this.profileName);
-      const expirySec = Math.floor((Date.now() + COOKIE_EXPIRY_THRESHOLD_MS) / 1000);
       let changed = false;
       const merged = stored.map((c) => {
         if (c.name === "__Secure-1PSID" && changed1psid) {
           changed = true;
-          return { ...c, value: live1psid, expires: expirySec };
+          return { ...c, value: live1psid };
         }
         if (c.name === "__Secure-1PSIDTS" && changed1psidts) {
           changed = true;
-          return { ...c, value: live1psidts, expires: expirySec };
+          return { ...c, value: live1psidts };
         }
         return c;
       });

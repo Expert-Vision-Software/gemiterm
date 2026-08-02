@@ -11,7 +11,7 @@ import {
   listProfiles,
 } from "./config.ts";
 
-const COOKIE_EXPIRY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+const COOKIE_EXPIRY_THRESHOLD_MS = 60 * 60 * 1000;
 
 interface StorageState {
   cookies: Cookie[];
@@ -158,7 +158,7 @@ export class ProfileManager {
       const cookies = this.cookieStorage.load(name);
       const hasValidCookies = validateCookies(cookies);
       const expiresMs = getCookieExpiryTimestamp(cookies);
-      const isActive = hasValidCookies && (expiresMs === null || expiresMs > Date.now());
+      const isActive = hasValidCookies && checkCookieFreshness(cookies) && (expiresMs === null || expiresMs > Date.now());
       let expiresAt: string | null = null;
       if (expiresMs !== null) {
         expiresAt = new Date(expiresMs).toISOString();

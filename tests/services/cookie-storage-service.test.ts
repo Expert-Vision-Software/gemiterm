@@ -57,7 +57,7 @@ function makeExpiredCookies(): Cookie[] {
 }
 
 function makeStaleCookies(): Cookie[] {
-  const soon = Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60;
+  const soon = Math.floor(Date.now() / 1000) + 30 * 60;
   return [
     {
       name: "__Secure-1PSID",
@@ -180,7 +180,7 @@ describe("CookieStorageService", () => {
       expect(service.checkCookieFreshness(makeExpiredCookies())).toBe(false);
     });
 
-    test("returns false when cookies expire within 7 days", () => {
+    test("returns false when cookies expire within the freshness window", () => {
       expect(service.checkCookieFreshness(makeStaleCookies())).toBe(false);
     });
 

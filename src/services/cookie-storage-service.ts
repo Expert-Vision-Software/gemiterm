@@ -2,7 +2,7 @@ import type { Cookie } from "../core/types.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 
-const COOKIE_EXPIRY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+const COOKIE_EXPIRY_THRESHOLD_MS = 60 * 60 * 1000;
 const REQUIRED_COOKIE_NAMES = new Set(["__Secure-1PSID", "__Secure-1PSIDTS"]);
 
 export interface LoadedCookies {

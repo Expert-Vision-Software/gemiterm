@@ -43,6 +43,32 @@ function makeValidCookies(): Cookie[] {
   ];
 }
 
+function makeNearExpiryCookies(): Cookie[] {
+  const nearFuture = Math.floor(Date.now() / 1000) + 30 * 60;
+  return [
+    {
+      name: "__Secure-1PSID",
+      value: "near-expiry-psid",
+      domain: ".google.com",
+      path: "/",
+      expires: nearFuture,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+    },
+    {
+      name: "__Secure-1PSIDTS",
+      value: "near-expiry-psidts",
+      domain: ".google.com",
+      path: "/",
+      expires: nearFuture,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax",
+    },
+  ];
+}
+
 function makeExpiredCookies(): Cookie[] {
   const past = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
   return [
@@ -223,6 +249,16 @@ describe("ProfileManager", () => {
     expect(status.isDefault).toBe(false);
   });
 
+  test("getStatus reports isActive: false for near-expiry cookies", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    storage.save("near-expiry", makeNearExpiryCookies());
+
+    const status = mgr.getStatus("near-expiry");
+    expect(status.exists).toBe(true);
+    expect(status.isActive).toBe(false);
+  });
+
   test("getStatus returns inactive for expired cookies", () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
@@ -266,6 +302,46 @@ describe("ProfileManager", () => {
     expect(status.expiresAt).toBeNull();
   });
 
+  test("makeValidCookies (now + 365 days) are fresh with 1-hour threshold", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    storage.save("valid", makeValidCookies());
+
+    expect(mgr.hasValidCookies("valid")).toBe(true);
+    const status = mgr.getStatus("valid");
+    expect(status.isActive).toBe(true);
+  });
+
+  test("session cookies (expires: -1) remain active with freshness check", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    const sessionCookies: Cookie[] = [
+      {
+        name: "__Secure-1PSID",
+        value: "psid",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__Secure-1PSIDTS",
+        value: "psidts",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ];
+    storage.save("session-fresh", sessionCookies);
+
+    expect(mgr.hasValidCookies("session-fresh")).toBe(true);
+  });
+
   test("getStatus returns not exists for missing profile", () => {
     const status = manager.getStatus("missing");
     expect(status.exists).toBe(false);
@@ -276,6 +352,20 @@ describe("ProfileManager", () => {
     manager.create("def");
     const status = manager.getStatus("def");
     expect(status.isDefault).toBe(true);
+  });
+
+  test("getAllStatuses correctly reports near-expiry profile as inactive", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    storage.save("active", makeValidCookies());
+    storage.save("near-expiry", makeNearExpiryCookies());
+
+    const statuses = mgr.getAllStatuses();
+    expect(statuses).toHaveLength(2);
+    const active = statuses.find((s) => s.name === "active")!;
+    const nearExpiry = statuses.find((s) => s.name === "near-expiry")!;
+    expect(active.isActive).toBe(true);
+    expect(nearExpiry.isActive).toBe(false);
   });
 
   test("getAllStatuses returns all profile statuses", () => {
