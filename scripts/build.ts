@@ -24,9 +24,8 @@ function hostTarget(): Target {
 
 const PROFILES: Record<string, Profile> = {
   default: { target: "host", outfile: "dist/gemiterm", minify: false },
-  linux: { target: "bun-linux-x64", outfile: "dist/gemiterm", minify: false },
-  windows: { target: "bun-windows-x64", outfile: "dist/gemiterm.exe", minify: false },
-  release: { target: "host", outfile: "dist/gemiterm", minify: true },
+  linux: { target: "bun-linux-x64", outfile: "dist/linux/gemiterm", minify: true },
+  windows: { target: "bun-windows-x64", outfile: "dist/windows/gemiterm.exe", minify: true },
 };
 
 function loadPackageJson(): { name: string; version: string } {

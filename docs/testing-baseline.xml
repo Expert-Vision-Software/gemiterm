@@ -1,53 +1,65 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <TestingBaseline>
     <Metadata>
-        <LastUpdated>2026-08-02T12:00:00Z</LastUpdated>
-        <BaselineId>BL-002</BaselineId>
+        <LastUpdated>2026-08-02T12:40:00Z</LastUpdated>
+        <BaselineId>BL-004</BaselineId>
         <Framework>Bun + TypeScript CLI</Framework>
     </Metadata>
 
     <Solution>
         <UnitTests>
             <Framework>bun test</Framework>
-            <TestFiles>52</TestFiles>
-            <Passed>833</Passed>
+            <TestFiles>53</TestFiles>
+            <Passed>863</Passed>
             <Failed>0</Failed>
             <Skipped>2</Skipped>
-            <Total>835</Total>
-            <Errors>0</Errors>
-            <Duration>11.80</Duration>
-            <ExpectCalls>1675</ExpectCalls>
+            <Total>865</Total>
+            <Duration>11.95</Duration>
+            <ExpectCalls>1758</ExpectCalls>
         </UnitTests>
         <IntegrationTests>
             <Framework>bun test</Framework>
             <Status>Active</Status>
-            <Total>835</Total>
-            <Passed>833</Passed>
+            <Total>176</Total>
+            <Passed>176</Passed>
             <Failed>0</Failed>
+            <Duration>0.55</Duration>
         </IntegrationTests>
         <SmokeTests>
             <Framework>bun test</Framework>
             <Status>Active</Status>
-            <Total>0</Total>
-            <Passed>0</Passed>
+            <Total>21</Total>
+            <Passed>21</Passed>
             <Failed>0</Failed>
+            <Duration>0.83</Duration>
         </SmokeTests>
         <Build>
-            <Status>Success</Status>
-            <BuildTime>0.58</BuildTime>
-            <TypeCheckStatus>Success</TypeCheckStatus>
-            <LintMediationStatus>Success</LintMediationStatus>
-            <TotalProjects>1</TotalProjects>
-            <Warnings>0</Warnings>
-            <OutputDirectory>./dist</OutputDirectory>
-            <FileCount>1</FileCount>
-            <TotalSizeMB>94.81</TotalSizeMB>
-            <KeyFiles>
-                <File>
-                    <Name>gemiterm.exe</Name>
-                    <SizeMB>94.81</SizeMB>
-                </File>
-            </KeyFiles>
+            <Windows>
+                <Status>Success</Status>
+                <BuildTime>0.5</BuildTime>
+                <TypeCheckStatus>Success</TypeCheckStatus>
+                <FileCount>1</FileCount>
+                <TotalSizeMB>94.4</TotalSizeMB>
+                <KeyFiles>
+                    <File>
+                        <Name>gemiterm.exe</Name>
+                        <SizeMB>94.4</SizeMB>
+                    </File>
+                </KeyFiles>
+            </Windows>
+            <Linux>
+                <Status>Success</Status>
+                <BuildTime>0.4</BuildTime>
+                <TypeCheckStatus>Success</TypeCheckStatus>
+                <FileCount>1</FileCount>
+                <TotalSizeMB>90.7</TotalSizeMB>
+                <KeyFiles>
+                    <File>
+                        <Name>gemiterm</Name>
+                        <SizeMB>90.7</SizeMB>
+                    </File>
+                </KeyFiles>
+            </Linux>
         </Build>
     </Solution>
 
@@ -78,6 +90,18 @@
     </Dependencies>
 
     <Changelog>
+        <Entry>
+            <BaselineId>BL-004</BaselineId>
+            <Date>2026-08-02</Date>
+            <Changes>Updated baseline: 865 unit (863 pass, 2 skip), 176 integration (176 pass), 21 smoke (21 pass), duration 11.95s unit, 0.55s integration, 0.83s smoke</Changes>
+            <Reason>User requested baseline update; template change; added integration/smoke metrics</Reason>
+        </Entry>
+        <Entry>
+            <BaselineId>BL-003</BaselineId>
+            <Date>2026-08-02</Date>
+            <Changes>Updated baseline: 865 tests (863 pass, 2 skip, 0 fail), duration 12.11s, 1758 expect() calls, 53 files</Changes>
+            <Reason>User requested baseline update; +30 tests from BL-002</Reason>
+        </Entry>
         <Entry>
             <BaselineId>BL-002</BaselineId>
             <Date>2026-08-02</Date>

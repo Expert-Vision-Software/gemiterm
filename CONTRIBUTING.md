@@ -38,7 +38,6 @@ bun test                 # full test suite
 bun run test:unit        # unit tests only
 bun run test:integration # integration tests only
 bun run typecheck        # tsc --noEmit
-bun run lint:mediation   # path-mediation lint (enforces the I/O boundary)
 ```
 
 For Chromium installation on different platforms, use the platform-specific wrappers:
@@ -48,23 +47,22 @@ bash scripts/install-browser.sh   # Linux / macOS
 pwsh scripts/install-browser.ps1  # Windows
 ```
 
-> **Path mediation is mandatory.** No file in `src/` outside the two exemptions may import from `node:fs`, `node:path`, or `node:os`. The `lint:mediation` script and CI enforce this. If you need a new file-system or path helper, add it to `src/infrastructure/io.ts` or `src/infrastructure/path-utils.ts` and consume it from there. The two currently-exempt files are `src/infrastructure/path-utils.ts` and `src/infrastructure/io.ts`.
+> **Path mediation is mandatory.** No file in `src/` outside the two exemptions may import from `node:fs`, `node:path`, or `node:os`. CI enforces this. If you need a new file-system or path helper, add it to `src/infrastructure/io.ts` or `src/infrastructure/path-utils.ts` and consume it from there. The two currently-exempt files are `src/infrastructure/path-utils.ts` and `src/infrastructure/io.ts`.
 
 ## Building from source
 
 GemiTerm requires **[Bun](https://bun.sh) ≥ 1.3.13** to build.
 
 ```bash
-bun run build            # native binary for the current OS (dist/gemiterm or dist/gemiterm.exe)
+bun run build            # builds both linux and windows binaries
 bun run build:linux      # cross-compile to bun-linux-x64
 bun run build:windows    # cross-compile to bun-windows-x64
-bun run build:release    # minified host-target build
 ```
 
 Output paths:
 
-- **Linux / macOS:** `dist/gemiterm`
-- **Windows:** `dist/gemiterm.exe`
+- **Linux:** `dist/linux/gemiterm`
+- **Windows:** `dist/windows/gemiterm.exe`
 
 ### Release artifacts
 
@@ -81,7 +79,7 @@ Issues and PRs are welcome. Before opening a pull request:
 
 1. **Read [`AGENTS.md`](AGENTS.md).** It documents the path-mediation rules, the sensitive auth files, the OpenSpec workflow, and the test commands you should run before committing.
 2. **Open or comment on an issue first** for non-trivial changes so we can align on approach.
-3. **Run the full gate locally** — `bun test`, `bun run typecheck`, and `bun run lint:mediation` must all pass. On Windows use `bash scripts/lint-path-mediation.sh` (the PowerShell version is currently broken — see AGENTS.md).
+3. **Run the full gate locally** — `bun test` and `bun run typecheck` must all pass.
 4. **Use Conventional Commits** for commit messages (`feat:`, `fix:`, `chore:`, `docs:`, …).
 5. **Keep PRs focused.** One logical change per PR makes review and bisect much easier.
 

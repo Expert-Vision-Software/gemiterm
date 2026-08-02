@@ -11,6 +11,58 @@
 <baseline>@testing-baseline.xml</baseline>
 </metadata>
 
+<reporting_schema>
+<Solution>
+  <UnitTests>
+    <!-- from: bun test (full suite) -->
+    <TestFiles>int</TestFiles>
+    <Total>int</Total>
+    <Passed>int</Passed>
+    <Failed>int</Failed>
+    <Skipped>int</Skipped>
+    <Duration>float (seconds)</Duration>
+    <ExpectCalls>int</ExpectCalls>
+  </UnitTests>
+
+  <IntegrationTests>
+    <!-- from: bun run test:integration -->
+    <Status>Active | Inactive</Status>
+    <Total>int</Total>
+    <Passed>int</Passed>
+    <Failed>int</Failed>
+    <Duration>float (seconds)</Duration>
+  </IntegrationTests>
+
+  <SmokeTests>
+    <!-- from: bun run test:smoke -->
+    <Status>Active | Inactive</Status>
+    <Total>int</Total>
+    <Passed>int</Passed>
+    <Failed>int</Failed>
+    <Duration>float (seconds)</Duration>
+  </SmokeTests>
+
+  <Build>
+    <Windows>
+      <!-- from: bun run build:windows -->
+      <Status>Success | Failed</Status>
+      <BuildTime>float (seconds)</BuildTime>
+      <TypeCheckStatus>Success | Failed</TypeCheckStatus>
+      <TotalSizeMB>float</TotalSizeMB>
+      <FileCount>int</FileCount>
+    </Windows>
+    <Linux>
+      <!-- from: bun run build:linux -->
+      <Status>Success | Failed</Status>
+      <BuildTime>float (seconds)</BuildTime>
+      <TypeCheckStatus>Success | Failed</TypeCheckStatus>
+      <TotalSizeMB>float</TotalSizeMB>
+      <FileCount>int</FileCount>
+    </Linux>
+  </Build>
+</Solution>
+</reporting_schema>
+
 <context_hierarchy>
 <system_context>Test baselining and quality gates</system_context>
 <domain_context>Bun + TypeScript CLI project (gemiterm)</domain_context>
@@ -28,15 +80,15 @@
 <execution_workflow>
 <stage name="Build">
  Execute build and capture artifact metrics:
- 1. bun run typecheck (tsc --noEmit) — verify type safety
- 2. bun run build — produce dist/gemiterm(.exe)
- 3. Capture artifact stats:
-    - dist/gemiterm(.exe) size bytes
-    - Number of output files
-    - Total output directory size
- 4. bun run lint:mediation — verify path mediation compliance
- Record: build success/fail, build time, artifact size, file count
-</stage>
+  1. bun run typecheck (tsc --noEmit) — verify type safety
+  2. bun run build:windows — produce dist/windows/gemiterm.exe
+  4. bun run build:linux — produce dist/linux/gemiterm
+  5. Capture artifact stats per platform:
+     - dist/{platform}/gemiterm(.exe) size bytes
+     - Number of output files
+     - Total output directory size
+  Record: build success/fail, build time, artifact size, file count per platform
+ </stage>
 
 <stage name="Test">
  Execute test suite and capture metrics:
@@ -85,8 +137,7 @@
  - Test pass rate = 100% (0 failures)
  - bun test returns 0 exit code
  - bun run typecheck returns 0 exit code
- - bun run lint:mediation passes
- - Build produces valid dist/gemiterm(.exe)
+ - Build produces valid dist/linux/gemiterm and dist/windows/gemiterm.exe
 </solution_pass>
 
 <solution_fail>
@@ -126,8 +177,8 @@
 | bun run test:smoke | Smoke tests only |
 | bun run test:parity | Parity tests (requires Python CLI v1.4.1) |
 | bun run typecheck | TypeScript type checking |
-| bun run lint:mediation | Path mediation linting |
-| bun run build | Production build |
+| bun run build:windows | Windows production build |
+| bun run build:linux | Linux production build |
 </quick_commands>
 
 <investigation_triggers>

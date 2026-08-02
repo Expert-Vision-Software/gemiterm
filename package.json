@@ -33,13 +33,11 @@
     "test:integration": "bun test tests/integration",
     "test:parity": "bun test tests/parity",
     "test:smoke": "bun test tests/smoke",
-    "test:all": "bun test --isolate",
-    "lint:mediation": "bash scripts/lint-path-mediation.sh",
-    "lint:mediation:ps": "pwsh scripts/lint-path-mediation.ps1",
-    "build": "bun run scripts/build.ts",
+    "test:all": "bun run lint && bun test --isolate",
+    "lint": "bun run typecheck",
+    "build": "bun run build:windows && bun run build:linux",
     "build:linux": "bun run scripts/build.ts linux",
-    "build:windows": "bun run scripts/build.ts windows",
-    "build:release": "bun run scripts/build.ts release"
+    "build:windows": "bun run scripts/build.ts windows"
   },
   "devDependencies": {
     "@inquirer/testing": "^2.1.0",

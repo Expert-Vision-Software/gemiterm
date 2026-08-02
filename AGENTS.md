@@ -44,11 +44,8 @@ bun run typecheck          # tsc --noEmit; clean at HEAD
 bun run build              # scripts/build.ts -> dist/gemiterm(.exe)
 bun run build:linux        # cross-compile to bun-linux-x64
 bun run build:windows      # cross-compile to bun-windows-x64
-bun run build:release      # minified host-target build
-bun run lint:mediation     # bash version — use this on Windows
+bun run typecheck          # tsc --noEmit; clean at HEAD
 ```
-
-> **The PowerShell version of the mediation lint is broken.** `bun run lint:mediation:ps` (and `pwsh -File scripts/lint-path-mediation.ps1`) hardcodes `gemiterm-bun-rewrite/` in its path-normalization step (`scripts/lint-path-mediation.ps1:30`). It will report false positives on every file in `src/infrastructure/`. **Use `bash scripts/lint-path-mediation.sh` (or `bun run lint:mediation`) on Windows** — that one is correct. CI runs the bash form in `.github/workflows/test.yml:23-29`.
 
 Test count and the v2.0.0 release date (2026-06-08) are in `CHANGELOG.md`. Update the baseline number in any open change's `tasks.md` if the count moves.
 
@@ -92,12 +89,12 @@ The `gemiterm list -i` (or `--interactive`) flag is the **only** entry point to 
 
 ## Code conventions
 
-**Path and file operations are mandatory mediation.** No file in `src/` outside the two exemptions may import from `node:fs`, `node:path`, or `node:os`. The lint script `scripts/lint-path-mediation.sh` (and the CI step in `.github/workflows/test.yml:23-29`) enforces this. The two exempt files are:
+**Path and file operations are mandatory mediation.** No file in `src/` outside the two exemptions may import from `node:fs`, `node:path`, or `node:os`. The CI step in `.github/workflows/test.yml:24-30` enforces this. The two exempt files are:
 
 - `src/infrastructure/path-utils.ts` — canonical home for path values
 - `src/infrastructure/io.ts` — canonical home for file-system side effects
 
-If you need a new path or file-system helper, add it to the appropriate module and consume it from there. Do not bypass the mediation. To add a new exemption, update the file list in **both** `scripts/lint-path-mediation.sh` and `.github/workflows/test.yml` and the `if` block in `scripts/lint-path-mediation.ps1`, with a comment explaining why.
+If you need a new path or file-system helper, add it to the appropriate module and consume it from there. Do not bypass the mediation. To add a new exemption, update the file list in `.github/workflows/test.yml`, with a comment explaining why.
 
 The `io.ts` surface to use: `writeTextFile`, `readTextFile`, `readJsonFile`, `writeJsonFile`, `ensureDir`, `existsFile`, `removeDir`, `renameDir`, `isDirectory`, `listSubdirectories`, `safeReadTextFile`. Add new helpers only when at least 2 call sites need them. Errors from `io.ts` throw `IOError` with a `cause` field — do not catch and re-throw the raw `node:fs` error.
 
