@@ -36,5 +36,5 @@
 
 ## 5. Post-Implementation
 
-- [ ] 5.1 Run the `code-review` skill and address all findings.
-- [ ] 5.2 Mark all tasks complete in this file.
+- [x] 5.1 Run the `code-review` skill and address all findings.
+- [x] 5.2 Mark all tasks complete in this file.
