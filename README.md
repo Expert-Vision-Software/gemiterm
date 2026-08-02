@@ -9,6 +9,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)](LICENSE.md)
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux%20%7C%20macOS-6366f1)](#installation)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Expert-Vision-Software/gemiterm)
 [![Stars](https://img.shields.io/github/stars/Expert-Vision-Software/gemiterm?style=social)](https://github.com/Expert-Vision-Software/gemiterm)
 
 **List · Search · Export · Continue · Debate · Automate**

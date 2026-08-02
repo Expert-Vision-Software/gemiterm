@@ -1,3 +1,11 @@
+## [2.4.2] - 2026-08-01
+
+### Added
+
+- Add DeepWiki badge to README.
+
+---
+
 ## [2.4.1] - 2026-08-01
 
 ### Added
