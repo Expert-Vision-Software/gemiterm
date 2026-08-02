@@ -5,7 +5,7 @@ import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import type { ChatMetadata } from "./chat-metadata-storage.ts";
 import { ChatMetadataStorage } from "./chat-metadata-storage.ts";
-import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
+import { GeminiAPIError, AuthenticationError, GemitermError } from "../core/errors.ts";
 
 export interface GeminiClientDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -219,13 +219,9 @@ export class GeminiClientService
   }
 
   async profileHasConversation(profileName: string, conversationId: string): Promise<boolean> {
-    try {
-      const profileClient = this.forProfile(profileName);
-      const chats = await profileClient.listChats();
-      return chats.some((chat) => chat.id === conversationId);
-    } catch {
-      return false;
-    }
+    const profileClient = this.forProfile(profileName);
+    const chats = await profileClient.listChats({ limit: 50 });
+    return chats.some((chat) => chat.id === conversationId);
   }
 
   async listChats(options?: {
@@ -235,8 +231,11 @@ export class GeminiClientService
   }): Promise<ChatInfo[]> {
     await this.init();
     try {
-      const raw = await this.client!.chats() as RawChatRow[];
-      let chats: ChatInfo[] = (raw ?? []).map((c) => this.toDomainChatInfo(c, this.profileName));
+      const raw = await this.client!.chats() as RawChatRow[] | null | undefined;
+      if (raw === null || raw === undefined) {
+        throw new GemitermError("Gemini returned no data — session may be expired");
+      }
+      let chats: ChatInfo[] = raw.map((c) => this.toDomainChatInfo(c, this.profileName));
 
       if (options?.search) {
         const query = options.search.toLowerCase();
