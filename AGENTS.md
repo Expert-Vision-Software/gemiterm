@@ -35,7 +35,7 @@ The one currently-open OpenSpec change is `commander-cli-parser` (proposes repla
 ```bash
 bun install                # install deps (bun.lock is committed)
 bun run dev                # = bun run src/cli/index.ts; runs the CLI in dev
-bun test                   # full suite — baseline: 657 pass, 0 fail
+bun test                   # full suite — baseline: 818 pass, 0 fail
 bun run test:unit          # tests/unit only
 bun run test:integration   # tests/integration only
 bun run test:parity        # tests/parity (requires v1.4.1 Python CLI on PATH; not run in CI)
@@ -51,6 +51,19 @@ bun run lint:mediation     # bash version — use this on Windows
 > **The PowerShell version of the mediation lint is broken.** `bun run lint:mediation:ps` (and `pwsh -File scripts/lint-path-mediation.ps1`) hardcodes `gemiterm-bun-rewrite/` in its path-normalization step (`scripts/lint-path-mediation.ps1:30`). It will report false positives on every file in `src/infrastructure/`. **Use `bash scripts/lint-path-mediation.sh` (or `bun run lint:mediation`) on Windows** — that one is correct. CI runs the bash form in `.github/workflows/test.yml:23-29`.
 
 Test count and the v2.0.0 release date (2026-06-08) are in `CHANGELOG.md`. Update the baseline number in any open change's `tasks.md` if the count moves.
+
+---
+
+## Test Baselining
+
+Test baseline files are at `docs/testing-baseline.xml` and `docs/testing-protocol.md`.
+
+Baseline metrics (BL-001, 2026-08-02):
+- 820 tests total (818 pass, 2 skip, 0 fail) across 52 files
+- Duration: 12.40s
+- expect() calls: 1648
+
+Use `bun test` to evaluate against baseline. The test count increased from the v2.0.0 baseline of 657 to 818.
 
 ---
 
