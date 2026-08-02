@@ -368,15 +368,22 @@ describe("GeminiClientService", () => {
       expect(chats[0].profile).toBe("work");
     });
 
-    test("returns empty array when chats returns null", async () => {
+    test("throws when chats returns null", async () => {
       const d = installGeminiReverseMock({ chats: null });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
-      const chats = await service.listChats();
+      await expect(service.listChats()).rejects.toThrow("Gemini returned no data");
+    });
 
-      expect(chats).toEqual([]);
+    test("throws when chats returns undefined", async () => {
+      const d = installGeminiReverseMock({ chats: undefined });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      await expect(service.listChats()).rejects.toThrow("Gemini returned no data");
     });
   });
 
@@ -1141,6 +1148,113 @@ describe("GeminiClientService", () => {
     });
   });
 
+  describe("profileHasConversation", () => {
+    test("returns true when conversation exists in profile", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        work: { secure_1psid: "work-sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+      const d = installGeminiReverseMock({
+        chats: [createMockChatRow({ cid: "abc-123", title: "My Chat" })],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
+
+      const result = await service.profileHasConversation("work", "abc-123");
+
+      expect(result).toBe(true);
+    });
+
+    test("returns false when conversation does not exist in profile", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        personal: { secure_1psid: "personal-sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+      const d = installGeminiReverseMock({
+        chats: [createMockChatRow({ cid: "other-456", title: "Other Chat" })],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
+
+      const result = await service.profileHasConversation("personal", "abc-123");
+
+      expect(result).toBe(false);
+    });
+
+    test("throws when listChats fails", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        work: { secure_1psid: "work-sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+      const d = installGeminiReverseMock({
+        chatsImplementation: () => {
+          throw new MockAuthError("auth failure");
+        },
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
+
+      await expect(service.profileHasConversation("work", "abc-123")).rejects.toThrow("Session expired or invalid");
+    });
+
+    test("passes limit:1 to listChats for targeted lookup", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        work: { secure_1psid: "work-sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+      let capturedOptions: { limit?: number; offset?: number; search?: string } | undefined;
+      const d = installGeminiReverseMock({
+        chats: [createMockChatRow({ cid: "abc-123" })],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const originalListChats = GeminiClientService.prototype.listChats;
+      GeminiClientService.prototype.listChats = function(options: { limit?: number }) {
+        capturedOptions = options;
+        return originalListChats.call(this, options);
+      };
+
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
+
+      await service.profileHasConversation("work", "abc-123");
+
+      GeminiClientService.prototype.listChats = originalListChats;
+      expect(capturedOptions?.limit).toBe(1);
+    });
+
+    test("does not mutate the calling instance's cookie config", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        work: { secure_1psid: "work-sid", secure_1psidts: "work-ts" },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+      const d = installGeminiReverseMock({
+        chats: [createMockChatRow({ cid: "abc-123" })],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, "main", d);
+      const authBefore = service.isAuthenticated();
+
+      await service.profileHasConversation("work", "abc-123");
+
+      const authAfter = service.isAuthenticated();
+      expect(authBefore).toBe(authAfter);
+    });
+  });
+
   describe("init() idempotency", () => {
     test("calls client.init exactly once even when called multiple times", async () => {
       let initCallCount = 0;
@@ -1163,14 +1277,13 @@ describe("GeminiClientService", () => {
   });
 
   describe("empty-cookies factory case", () => {
-    test("init resolves without throwing when secure1psid is empty string", async () => {
+    test("init resolves but listChats throws when SDK returns null for empty-cookie client", async () => {
       const d = installGeminiReverseMock({});
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "" }, logger, undefined, undefined, d);
 
-      await service.listChats();
-      expect(service.isAuthenticated()).toBe(true);
+      await expect(service.listChats()).rejects.toThrow("Gemini returned no data");
     });
   });
 

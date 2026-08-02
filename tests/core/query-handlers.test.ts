@@ -7,8 +7,9 @@ import {
   ListModelsQueryHandler,
   QUERY_TYPES,
 } from "../../src/core/query-handlers.ts";
-import type { IGeminiClientQueryService, IProfileQueryService } from "../../src/core/query-handlers.ts";
+import type { IGeminiClientQueryService, IProfileQueryService, ProfileManagerForQuery } from "../../src/core/query-handlers.ts";
 import type { Query } from "../../src/core/mediator.ts";
+import { Logger } from "../../src/infrastructure/logger.ts";
 
 function makeQuery<T>(type: string, payload: T): Query<T> {
   return { type, payload: payload as unknown as Record<string, unknown> };
@@ -16,6 +17,9 @@ function makeQuery<T>(type: string, payload: T): Query<T> {
 
 describe("ListChatsQueryHandler", () => {
   let mockClient: IGeminiClientQueryService & { forProfile: (name: string) => IGeminiClientQueryService };
+  let mockProfileManager: ProfileManagerForQuery;
+  let mockLogger: Logger;
+  let warnCalls: string[];
 
   beforeEach(() => {
     mockClient = {
@@ -24,10 +28,21 @@ describe("ListChatsQueryHandler", () => {
       listModels: mock(() => Promise.resolve([])),
       forProfile: (name: string) => mockClient,
     };
+    warnCalls = [];
+    mockLogger = {
+      warn: (msg: string, ..._args: unknown[]) => { warnCalls.push(msg); },
+      debug: () => {},
+      info: () => {},
+      error: () => {},
+    } as Logger;
+    mockProfileManager = {
+      hasValidCookies: mock(() => true),
+      list: mock(() => ["work", "personal", "test"]),
+    };
   });
 
   test("has correct queryType", () => {
-    const handler = new ListChatsQueryHandler(() => mockClient as any, () => []);
+    const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
     expect(handler.queryType).toBe(QUERY_TYPES.LIST_CHATS);
   });
 
@@ -38,7 +53,7 @@ describe("ListChatsQueryHandler", () => {
     ];
     mockClient.listChats = mock(() => Promise.resolve(chats));
 
-    const handler = new ListChatsQueryHandler(() => mockClient as any, () => []);
+    const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
     const result = await handler.handle(makeQuery(QUERY_TYPES.LIST_CHATS, {}));
     expect(result.chats).toEqual(chats);
   });
@@ -49,7 +64,7 @@ describe("ListChatsQueryHandler", () => {
       return Promise.resolve([]);
     });
 
-    const handler = new ListChatsQueryHandler(() => mockClient as any, () => []);
+    const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
     await handler.handle(
       makeQuery(QUERY_TYPES.LIST_CHATS, { limit: 10, offset: 5, search: "hello" }),
     );
@@ -66,7 +81,8 @@ describe("ListChatsQueryHandler", () => {
     const forProfileSpy = mock((_name: string) => profileClient as any);
     const handler = new ListChatsQueryHandler(
       () => ({ ...mockClient, forProfile: forProfileSpy } as any),
-      () => ["work", "personal"],
+      mockProfileManager,
+      mockLogger,
     );
 
     const result = await handler.handle(
@@ -90,11 +106,12 @@ describe("ListChatsQueryHandler", () => {
       listChats: mock(() => Promise.resolve([])),
     };
     const forProfileSpy = mock((_name: string) => profileClient as any);
-    const listProfilesSpy = mock(() => ["work", "personal"]);
+    const profileManagerSpy = { ...mockProfileManager, list: mock(() => ["work", "personal"]) };
 
     const handler = new ListChatsQueryHandler(
       () => ({ ...mockClient, forProfile: forProfileSpy } as any),
-      listProfilesSpy,
+      profileManagerSpy,
+      mockLogger,
     );
 
     await handler.handle(
@@ -103,7 +120,119 @@ describe("ListChatsQueryHandler", () => {
 
     expect(forProfileSpy).toHaveBeenCalledTimes(1);
     expect(forProfileSpy.mock.calls[0][0]).toBe("work");
-    expect(listProfilesSpy).not.toHaveBeenCalled();
+    expect(profileManagerSpy.list).not.toHaveBeenCalled();
+  });
+
+  test("allProfiles filters out unauthenticated profiles", async () => {
+    const chats = [{ id: "1", title: "Chat", isPinned: false, timestamp: 1000 }];
+    mockClient.listChats = mock(() => Promise.resolve(chats));
+    mockProfileManager.hasValidCookies = mock((name: string) => name !== "personal");
+    mockProfileManager.list = mock(() => ["work", "personal", "test"]);
+
+    const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
+    const result = await handler.handle(
+      makeQuery(QUERY_TYPES.LIST_CHATS, { allProfiles: true }),
+    );
+
+    expect(result.chats).toHaveLength(2);
+    expect(warnCalls).toEqual(["Skipping unauthenticated profile 'personal'"]);
+  });
+
+  test("allProfiles with no authenticated profiles returns empty chats", async () => {
+    mockProfileManager.hasValidCookies = mock(() => false);
+    mockProfileManager.list = mock(() => ["work", "personal"]);
+
+    const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
+    const result = await handler.handle(
+      makeQuery(QUERY_TYPES.LIST_CHATS, { allProfiles: true }),
+    );
+
+    expect(result.chats).toEqual([]);
+    expect(warnCalls).toEqual([
+      "Skipping unauthenticated profile 'work'",
+      "Skipping unauthenticated profile 'personal'",
+    ]);
+  });
+
+  test("allProfiles with allSettled — partial results on one profile failure", async () => {
+    const workChats = [{ id: "w1", title: "Work Chat", isPinned: false, timestamp: 2000 }];
+    const testChats = [{ id: "t1", title: "Test Chat", isPinned: false, timestamp: 1000 }];
+
+    const workClient = {
+      listChats: mock(() => Promise.resolve(workChats)),
+    };
+    const testClient = {
+      listChats: mock(() => Promise.resolve(testChats)),
+    };
+    const personalClient = {
+      listChats: mock(() => Promise.reject(new Error("API failure"))),
+    };
+
+    const forProfileSpy = mock((name: string) => {
+      if (name === "work") return workClient as any;
+      if (name === "test") return testClient as any;
+      return personalClient as any;
+    });
+
+    mockProfileManager.hasValidCookies = mock(() => true);
+    mockProfileManager.list = mock(() => ["work", "test", "personal"]);
+
+    const handler = new ListChatsQueryHandler(
+      () => ({ forProfile: forProfileSpy } as any),
+      mockProfileManager,
+      mockLogger,
+    );
+
+    const result = await handler.handle(
+      makeQuery(QUERY_TYPES.LIST_CHATS, { allProfiles: true }),
+    );
+
+    expect(result.chats).toHaveLength(2);
+    expect(result.chats[0].id).toBe("w1");
+    expect(result.chats[1].id).toBe("t1");
+    expect(warnCalls.some((c) => c.includes("Failed to list chats for profile"))).toBe(true);
+  });
+
+  test("allProfiles where all profiles reject returns empty chats with warnings", async () => {
+    mockProfileManager.hasValidCookies = mock(() => true);
+    mockProfileManager.list = mock(() => ["work", "personal"]);
+
+    const forProfileSpy = mock((_name: string) => ({
+      listChats: mock(() => Promise.reject(new Error("API error"))),
+    }) as any);
+
+    const handler = new ListChatsQueryHandler(
+      () => ({ forProfile: forProfileSpy } as any),
+      mockProfileManager,
+      mockLogger,
+    );
+
+    const result = await handler.handle(
+      makeQuery(QUERY_TYPES.LIST_CHATS, { allProfiles: true }),
+    );
+
+    expect(result.chats).toEqual([]);
+    expect(warnCalls.filter((c) => c.includes("Failed to list chats for profile")).length).toBe(2);
+  });
+
+  test("single profile query bypasses auth check and propagates errors", async () => {
+    const error = new Error("Profile-specific API failure");
+    const profileClient = {
+      listChats: mock(() => Promise.reject(error)),
+    };
+    const forProfileSpy = mock((_name: string) => profileClient as any);
+
+    const handler = new ListChatsQueryHandler(
+      () => ({ forProfile: forProfileSpy } as any),
+      mockProfileManager,
+      mockLogger,
+    );
+
+    await expect(handler.handle(
+      makeQuery(QUERY_TYPES.LIST_CHATS, { profile: "work" }),
+    )).rejects.toThrow("Profile-specific API failure");
+
+    expect(mockProfileManager.hasValidCookies).not.toHaveBeenCalled();
   });
 });
 

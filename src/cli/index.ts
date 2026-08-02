@@ -80,7 +80,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
 
   mediator.registerQueryHandler(new GetAuthStatusQueryHandler(profileQueryService));
   mediator.registerQueryHandler(new GetProfileStatusesQueryHandler(profileQueryService));
-  mediator.registerQueryHandler(new ListChatsQueryHandler(getGeminiClient, listProfiles));
+  mediator.registerQueryHandler(new ListChatsQueryHandler(getGeminiClient, profileManager, logger));
   mediator.registerQueryHandler(new FetchChatQueryHandler({
     async listChats(options) { return getGeminiClient().listChats(options); },
     async fetchChat(id) { return getGeminiClient().fetchChat(id); },

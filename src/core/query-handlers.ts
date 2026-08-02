@@ -1,6 +1,7 @@
 import type { Query, QueryHandler } from "./mediator.ts";
 import type { ChatInfo, Message, ProfileStatus } from "./types.ts";
 import type { IGeminiClientService } from "./command-handlers.ts";
+import type { Logger } from "../infrastructure/logger.ts";
 
 function extractPayload<T>(query: Query<T>): T {
   return query.payload;
@@ -68,16 +69,23 @@ export interface IProfileQueryService {
   getAuthStatus(): Promise<{ authenticated: boolean; profileName: string | null }>;
 }
 
+export interface ProfileManagerForQuery {
+  hasValidCookies(name: string): boolean;
+  list(): string[];
+}
+
 export class ListChatsQueryHandler
   implements QueryHandler<ListChatsQueryPayload, ListChatsQueryResult>
 {
   readonly queryType = QUERY_TYPES.LIST_CHATS;
   private readonly getGeminiClient: () => IGeminiClientService;
-  private readonly listProfiles: () => string[];
+  private readonly profileManager: ProfileManagerForQuery;
+  private readonly logger: Logger;
 
-  constructor(getGeminiClient: () => IGeminiClientService, listProfiles: () => string[]) {
+  constructor(getGeminiClient: () => IGeminiClientService, profileManager: ProfileManagerForQuery, logger: Logger) {
     this.getGeminiClient = getGeminiClient;
-    this.listProfiles = listProfiles;
+    this.profileManager = profileManager;
+    this.logger = logger;
   }
 
   async handle(query: Query<ListChatsQueryPayload>): Promise<ListChatsQueryResult> {
@@ -89,12 +97,35 @@ export class ListChatsQueryHandler
     if (profile) {
       chats = await client.forProfile(profile).listChats(options);
     } else if (allProfiles) {
-      const profileNames = this.listProfiles();
-      const results = await Promise.all(
-        profileNames.map((name) => client.forProfile(name).listChats(options)),
-      );
-      chats = results.flat();
-      chats.sort((a, b) => b.timestamp - a.timestamp);
+      const allProfilesList = this.profileManager.list();
+      const authenticated = allProfilesList.filter((name) => {
+        const valid = this.profileManager.hasValidCookies(name);
+        if (!valid) {
+          this.logger.warn(`Skipping unauthenticated profile '${name}'`);
+        }
+        return valid;
+      });
+
+      if (authenticated.length === 0) {
+        chats = [];
+      } else {
+        const results = await Promise.allSettled(
+          authenticated.map((name) =>
+            client.forProfile(name).listChats(options),
+          ),
+        );
+        chats = [];
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          if (result.status === "fulfilled") {
+            chats.push(...result.value);
+          } else {
+            const err = result.reason instanceof Error ? result.reason : new Error(String(result.reason));
+            this.logger.warn(`Failed to list chats for profile '${authenticated[i]}': ${err.message}`);
+          }
+        }
+        chats.sort((a, b) => b.timestamp - a.timestamp);
+      }
     } else {
       chats = await client.listChats(options);
     }
