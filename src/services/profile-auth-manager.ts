@@ -1,6 +1,6 @@
 import type { Cookie } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
-import type { ProfileManager } from "../infrastructure/storage.ts";
+import { checkCookieFreshness, type ProfileManager } from "../infrastructure/storage.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import type { LoadedCookies } from "./cookie-storage-service.ts";
 import type { IGeminiClientService } from "../core/command-handlers.ts";
@@ -8,11 +8,14 @@ import { AuthenticationError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 
+export type SilentRefreshFn = (profileName: string) => Promise<boolean>;
+
 export interface ProfileAuthManagerDeps {
   profileManager: ProfileManager;
   cookieStorageService: CookieStorageService;
   logger: Logger;
   geminiClient: IGeminiClientService;
+  silentRefresh: SilentRefreshFn;
 }
 
 export class ProfileAuthManager {
@@ -20,19 +23,44 @@ export class ProfileAuthManager {
   private readonly cookieStorageService: CookieStorageService;
   private readonly logger: Logger;
   private readonly geminiClient: IGeminiClientService;
+  private readonly silentRefresh: SilentRefreshFn;
 
   constructor(deps: ProfileAuthManagerDeps) {
     this.profileManager = deps.profileManager;
     this.cookieStorageService = deps.cookieStorageService;
     this.logger = deps.logger;
     this.geminiClient = deps.geminiClient;
+    this.silentRefresh = deps.silentRefresh;
   }
 
-  ensureAuthenticated(profileName?: string): LoadedCookies {
+  async autoExtendSession(profileName: string): Promise<boolean> {
+    const name = profileName ?? getDefaultProfileName();
+    validateProfileName(name);
+
+    let cookies: Cookie[];
+    try {
+      cookies = this.cookieStorageService.loadAllCookiesForProfile(name);
+    } catch {
+      return false;
+    }
+
+    if (checkCookieFreshness(cookies)) {
+      return true;
+    }
+
+    return this.silentRefresh(name);
+  }
+
+  async ensureAuthenticated(profileName?: string): Promise<LoadedCookies> {
     const name = profileName ?? getDefaultProfileName();
     validateProfileName(name);
 
     if (!this.profileManager.hasValidCookies(name)) {
+      const extended = await this.autoExtendSession(name);
+      if (extended) {
+        this.logger.info(`Session auto-refreshed for profile '${name}'`);
+        return this.cookieStorageService.loadCookiesForProfile(name);
+      }
       throw new AuthenticationError(
         `No valid session for profile '${name}'. Run 'gemiterm login' to authenticate.`,
       );

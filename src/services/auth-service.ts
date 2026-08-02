@@ -3,6 +3,7 @@ import type { Cookie, AuthResult } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { PlaywrightCliDriver } from "./playwright-cli-driver.ts";
 import type { CookieMonitor } from "./cookie-monitor.ts";
+import { CookieMonitor as CookieMonitorImpl } from "./cookie-monitor.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
 import { ensureConfigDir, getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
@@ -12,12 +13,14 @@ import { isRunningElevated, ElevationError } from "../infrastructure/elevation.t
 
 const GEMINI_AUTH_URL = "https://gemini.google.com/app";
 const DEFAULT_AUTH_TIMEOUT_MS = 300_000;
+const SILENT_REFRESH_TIMEOUT_MS = 30_000;
 
 export interface AuthServiceDeps {
   driver: PlaywrightCliDriver;
   cookieMonitor: CookieMonitor;
   cookieStorage: CookieStorage;
   logger: Logger;
+  silentRefreshMonitorFactory?: () => CookieMonitor;
 }
 
 export class AuthServiceTimeoutError extends Error {
@@ -32,12 +35,15 @@ export class AuthService {
   private readonly cookieMonitor: CookieMonitor;
   private readonly cookieStorage: CookieStorage;
   private readonly logger: Logger;
+  private readonly silentRefreshMonitorFactory: () => CookieMonitor;
 
   constructor(deps: AuthServiceDeps) {
     this.driver = deps.driver;
     this.cookieMonitor = deps.cookieMonitor;
     this.cookieStorage = deps.cookieStorage;
     this.logger = deps.logger;
+    this.silentRefreshMonitorFactory = deps.silentRefreshMonitorFactory
+      ?? (() => new CookieMonitorImpl({ driver: deps.driver, logger: deps.logger }));
   }
 
   async authenticate(profileName?: string): Promise<AuthResult> {
@@ -182,6 +188,71 @@ export class AuthService {
     } catch (err) {
       this.logger.warn(`Failed to close browser: ${err}`);
     }
+  }
+
+  async silentRefresh(profileName: string, timeoutMs: number = SILENT_REFRESH_TIMEOUT_MS): Promise<boolean> {
+    const name = profileName ?? getDefaultProfileName();
+    try {
+      validateProfileName(name);
+    } catch {
+      return false;
+    }
+
+    this.logger.debug(`Silent refresh attempt for profile: ${name}`);
+
+    try {
+      await this.driver.openHeadless(GEMINI_AUTH_URL, name, name);
+
+      const statePath = getProfilePath(name);
+      if (existsFile(statePath)) {
+        try {
+          await this.driver.stateLoad(name, statePath);
+        } catch (err) {
+          this.logger.debug(`silentRefresh: stateLoad failed: ${err}`);
+          return false;
+        }
+      } else {
+        this.logger.debug(`silentRefresh: no existing state for profile '${name}'`);
+        return false;
+      }
+
+      const cookies = await this.waitForSilentLogin(name, timeoutMs);
+      if (cookies) {
+        await this.extractCookies(name, cookies);
+      }
+      return cookies !== null;
+    } catch (err) {
+      this.logger.debug(`silentRefresh: ${err}`);
+      return false;
+    } finally {
+      await this.closeBrowser(name);
+    }
+  }
+
+  private waitForSilentLogin(profileName: string, timeoutMs: number): Promise<Cookie[] | null> {
+    const silentMonitor = this.silentRefreshMonitorFactory();
+    return new Promise<Cookie[] | null>((resolve) => {
+      let settled = false;
+      const settle = (value: Cookie[] | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+
+      const timeoutHandle = setTimeout(() => {
+        silentMonitor.stop();
+        settle(null);
+      }, timeoutMs);
+
+      silentMonitor.start(
+        profileName,
+        (cookies) => {
+          clearTimeout(timeoutHandle);
+          settle(cookies);
+        },
+        timeoutMs,
+      );
+    });
   }
 
   private getCookieExpiry(cookies: Cookie[]): Date | null {

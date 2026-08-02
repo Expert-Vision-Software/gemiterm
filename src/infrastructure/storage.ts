@@ -38,7 +38,7 @@ function getCookieExpiryTimestamp(cookies: Cookie[]): number | null {
   return maxExpiry;
 }
 
-function checkCookieFreshness(cookies: Cookie[]): boolean {
+export function checkCookieFreshness(cookies: Cookie[]): boolean {
   for (const cookie of cookies) {
     if (cookie.name === "__Secure-1PSIDTS" && cookie.expires > 0) {
       const threshold = Date.now() + COOKIE_EXPIRY_THRESHOLD_MS;

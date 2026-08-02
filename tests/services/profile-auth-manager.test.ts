@@ -76,6 +76,7 @@ function makeExpiredCookies(): Cookie[] {
 function createManager(
   profileManager: ProfileManagerType,
   geminiClient?: IGeminiClientService,
+  silentRefresh: (profileName: string) => Promise<boolean> = async () => false,
 ): ProfileAuthManager {
   const cookieStorage = new CookieStorageService({
     cookieStorage: new CookieStorage(),
@@ -92,6 +93,7 @@ function createManager(
       async profileHasConversation() { return false; },
       forProfile() { return this as unknown as IGeminiClientService; },
     },
+    silentRefresh,
   });
 }
 
@@ -107,30 +109,30 @@ afterEach(() => {
 
 describe("ProfileAuthManager", () => {
   describe("ensureAuthenticated", () => {
-    test("returns cookies for a profile with valid session", () => {
+    test("returns cookies for a profile with valid session", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeValidCookies());
 
       const mgr = createManager(manager);
-      const cookies = mgr.ensureAuthenticated("default");
+      const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
       expect(cookies.secure_1psidts).toBe("test-psidts-value");
     });
 
-    test("throws AuthenticationError when no valid cookies", () => {
+    test("throws AuthenticationError when no valid cookies", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
 
       const mgr = createManager(manager);
 
-      expect(() => mgr.ensureAuthenticated("default")).toThrow("No valid session");
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
     });
 
-    test("throws AuthenticationError with expired cookies", () => {
+    test("throws AuthenticationError with expired cookies", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -138,18 +140,75 @@ describe("ProfileAuthManager", () => {
 
       const mgr = createManager(manager);
 
-      expect(() => mgr.ensureAuthenticated("default")).toThrow("No valid session");
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
     });
 
-    test("throws on invalid profile name", () => {
+    test("auto-extends session before throwing when silentRefresh succeeds", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeExpiredCookies());
+
+      const silentRefresh = mock(async (_profileName: string) => {
+        storage.save("default", makeValidCookies());
+        return true;
+      });
+
+      const infoSpy = mock(() => {});
+      const testLogger = new Logger("test");
+      testLogger.info = infoSpy;
+
+      const cookieStorage = new CookieStorageService({
+        cookieStorage: storage,
+        logger: testLogger,
+      });
+
+      const mgr = new ProfileAuthManager({
+        profileManager: manager,
+        cookieStorageService: cookieStorage,
+        logger: testLogger,
+        geminiClient: {
+          async deleteChat() { return; },
+          async sendMessage() { return ""; },
+          async startNewChat() { return { response: "", conversationId: "" }; },
+          async profileHasConversation() { return false; },
+          forProfile() { return this as unknown as IGeminiClientService; },
+        },
+        silentRefresh,
+      });
+
+      const cookies = await mgr.ensureAuthenticated("default");
+
+      expect(cookies.secure_1psid).toBe("test-psid-value");
+      expect(silentRefresh).toHaveBeenCalledWith("default");
+      expect(infoSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Session auto-refreshed for profile 'default'"),
+      );
+    });
+
+    test("throws AuthenticationError when auto-extend fails", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeExpiredCookies());
+
+      const silentRefresh = mock(async (_profileName: string) => false);
+
+      const mgr = createManager(manager, undefined, silentRefresh);
+
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
+      expect(silentRefresh).toHaveBeenCalledWith("default");
+    });
+
+    test("throws on invalid profile name", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       const mgr = createManager(manager);
 
-      expect(() => mgr.ensureAuthenticated("bad name!")).toThrow("invalid characters");
+      await expect(mgr.ensureAuthenticated("bad name!")).rejects.toThrow("invalid characters");
     });
 
-    test("uses default profile when none specified", () => {
+    test("uses default profile when none specified", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -160,9 +219,70 @@ describe("ProfileAuthManager", () => {
       writeFileSync(join(markerDir, "default-profile"), "default", "utf-8");
 
       const mgr = createManager(manager);
-      const cookies = mgr.ensureAuthenticated();
+      const cookies = await mgr.ensureAuthenticated();
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
+    });
+  });
+
+  describe("autoExtendSession", () => {
+    test("returns true when cookies are already fresh without calling silentRefresh", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeValidCookies());
+
+      const silentRefresh = mock(async (_profileName: string) => true);
+
+      const mgr = createManager(manager, undefined, silentRefresh);
+      const result = await mgr.autoExtendSession("default");
+
+      expect(result).toBe(true);
+      expect(silentRefresh).not.toHaveBeenCalled();
+    });
+
+    test("calls silentRefresh when cookies are within the 1-hour grace window", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeExpiredCookies());
+
+      const silentRefresh = mock(async (_profileName: string) => true);
+
+      const mgr = createManager(manager, undefined, silentRefresh);
+      const result = await mgr.autoExtendSession("default");
+
+      expect(result).toBe(true);
+      expect(silentRefresh).toHaveBeenCalledWith("default");
+    });
+
+    test("returns false when silentRefresh fails", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeExpiredCookies());
+
+      const silentRefresh = mock(async (_profileName: string) => false);
+
+      const mgr = createManager(manager, undefined, silentRefresh);
+      const result = await mgr.autoExtendSession("default");
+
+      expect(result).toBe(false);
+      expect(silentRefresh).toHaveBeenCalledWith("default");
+    });
+
+    test("returns false when profile has no cookies file", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("ghost");
+
+      const silentRefresh = mock(async (_profileName: string) => true);
+
+      const mgr = createManager(manager, undefined, silentRefresh);
+      const result = await mgr.autoExtendSession("ghost");
+
+      expect(result).toBe(false);
+      expect(silentRefresh).not.toHaveBeenCalled();
     });
   });
 

@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { CookieStorage, ProfileManager } from "../../src/infrastructure/storage.ts";
+import { CookieStorage, ProfileManager, checkCookieFreshness } from "../../src/infrastructure/storage.ts";
 import type { Cookie } from "../../src/core/types.ts";
 
 const TEST_DIR = join(tmpdir(), "gemiterm-test-storage");
@@ -422,5 +422,53 @@ describe("ProfileManager", () => {
 
   test("loadCookiesForApi throws for missing profile", () => {
     expect(() => manager.loadCookiesForApi("ghost")).toThrow("No storage state found");
+  });
+});
+
+describe("checkCookieFreshness", () => {
+  test("is publicly importable as a function", () => {
+    expect(typeof checkCookieFreshness).toBe("function");
+  });
+
+  test("returns true for fresh cookies (expires > 1 hour away)", () => {
+    expect(checkCookieFreshness(makeValidCookies())).toBe(true);
+  });
+
+  test("returns false for cookies within the 1-hour grace window", () => {
+    expect(checkCookieFreshness(makeNearExpiryCookies())).toBe(false);
+  });
+
+  test("returns false for expired cookies", () => {
+    expect(checkCookieFreshness(makeExpiredCookies())).toBe(false);
+  });
+
+  test("returns true for session cookies (expires: -1)", () => {
+    const sessionCookies: Cookie[] = [
+      {
+        name: "__Secure-1PSID",
+        value: "psid",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__Secure-1PSIDTS",
+        value: "psidts",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ];
+    expect(checkCookieFreshness(sessionCookies)).toBe(true);
+  });
+
+  test("returns true for empty cookie list", () => {
+    expect(checkCookieFreshness([])).toBe(true);
   });
 });

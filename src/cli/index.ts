@@ -27,6 +27,11 @@ import {
   GetAuthStatusQueryHandler,
   ListModelsQueryHandler,
 } from "../core/query-handlers.ts";
+import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
+import { CookieMonitor } from "../services/cookie-monitor.ts";
+import { AuthService } from "../services/auth-service.ts";
+import { confirm } from "./utils/prompts.ts";
+import { runReauthFlow } from "./utils/reauth.ts";
 
 const pkg = getPackageJson(import.meta.url);
 
@@ -34,6 +39,14 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
   const logger = new Logger("mediator");
   const cookieStorage = new CookieStorage();
   const profileManager = new ProfileManager(cookieStorage);
+  const driver = new PlaywrightCliDriver();
+  const cookieMonitor = new CookieMonitor({ driver, logger });
+  const authService = new AuthService({
+    driver,
+    cookieMonitor,
+    cookieStorage,
+    logger,
+  });
 
   const profileQueryService = {
     async getProfileStatuses() {
@@ -51,76 +64,107 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
   };
 
   const cookieStorageService = new CookieStorageService({ cookieStorage, logger });
+  const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, cookieStorageService);
+  try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
+  const profileAuthManager = new ProfileAuthManager({
+    profileManager,
+    cookieStorageService,
+    logger,
+    geminiClient: factoryClient,
+    silentRefresh: (profileName: string) => authService.silentRefresh(profileName),
+  });
+
   let geminiClient: GeminiClientService | null = null;
 
-  function getGeminiClient(): GeminiClientService {
-    if (geminiClient) return geminiClient;
+  async function getGeminiClient(profileName?: string): Promise<GeminiClientService> {
+    if (geminiClient && (!profileName || profileName === geminiClient.profileName)) {
+      return geminiClient;
+    }
     const profiles = listProfiles();
     if (profiles.length === 0) {
       throw new AuthenticationError();
     }
-    const profileName = getDefaultProfileName();
+    const targetProfile = profileName ?? getDefaultProfileName();
     try {
-      const cookieData = profileManager.loadCookiesForApi(profileName);
-      geminiClient = new GeminiClientService(
-        { secure1psid: cookieData.secure1psid, secure1psidts: cookieData.secure1psidts },
-        logger,
-        cookieStorageService,
-        profileName,
-      );
-      return geminiClient;
-    } catch {
-      throw new AuthenticationError();
+      const cookies = await profileAuthManager.ensureAuthenticated(targetProfile);
+      return buildClient(targetProfile, cookies);
+    } catch (originalError) {
+      if (!(originalError instanceof AuthenticationError)) throw originalError;
+      await promptAndReauth(targetProfile, originalError);
+      const cookies = await profileAuthManager.ensureAuthenticated(targetProfile);
+      return buildClient(targetProfile, cookies);
     }
   }
 
-  const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, cookieStorageService);
-  try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
-  const profileAuthManager = new ProfileAuthManager({ profileManager, cookieStorageService, logger, geminiClient: factoryClient });
+  function buildClient(profileName: string, cookies: { secure_1psid: string; secure_1psidts: string | null }): GeminiClientService {
+    const client = new GeminiClientService(
+      { secure1psid: cookies.secure_1psid, secure1psidts: cookies.secure_1psidts },
+      logger,
+      cookieStorageService,
+      profileName,
+    );
+    geminiClient = client;
+    return client;
+  }
+
+  async function promptAndReauth(profileName: string, originalError: AuthenticationError): Promise<void> {
+    await runReauthFlow(profileName, { authService, confirmPrompt: confirm, originalError });
+  }
 
   mediator.registerQueryHandler(new GetAuthStatusQueryHandler(profileQueryService));
   mediator.registerQueryHandler(new GetProfileStatusesQueryHandler(profileQueryService));
-  mediator.registerQueryHandler(new ListChatsQueryHandler(getGeminiClient, profileManager, logger));
-  mediator.registerQueryHandler(new FetchChatQueryHandler({
-    async listChats(options) { return getGeminiClient().listChats(options); },
-    async fetchChat(id) { return getGeminiClient().fetchChat(id); },
-    async listModels() { return getGeminiClient().listModels(); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-  }));
-  mediator.registerQueryHandler(new ListModelsQueryHandler({
-    async listChats(options) { return getGeminiClient().listChats(options); },
-    async fetchChat(id) { return getGeminiClient().fetchChat(id); },
-    async listModels() { return getGeminiClient().listModels(); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-  }));
+  mediator.registerQueryHandler(new ListChatsQueryHandler(async () => getGeminiClient(), profileManager, logger));
+
+  const clientService = {
+    async listChats(options?: { limit?: number; offset?: number; search?: string }) {
+      return (await getGeminiClient()).listChats(options);
+    },
+    async fetchChat(id: string) {
+      return (await getGeminiClient()).fetchChat(id);
+    },
+    async listModels() {
+      return (await getGeminiClient()).listModels();
+    },
+    forProfile(name: string) {
+      const c = geminiClient;
+      if (!c) throw new AuthenticationError();
+      return c.forProfile(name);
+    },
+  };
+
+  mediator.registerQueryHandler(new FetchChatQueryHandler(clientService));
+  mediator.registerQueryHandler(new ListModelsQueryHandler(clientService));
+
+  const commandClientService = {
+    async deleteChat(id: string) {
+      return (await getGeminiClient()).deleteChat(id);
+    },
+    async sendMessage(id: string, msg: string) {
+      return (await getGeminiClient()).sendMessage(id, msg);
+    },
+    async startNewChat(msg: string) {
+      return (await getGeminiClient()).startNewChat(msg);
+    },
+    async profileHasConversation(name: string, id: string) {
+      return (await getGeminiClient()).profileHasConversation(name, id);
+    },
+    forProfile(name: string) {
+      const c = geminiClient;
+      if (!c) throw new AuthenticationError();
+      return c.forProfile(name);
+    },
+    async listChats(options?: { limit?: number; offset?: number; search?: string }) {
+      return (await getGeminiClient()).listChats(options);
+    },
+  };
+
   mediator.registerCommandHandler(new AuthenticateCommandHandler(null as any));
   mediator.registerCommandHandler(new DeleteProfileCommandHandler(null as any));
   mediator.registerCommandHandler(new RenameProfileCommandHandler(null as any));
   mediator.registerCommandHandler(new SetDefaultProfileCommandHandler(null as any));
-  mediator.registerCommandHandler(new DeleteConversationCommandHandler({
-    async deleteChat(id) { return getGeminiClient().deleteChat(id); },
-    async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
-    async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
-    async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-    async listChats(options) { return getGeminiClient().listChats(options); },
-  }));
-  mediator.registerCommandHandler(new SendMessageCommandHandler({
-    async deleteChat(id) { return getGeminiClient().deleteChat(id); },
-    async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
-    async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
-    async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-    async listChats(options) { return getGeminiClient().listChats(options); },
-  }));
-  mediator.registerCommandHandler(new StartNewChatCommandHandler({
-    async deleteChat(id) { return getGeminiClient().deleteChat(id); },
-    async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
-    async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
-    async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-    async listChats(options) { return getGeminiClient().listChats(options); },
-  }));
+  mediator.registerCommandHandler(new DeleteConversationCommandHandler(commandClientService));
+  mediator.registerCommandHandler(new SendMessageCommandHandler(commandClientService));
+  mediator.registerCommandHandler(new StartNewChatCommandHandler(commandClientService));
 
   return profileAuthManager;
 }

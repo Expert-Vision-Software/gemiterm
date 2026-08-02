@@ -141,6 +141,65 @@ describe("PlaywrightCliDriver", () => {
     });
   });
 
+  describe("openHeadless", () => {
+    test("omits --headed and --persistent flags", () => {
+      const d = new PlaywrightCliDriver({
+        runner: createMockRunner(),
+        profileDirResolver: (name) => `/abs/path/to/${name}`,
+      });
+      const args = d.buildOpenHeadlessArgs("https://gemini.google.com/app", "p1", "s1");
+      expect(args).toContain("open");
+      expect(args).toContain("https://gemini.google.com/app");
+      expect(args).toContain("--browser=chromium");
+      expect(args).toContain("--profile=/abs/path/to/p1");
+      expect(args).toContain("-s=s1");
+      expect(args).not.toContain("--headed");
+      expect(args).not.toContain("--persistent");
+    });
+
+    test("omits the session flag when no session is provided", () => {
+      const d = new PlaywrightCliDriver({
+        runner: createMockRunner(),
+        profileDirResolver: (name) => `/abs/path/to/${name}`,
+      });
+      const args = d.buildOpenHeadlessArgs("https://example.com", "p1");
+      expect(args).not.toContain(expect.stringContaining("-s="));
+      expect(args).not.toContain("--headed");
+      expect(args).not.toContain("--persistent");
+      expect(args).toContain("open");
+      expect(args).toContain("https://example.com");
+    });
+
+    test("uses injected profileDirResolver for --profile path", () => {
+      const resolver = mock((name: string) => `/custom/root/${name}`);
+      const d = new PlaywrightCliDriver({ runner: createMockRunner(), profileDirResolver: resolver });
+      const args = d.buildOpenHeadlessArgs("https://gemini.google.com/app", "p1", "s1");
+      expect(args).toContain("--profile=/custom/root/p1");
+      expect(resolver).toHaveBeenCalledWith("p1");
+    });
+
+    test("openHeadless runs the CLI with expected headless args", async () => {
+      const runner = createMockRunner();
+      const d = new PlaywrightCliDriver({ runner });
+      await d.openHeadless("https://gemini.google.com/app", "p1", "s1");
+      expect(runner._run).toHaveBeenCalledTimes(1);
+      const args = runner._run.mock.calls[0]![0] as string[];
+      expect(args[0]).toBe("-s=s1");
+      expect(args).toContain("open");
+      expect(args).toContain("--browser=chromium");
+      expect(args).toContain("https://gemini.google.com/app");
+      expect(args).not.toContain("--headed");
+      expect(args).not.toContain("--persistent");
+    });
+
+    test("openHeadless throws PlaywrightCliError when open command fails", async () => {
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "open failed" });
+      const d = new PlaywrightCliDriver({ runner });
+      await expect(d.openHeadless("https://gemini.google.com/app", "p1", "s1")).rejects.toBeInstanceOf(PlaywrightCliError);
+    });
+  });
+
   describe("evalJs", () => {
     test("passes expression with session and --raw flag", async () => {
       const runner = createMockRunner();
