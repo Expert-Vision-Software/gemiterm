@@ -133,4 +133,7 @@ returned as "authenticated" while every API call returns empty.
 
 This is the bug-report draft. The deterministic regression test suite that
 captures the symptom is filed separately as `phatom-auth-repro-with-tests`.
-That change defines the test contract; this change consumes it.
+That change defines the test contract; this change consumes it. The
+`phantom-auth-detection` capability spec lives at
+`openspec/changes/phatom-auth-repro-with-tests/specs/phantom-auth-detection/spec.md`
+and codifies the server-side session-validity contract that the fix must satisfy.

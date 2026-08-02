@@ -64,7 +64,7 @@
 
 ## 5. Coordination with the fix change
 
-- [ ] 5.1 Add a note to `openspec/changes/phantom-auth-ultimate-fix/proposal.md` (via amendment in the next session) referencing the `phantom-auth-detection` capability spec defined in this change's `specs/phantom-auth-detection/spec.md`.
+- [x] 5.1 Add a note to `openspec/changes/phantom-auth-ultimate-fix/proposal.md` (via amendment in the next session) referencing the `phantom-auth-detection` capability spec defined in this change's `specs/phantom-auth-detection/spec.md`.
 - [ ] 5.2 When `phantom-auth-ultimate-fix` lands, re-run `bun test tests/services/phantom-auth.test.ts` to confirm the five scenarios pass (green).
 - [ ] 5.3 Open Question A (probe budget / cache TTL) and Open Question B (empty-list vs. legitimate empty profile) are resolved by the fix change's design; adjust test #4's exact assertion if the chosen TTL differs from the spec's default 5 minutes.
 
