@@ -127,11 +127,15 @@ The `ProfileManager` class MUST expose a `list()` method that returns the sorted
 The `ProfileManager` class MUST expose a `getStatus(name)` method returning a `ProfileStatus` object. The method MUST report `exists: false` and `isActive: false` (with `expiresAt: null`) when the profile's storage file does not exist. When the file exists, the method MUST attempt to load the cookies and compute `isActive` from cookie validity and freshness (see Requirement: Freshness and Validity). If loading throws, the method MUST return `exists: true`, `isActive: false`, and `expiresAt: null`. The `isDefault` field MUST reflect whether `name` equals the current default profile name.
 
 #### Scenario: Status for a valid active profile
-- **WHEN** a profile has fresh `__Secure-1PSID` and `__Secure-1PSIDTS` cookies
+- **WHEN** a profile has fresh `__Secure-1PSID` and `__Secure-1PSIDTS` cookies (expiring more than 1 hour from now)
 - **THEN** `getStatus(name)` returns `exists: true`, `isActive: true`, a non-null `expiresAt`, and the correct `isDefault`
 
 #### Scenario: Status for an expired profile
 - **WHEN** a profile's cookies are expired
+- **THEN** `getStatus(name)` returns `exists: true`, `isActive: false`
+
+#### Scenario: Status for near-expiry cookies (within 1-hour freshness window)
+- **WHEN** a profile's `__Secure-1PSIDTS` cookie expires within 1 hour from now (but has not yet passed its absolute expiry)
 - **THEN** `getStatus(name)` returns `exists: true`, `isActive: false`
 
 #### Scenario: Status for a missing profile
@@ -180,14 +184,14 @@ The `ProfileManager` class MUST expose a `loadCookiesForApi(profileName)` method
 - **THEN** `loadCookiesForApi(name)` throws an error whose message contains `No storage state found`
 
 ### Requirement: Freshness and Validity
-A profile's cookies are considered valid and fresh when ALL of the following are true: (a) the cookie set includes both `__Secure-1PSID` and `__Secure-1PSIDTS`, (b) the `__Secure-1PSIDTS` cookie has an `expires` value greater than 0, and (c) the resulting expiry timestamp (cookie `expires` in milliseconds) is later than `now + 7 days` (the freshness threshold). The system MUST use these rules consistently in `hasValidCookies`, `getStatus`, and `loadCookiesForApi`.
+A profile's cookies are considered valid and fresh when ALL of the following are true: (a) the cookie set includes both `__Secure-1PSID` and `__Secure-1PSIDTS`, (b) the `__Secure-1PSIDTS` cookie has an `expires` value greater than 0, and (c) the resulting expiry timestamp (cookie `expires` in milliseconds) is later than `now + 1 hour` (the freshness threshold). The system MUST use these rules consistently in `hasValidCookies`, `getStatus`, and `loadCookiesForApi`.
 
-#### Scenario: Freshness window uses 7-day threshold
-- **WHEN** a profile's `__Secure-1PSIDTS` cookie expires more than 7 days from now
+#### Scenario: Freshness window uses 1-hour threshold
+- **WHEN** a profile's `__Secure-1PSIDTS` cookie expires more than 1 hour from now
 - **THEN** `hasValidCookies` and `getStatus` both report the profile as active
 
-#### Scenario: Cookies inside the 7-day window are not fresh
-- **WHEN** a profile's `__Secure-1PSIDTS` cookie expires within 7 days from now (or has already passed)
+#### Scenario: Cookies inside the 1-hour window are not fresh
+- **WHEN** a profile's `__Secure-1PSIDTS` cookie expires within 1 hour from now (or has already passed)
 - **THEN** `hasValidCookies` returns `false` and `getStatus` reports `isActive: false`
 
 ### Requirement: Cookie JSON On-Disk Layout
