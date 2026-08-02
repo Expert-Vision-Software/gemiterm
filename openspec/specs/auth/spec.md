@@ -199,18 +199,23 @@ SHALL NOT fail the triggering operation.
   the failure is logged at debug level
 
 ### Requirement: ProfileAuthManager.ensureAuthenticated returns cookies or throws
-The `ProfileAuthManager.ensureAuthenticated(profileName?)` method MUST resolve the profile name (provided value, or the configured default), validate it, and check that the profile has valid cookies. If `profileManager.hasValidCookies(name)` returns `false`, the method MUST throw an `AuthenticationError` whose message contains `No valid session for profile '<name>'` and the substring `gemiterm login`. If the cookies are valid, the method MUST return the result of `cookieStorageService.loadCookiesForProfile(name)`.
+The `ProfileAuthManager.ensureAuthenticated(profileName?)` method MUST resolve the profile name (provided value, or the configured default), validate it, and check that the profile has valid cookies. If `profileManager.hasValidCookies(name)` returns `false`, the method MUST first attempt `autoExtendSession(name)`. If auto-extend succeeds (returns `true`), the method MUST log an info-level `"Session auto-refreshed for profile '<name>'"` message and return the result of `cookieStorageService.loadCookiesForProfile(name)`. If auto-extend fails (returns `false`), the method MUST throw an `AuthenticationError` whose message contains `No valid session for profile '<name>'` and the substring `gemiterm login`. If the cookies are valid on initial check, the method MUST return the result of `cookieStorageService.loadCookiesForProfile(name)` without attempting auto-extend.
 
 #### Scenario: Returns cookies for a profile with valid session
 - **WHEN** `ensureAuthenticated("default")` is called and the default profile has fresh cookies
 - **THEN** it returns a `LoadedCookies` object whose `secure_1psid` and `secure_1psidts` match the stored values
 
-#### Scenario: Throws AuthenticationError when no valid cookies
-- **WHEN** `ensureAuthenticated("default")` is called and the profile has no cookies
+#### Scenario: Auto-extends session before throwing AuthenticationError
+- **WHEN** `ensureAuthenticated("default")` is called and the profile's cookies are within the 1-hour grace window, but auto-extend succeeds
+- **THEN** the method logs `"Session auto-refreshed for profile 'default'"` and returns the `LoadedCookies`
+- **AND** `AuthenticationError` is NOT thrown
+
+#### Scenario: Throws AuthenticationError when auto-extend fails on expired cookies
+- **WHEN** `ensureAuthenticated("default")` is called and the profile's cookies are expired (or near-expiry) and auto-extend returns `false`
 - **THEN** it throws an `AuthenticationError` whose message contains `No valid session`
 
-#### Scenario: Throws AuthenticationError with expired cookies
-- **WHEN** `ensureAuthenticated("default")` is called and the profile's cookies are expired
+#### Scenario: Throws AuthenticationError when no cookies exist and auto-extend fails
+- **WHEN** `ensureAuthenticated("default")` is called and the profile has no cookies
 - **THEN** it throws an `AuthenticationError` whose message contains `No valid session`
 
 #### Scenario: Uses default profile when none specified
@@ -427,3 +432,138 @@ When `AuthCommand.authenticateWithProfile` (or its delegates) throws, the comman
 #### Scenario: Auth flow errors are propagated
 - **WHEN** the auth flow rejects with an error whose message is `Browser launch failed`
 - **THEN** `execute` rejects with an error whose message contains `Browser launch failed`
+
+### Requirement: AuthService.silentRefresh attempts headless session refresh
+The `AuthService.silentRefresh(profileName)` method MUST launch a headless Chromium browser via `PlaywrightCliDriver.openHeadless` targeting `https://gemini.google.com/app`, load existing cookies from disk via `stateLoad` using `getProfilePath(profileName)`, and use `CookieMonitor` with a 30-second timeout to detect fresh auth cookies. The method MUST return `true` if the monitor detects both required cookies within the timeout, and `false` otherwise. The method MUST ALWAYS close the browser session in a `finally` block. The method MUST NOT produce console output (silent operation). The method MUST NOT throw on any error (driver failure, timeout, missing profile) — all failures return `false`.
+
+#### Scenario: Silent refresh succeeds and captures fresh cookies
+- **WHEN** `silentRefresh("test-profile")` is called and Google recognizes the existing cookies as valid
+- **THEN** `openHeadless` is called with the Gemini URL and `"test-profile"` profile, `stateLoad` is called with the profile's storage path, `CookieMonitor.start` is called with a 30s timeout, the monitor callback fires with auth cookies, and the method returns `true`
+- **AND** `closeSession` is called in the `finally` block
+
+#### Scenario: Silent refresh returns false on timeout
+- **WHEN** `silentRefresh("test-profile")` is called and the `CookieMonitor` does not detect auth cookies within 30s
+- **THEN** the monitor times out, `closeSession` is called, and the method returns `false`
+
+#### Scenario: Silent refresh returns false on driver failure
+- **WHEN** `silentRefresh("test-profile")` is called and `openHeadless` throws
+- **THEN** the method catches the error, attempts `closeSession` in `finally`, and returns `false`
+
+#### Scenario: Silent refresh returns false when profile has no saved cookies
+- **WHEN** `silentRefresh("new-profile")` is called and no `storage_state.json` exists for that profile
+- **THEN** the `stateLoad` call fails (or is skipped), `closeSession` is called, and the method returns `false`
+
+#### Scenario: Silent refresh returns false when cookies are expired on Google's side
+- **WHEN** `silentRefresh("expired-profile")` is called and the loaded cookies are no longer recognized (Google shows login page)
+- **THEN** the `CookieMonitor` does not detect auth cookies within 30s, the monitor stops, the browser is closed, and the method returns `false`
+
+#### Scenario: Silent refresh does not print to stdout
+- **WHEN** `silentRefresh("test-profile")` is called and succeeds
+- **THEN** no console output is produced (no `console.log` or `console.error` calls from the method itself)
+
+#### Scenario: Silent refresh uses 30-second timeout
+- **WHEN** `silentRefresh("test-profile")` is called
+- **THEN** `CookieMonitor.start` is invoked with `timeoutMs` of `30_000` (30 seconds)
+
+### Requirement: PlaywrightCliDriver.openHeadless launches a headless browser
+The `PlaywrightCliDriver` class MUST expose an `openHeadless(url, profile, session?)` method. The method MUST build the same argument array as `buildOpenHeadedArgs` but without the `--headed` flag and without the `--persistent` flag. The method MUST resolve when the browser launches successfully and MUST throw `PlaywrightCliError` on failure.
+
+#### Scenario: openHeadless builds args without --headed and without --persistent
+- **WHEN** `openHeadless("https://gemini.google.com/app", "p1", "s1")` is called
+- **THEN** the runner is invoked with args containing `-s=s1`, `open`, `https://gemini.google.com/app`, `--browser=chromium`, and `--profile=<dir>/p1`
+- **AND** the args do NOT contain `--headed`
+- **AND** the args do NOT contain `--persistent`
+
+#### Scenario: openHeadless without session works
+- **WHEN** `openHeadless("https://example.com", "p1")` is called with no session argument
+- **THEN** the args do NOT contain `-s=` and the method resolves successfully
+
+### Requirement: CLI intercepts AuthenticationError and prompts for reauth
+When the `getGeminiClient()` factory in `src/cli/index.ts` encounters an `AuthenticationError` (either from `loadCookiesForApi` throwing or from `ProfileAuthManager.ensureAuthenticated` throwing), the factory MUST catch the error and, before propagating it, attempt to present a re-authentication prompt. The prompt MUST use the `confirm` function from the prompt facade (`src/cli/utils/prompts.ts`). The prompt message MUST contain the substring `Session for profile` and the profile name, and MUST contain the substring `Would you like to launch browser to re-authenticate?`.
+
+#### Scenario: User confirms reauth, browser launches, and operation retries
+- **WHEN** `getGeminiClient()` encounters an `AuthenticationError` for profile `"default"`, the user answers `y` to the confirm prompt, and the headed auth flow succeeds
+- **THEN** the factory calls `authService.authenticate("default")` (or equivalent auth flow), saves the resulting cookies, calls `profileManager.loadCookiesForApi("default")` again, constructs a new `GeminiClientService` with fresh cookie values, and returns it
+- **AND** the original caller (command handler) receives a working client and proceeds with the operation
+
+#### Scenario: User declines reauth, error propagates
+- **WHEN** `getGeminiClient()` encounters an `AuthenticationError` and the user answers `n` (or any non-y response) to the confirm prompt
+- **THEN** the factory re-throws the original `AuthenticationError`
+- **AND** the CLI error handler catches it and prints the error message, exiting with code 1
+
+#### Scenario: Non-TTY mode skips prompt and propagates error
+- **WHEN** `getGeminiClient()` encounters an `AuthenticationError` and `process.stdin.isTTY` is `false`
+- **THEN** the `confirm` call throws `NonInteractiveError`, which the factory catches and re-throws the original `AuthenticationError`
+- **AND** the behavior matches today's error path (error message printed, exit code 1)
+
+#### Scenario: Reauth retry fails, error propagates
+- **WHEN** `getGeminiClient()` encounters an `AuthenticationError`, the user confirms reauth, the auth flow succeeds, but the retry `loadCookiesForApi` still throws (e.g., cookies not saved correctly)
+- **THEN** the factory throws the second `AuthenticationError` without presenting another prompt (single retry only)
+- **AND** the CLI error handler catches it and exits with code 1
+
+### Requirement: Reauth prompt respects --profile flag
+When the CLI was invoked with `--profile/-p <name>`, the reauth prompt and the subsequent auth flow MUST target the specified profile, not the default profile. The confirm message MUST include the explicitly-specified profile name.
+
+#### Scenario: Reauth prompt with explicit profile
+- **WHEN** `getGeminiClient()` is called with `profileName` set to `"work"` (via `--profile work`) and encounters an `AuthenticationError`
+- **THEN** the confirm prompt message contains `"work"` and the auth flow targets the `"work"` profile
+
+### Requirement: Reauth prompt uses prompt facade
+The reauth prompt MUST use the `confirm()` function exported from `src/cli/utils/prompts.ts`. The prompt MUST NOT import from `@inquirer/prompts` directly. On `CancellationError` (user presses Ctrl+C during prompt), the factory MUST re-throw the original `AuthenticationError` (not the cancellation).
+
+#### Scenario: Ctrl+C during reauth prompt propagates auth error
+- **WHEN** the user presses Ctrl+C while the reauth confirm prompt is displayed
+- **THEN** the `confirm()` call throws `CancellationError`, the factory catches it and re-throws the original `AuthenticationError`
+- **AND** the CLI exits with the authentication error message, not a cancellation message
+
+### Requirement: ProfileAuthManager.autoExtendSession attempts silent refresh
+The `ProfileAuthManager.autoExtendSession(profileName)` method MUST attempt to silently extend a near-expiry session. The method MUST:
+1. Load the profile's cookies from `cookieStorageService.load(profileName)` (or equivalent storage access)
+2. Call `checkCookieFreshness(cookies)` from `src/infrastructure/storage.ts` to determine if cookies are within the 1-hour grace window
+3. If cookies are fresh (outside the window), return `true` immediately (no action needed)
+4. If cookies are within the window (not fresh), call a provided `silentRefresh` function (injected as a dependency) with the profile name
+5. Return the boolean result of `silentRefresh`
+
+If loading the cookies fails (no profile, no storage file), the method MUST return `false` without throwing.
+
+#### Scenario: autoExtendSession returns true when cookies are already fresh
+- **WHEN** `autoExtendSession("default")` is called and the profile's cookies are fresh (outside the 1-hour grace window)
+- **THEN** the method returns `true` without calling `silentRefresh`
+- **AND** no browser is launched
+
+#### Scenario: autoExtendSession returns true when silent refresh succeeds
+- **WHEN** `autoExtendSession("default")` is called and cookies are within the 1-hour grace window, and the injected `silentRefresh` returns `true`
+- **THEN** the method returns `true`
+
+#### Scenario: autoExtendSession returns false when silent refresh fails
+- **WHEN** `autoExtendSession("default")` is called and cookies are within the 1-hour grace window, and the injected `silentRefresh` returns `false`
+- **THEN** the method returns `false`
+
+#### Scenario: autoExtendSession returns false when profile has no cookies
+- **WHEN** `autoExtendSession("ghost")` is called and no storage file exists for the profile
+- **THEN** the method returns `false` without throwing
+
+### Requirement: ProfileAuthManager.ensureAuthenticated triggers auto-extend before throwing
+The `ProfileAuthManager.ensureAuthenticated(profileName?)` method MUST attempt auto-extend when cookies are not valid, before throwing `AuthenticationError`. The updated flow MUST be:
+1. Resolve and validate the profile name (unchanged)
+2. Check `profileManager.hasValidCookies(name)` (unchanged)
+3. If cookies are NOT valid, call `autoExtendSession(name)`
+4. If `autoExtendSession` returns `true`, proceed to load and return cookies (step 5)
+5. If `autoExtendSession` returns `false`, throw `AuthenticationError`
+6. If cookies ARE valid (step 2 passed), return `cookieStorageService.loadCookiesForProfile(name)` (unchanged)
+
+The method MUST log a brief `"Session auto-refreshed for profile '<name>'"` message at info level when auto-extend succeeds, before returning cookies.
+
+#### Scenario: ensureAuthenticated auto-extends and succeeds
+- **WHEN** `ensureAuthenticated("default")` is called, `hasValidCookies` returns `false`, and `autoExtendSession` returns `true`
+- **THEN** the method logs `"Session auto-refreshed for profile 'default'"` and returns the `LoadedCookies` for the profile
+- **AND** `AuthenticationError` is NOT thrown
+
+#### Scenario: ensureAuthenticated auto-extends and fails, throws error
+- **WHEN** `ensureAuthenticated("default")` is called, `hasValidCookies` returns `false`, and `autoExtendSession` returns `false`
+- **THEN** the method throws `AuthenticationError` with the message containing `"No valid session for profile 'default'"`
+- **AND** the logged message does NOT include `"Session auto-refreshed"`
+
+#### Scenario: ensureAuthenticated skips auto-extend when cookies are valid
+- **WHEN** `ensureAuthenticated("default")` is called and `hasValidCookies` returns `true`
+- **THEN** `autoExtendSession` is NOT called and the method returns `LoadedCookies` directly
