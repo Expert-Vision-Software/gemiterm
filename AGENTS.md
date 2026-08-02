@@ -58,12 +58,6 @@ Test count and the v2.0.0 release date (2026-06-08) are in `CHANGELOG.md`. Updat
 
 Test baseline files are at `docs/testing-baseline.xml` and `docs/testing-protocol.md`.
 
-Baseline metrics (BL-001, 2026-08-02):
-- 820 tests total (818 pass, 2 skip, 0 fail) across 52 files
-- Duration: 12.40s
-- expect() calls: 1648
-
-Use `bun test` to evaluate against baseline. The test count increased from the v2.0.0 baseline of 657 to 818.
 
 ---
 

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <TestingBaseline>
     <Metadata>
-        <LastUpdated>2026-08-02T04:33:08Z</LastUpdated>
-        <BaselineId>BL-001</BaselineId>
+        <LastUpdated>2026-08-02T12:00:00Z</LastUpdated>
+        <BaselineId>BL-002</BaselineId>
         <Framework>Bun + TypeScript CLI</Framework>
     </Metadata>
 
@@ -10,19 +10,19 @@
         <UnitTests>
             <Framework>bun test</Framework>
             <TestFiles>52</TestFiles>
-            <Passed>818</Passed>
+            <Passed>833</Passed>
             <Failed>0</Failed>
             <Skipped>2</Skipped>
-            <Total>820</Total>
+            <Total>835</Total>
             <Errors>0</Errors>
-            <Duration>12.40</Duration>
-            <ExpectCalls>1648</ExpectCalls>
+            <Duration>11.80</Duration>
+            <ExpectCalls>1675</ExpectCalls>
         </UnitTests>
         <IntegrationTests>
             <Framework>bun test</Framework>
             <Status>Active</Status>
-            <Total>820</Total>
-            <Passed>818</Passed>
+            <Total>835</Total>
+            <Passed>833</Passed>
             <Failed>0</Failed>
         </IntegrationTests>
         <SmokeTests>
@@ -78,6 +78,12 @@
     </Dependencies>
 
     <Changelog>
+        <Entry>
+            <BaselineId>BL-002</BaselineId>
+            <Date>2026-08-02</Date>
+            <Changes>Updated baseline: 835 tests (833 pass, 2 skip, 0 fail), duration 11.80s, 1675 expect() calls</Changes>
+            <Reason>Manual update requested; +15 tests from BL-001</Reason>
+        </Entry>
         <Entry>
             <BaselineId>BL-001</BaselineId>
             <Date>2026-08-02</Date>
