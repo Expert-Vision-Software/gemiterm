@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TestingBaseline>
+    <Metadata>
+        <LastUpdated>2026-08-02T04:33:08Z</LastUpdated>
+        <BaselineId>BL-001</BaselineId>
+        <Framework>Bun + TypeScript CLI</Framework>
+    </Metadata>
+
+    <Solution>
+        <UnitTests>
+            <Framework>bun test</Framework>
+            <TestFiles>52</TestFiles>
+            <Passed>818</Passed>
+            <Failed>0</Failed>
+            <Skipped>2</Skipped>
+            <Total>820</Total>
+            <Errors>0</Errors>
+            <Duration>12.40</Duration>
+            <ExpectCalls>1648</ExpectCalls>
+        </UnitTests>
+        <IntegrationTests>
+            <Framework>bun test</Framework>
+            <Status>Active</Status>
+            <Total>820</Total>
+            <Passed>818</Passed>
+            <Failed>0</Failed>
+        </IntegrationTests>
+        <SmokeTests>
+            <Framework>bun test</Framework>
+            <Status>Active</Status>
+            <Total>0</Total>
+            <Passed>0</Passed>
+            <Failed>0</Failed>
+        </SmokeTests>
+        <Build>
+            <Status>Success</Status>
+            <BuildTime>0.58</BuildTime>
+            <TypeCheckStatus>Success</TypeCheckStatus>
+            <LintMediationStatus>Success</LintMediationStatus>
+            <TotalProjects>1</TotalProjects>
+            <Warnings>0</Warnings>
+            <OutputDirectory>./dist</OutputDirectory>
+            <FileCount>1</FileCount>
+            <TotalSizeMB>94.81</TotalSizeMB>
+            <KeyFiles>
+                <File>
+                    <Name>gemiterm.exe</Name>
+                    <SizeMB>94.81</SizeMB>
+                </File>
+            </KeyFiles>
+        </Build>
+    </Solution>
+
+    <FailedTests>
+        <Test>
+            <Name>None</Name>
+        </Test>
+    </FailedTests>
+
+    <FlakyTests>
+        <Test>
+            <Name>None</Name>
+        </Test>
+    </FlakyTests>
+
+    <KnownErrors>
+        <Error>
+            <Description>None</Description>
+        </Error>
+    </KnownErrors>
+
+    <Dependencies>
+        <Solution>
+            <TargetFramework>bun</TargetFramework>
+            <PrimaryTestFramework>bun test</PrimaryTestFramework>
+            <BuildTooling>bun</BuildTooling>
+        </Solution>
+    </Dependencies>
+
+    <Changelog>
+        <Entry>
+            <BaselineId>BL-001</BaselineId>
+            <Date>2026-08-02</Date>
+            <Changes>Initial baseline established</Changes>
+            <Reason>Project baseline created with 820 tests (818 pass, 2 skip, 0 fail)</Reason>
+        </Entry>
+    </Changelog>
+</TestingBaseline>
