@@ -1233,7 +1233,7 @@ describe("persistRefreshedCookies", () => {
     logger = new Logger("test");
   });
 
-  test("persists refreshed __Secure-1PSID with metadata preserved and refreshed expires", async () => {
+  test("persists refreshed __Secure-1PSID with metadata preserved and original expires preserved", async () => {
     const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
       work: { secure_1psid: "work-sid", secure_1psidts: "work-ts" },
     };
@@ -1243,6 +1243,13 @@ describe("persistRefreshedCookies", () => {
       saveCalls.push({ name, cookies });
     }) as CookieStorage["save"];
     const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+    let originalExpires: number | undefined;
+    const initialCookies = storage.load("work");
+    const psidCookie = initialCookies.find((c) => c.name === "__Secure-1PSID");
+    if (psidCookie) {
+      originalExpires = psidCookie.expires;
+    }
 
     const d = installGeminiReverseMock({
       initImplementation: (client: RawGemini) => {
@@ -1266,7 +1273,8 @@ describe("persistRefreshedCookies", () => {
     expect(psid.httpOnly).toBe(true);
     expect(psid.secure).toBe(true);
     expect(psid.sameSite).toBe("Lax");
-    expect(psid.expires).toBeGreaterThan(Math.floor(Date.now() / 1000) + 6 * 24 * 60 * 60);
+    expect(originalExpires).toBeDefined();
+    expect(psid.expires).toBe(originalExpires);
     const ts = saveCalls[0].cookies.find((c) => c.name === "__Secure-1PSIDTS")!;
     expect(ts.value).toBe("work-ts");
 
