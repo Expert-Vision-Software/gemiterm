@@ -20,3 +20,4 @@ dist/
 
 # runtime / testing
 .gemiterm
+.serena/

@@ -1,3 +1,20 @@
+## [2.6.0] - 2026-08-03
+
+### Added
+
+- Phantom-authentication regression suite (`tests/services/phantom-auth.test.ts`) that locks the post-2h silent-empty-list symptom at the `ProfileAuthManager` seam.
+- Server-side session validity probe in `ProfileAuthManager.ensureAuthenticated`. When local cookies pass freshness, the manager now consults `geminiClient.listChats({ limit: 1 })` before returning the loaded cookies. A process-level probe cache (default TTL 150_000 ms, `GEMITERM_PROBE_TTL_MS` override) memoizes the result across calls in the same command run. A per-profile `profile-has-chats` marker is written to disk on every non-empty probe.
+- L1 cookie rotation via `accounts.google.com/RotateCookies` (`src/services/cookie-rotation.ts`). `AuthService.silentRefresh` now tries the RotateCookies POST first (no browser, no Playwright, deterministic single round-trip) and only falls through to the L2 headless browser when L1 returns `false` (network error, 401/403, or PSIDTS unchanged). Rate-limited by a 600 s disk-mtime guard and a module-level in-flight throttle. Skippable via `GEMITERM_SKIP_ROTATE_COOKIES`.
+- L2 headless refresh hardening. `CookieMonitor.start` accepts an optional `requireRotation` baseline; `AuthService.silentRefresh` snapshots active cookie values before the L2 launch and only commits a refresh when the polled cookies differ from the snapshot, preventing the "no-op rotation" failure mode where the loaded cookies are still valid and Google does not rotate them.
+
+### Fixed
+
+- `GeminiClientService.persistRefreshedCookies` now matches stored cookies by `(name, baselineValue)` instead of `name` only. The SDK jar carries only a `Record<string, string>` (no domain info), so the match key compares the stored cookie's value against `baselineSecure1psid` / `baselineSecure1psidts` captured at construction. On profiles whose storage file contains duplicate `__Secure-1PSID` / `__Secure-1PSIDTS` entries across domains (`.youtube.com` and `.google.com`), this prevents silently overwriting the non-matching domain entry.
+- Phantom-authentication symptom (post-2h `gemiterm list` returns empty despite locally-valid cookies and `Profile '<name>' is authenticated` log line). The server-side probe in `ProfileAuthManager.ensureAuthenticated` now detects Google-side session invalidation and triggers silent recovery via the L1 → L2 ladder.
+- `list -i` interactive browser: `executeAction` now forwards `chat.profile` to sub-commands (`fetch`, `export`, `continue`, `delete`). Previously the profile was discarded when building argv, forcing the sub-commands through `findProfileForConversation`'s sequential probe and throwing `AuthenticationError` for chats owned by non-default profiles when multiple authenticated profiles exist.
+
+---
+
 ## [2.5.0] - 2026-08-02
 
 ### Added

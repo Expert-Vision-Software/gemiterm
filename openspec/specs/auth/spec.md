@@ -198,12 +198,13 @@ SHALL NOT fail the triggering operation.
 - **THEN** the triggering API operation's result is returned normally and
   the failure is logged at debug level
 
-### Requirement: ProfileAuthManager.ensureAuthenticated returns cookies or throws
-The `ProfileAuthManager.ensureAuthenticated(profileName?)` method MUST resolve the profile name (provided value, or the configured default), validate it, and check that the profile has valid cookies. If `profileManager.hasValidCookies(name)` returns `false`, the method MUST first attempt `autoExtendSession(name)`. If auto-extend succeeds (returns `true`), the method MUST log an info-level `"Session auto-refreshed for profile '<name>'"` message and return the result of `cookieStorageService.loadCookiesForProfile(name)`. If auto-extend fails (returns `false`), the method MUST throw an `AuthenticationError` whose message contains `No valid session for profile '<name>'` and the substring `gemiterm login`. If the cookies are valid on initial check, the method MUST return the result of `cookieStorageService.loadCookiesForProfile(name)` without attempting auto-extend.
+### Requirement: ProfileAuthManager.ensureAuthenticated probes server before returning cookies
+The `ProfileAuthManager.ensureAuthenticated(profileName?)` method MUST resolve the profile name (provided value, or the configured default), validate it, and check that the profile has valid cookies. If `profileManager.hasValidCookies(name)` returns `false`, the method MUST first attempt `autoExtendSession(name)`. If auto-extend succeeds (returns `true`), the method MUST log an info-level `"Session auto-refreshed for profile '<name>'"` message and return the result of `cookieStorageService.loadCookiesForProfile(name)`. If auto-extend fails (returns `false`), the method MUST throw an `AuthenticationError` whose message contains `No valid session for profile '<name>'` and the substring `gemiterm login`. When `profileManager.hasValidCookies(name)` returns `true`, the method MUST consult a server-side validity probe (calling `geminiClient.listChats({ limit: 1 })`) before returning the loaded cookies. The probe result semantics are defined in the `phantom-auth-detection` capability spec. The probe is memoized with a process-level cache (default TTL 150_000 ms, overridable via `GEMITERM_PROBE_TTL_MS`).
 
-#### Scenario: Returns cookies for a profile with valid session
-- **WHEN** `ensureAuthenticated("default")` is called and the default profile has fresh cookies
+#### Scenario: Returns cookies for a profile with valid session (MODIFIED -- includes server probe)
+- **WHEN** `ensureAuthenticated("default")` is called and the default profile has locally-valid cookies AND the server-side probe returns a non-empty chat list
 - **THEN** it returns a `LoadedCookies` object whose `secure_1psid` and `secure_1psidts` match the stored values
+- **AND** the per-profile has-chats marker is written to disk
 
 #### Scenario: Auto-extends session before throwing AuthenticationError
 - **WHEN** `ensureAuthenticated("default")` is called and the profile's cookies are within the 1-hour grace window, but auto-extend succeeds
@@ -433,13 +434,30 @@ When `AuthCommand.authenticateWithProfile` (or its delegates) throws, the comman
 - **WHEN** the auth flow rejects with an error whose message is `Browser launch failed`
 - **THEN** `execute` rejects with an error whose message contains `Browser launch failed`
 
-### Requirement: AuthService.silentRefresh attempts headless session refresh
-The `AuthService.silentRefresh(profileName)` method MUST launch a headless Chromium browser via `PlaywrightCliDriver.openHeadless` targeting `https://gemini.google.com/app`, load existing cookies from disk via `stateLoad` using `getProfilePath(profileName)`, and use `CookieMonitor` with a 30-second timeout to detect fresh auth cookies. The method MUST return `true` if the monitor detects both required cookies within the timeout, and `false` otherwise. The method MUST ALWAYS close the browser session in a `finally` block. The method MUST NOT produce console output (silent operation). The method MUST NOT throw on any error (driver failure, timeout, missing profile) — all failures return `false`.
+### Requirement: AuthService.silentRefresh is a multi-layer recovery ladder
+The `AuthService.silentRefresh(profileName)` method MUST implement a recovery ladder:
+1. **L1 -- RotateCookies POST:** Call `rotateCookies(profileName)`. If `true`, return `true` immediately. No browser launch. No polling.
+2. **L2 -- Headless browser (fallback):** Only reached when L1 returns `false`. Launch headless Chromium via `openHeadless`, load cookies via `stateLoad`, start `CookieMonitor` with `requireRotation` baseline. Return `true` only when the monitor returns values that differ from the snapshot. Close browser in `finally`.
+3. Return `false` when both L1 and L2 fail.
 
-#### Scenario: Silent refresh succeeds and captures fresh cookies
-- **WHEN** `silentRefresh("test-profile")` is called and Google recognizes the existing cookies as valid
-- **THEN** `openHeadless` is called with the Gemini URL and `"test-profile"` profile, `stateLoad` is called with the profile's storage path, `CookieMonitor.start` is called with a 30s timeout, the monitor callback fires with auth cookies, and the method returns `true`
-- **AND** `closeSession` is called in the `finally` block
+The method MUST NOT produce console output (silent operation). The method MUST NOT throw on any error (driver failure, timeout, missing profile) — all failures return `false`.
+
+#### Scenario: L1 RotateCookies succeeds, returns true immediately
+- **WHEN** `silentRefresh("test-profile")` is called
+- **AND** `rotateCookies("test-profile")` returns `true` (fresh PSIDTS)
+- **THEN** the method returns `true` without launching a browser
+
+#### Scenario: L1 fails, L2 headless browser succeeds with rotated cookies
+- **WHEN** `silentRefresh("test-profile")` is called
+- **AND** `rotateCookies` returns `false`
+- **AND** the headless browser flow detects rotated cookies within 30s
+- **THEN** the method returns `true` and the browser is closed
+
+#### Scenario: Both L1 and L2 fail, returns false
+- **WHEN** `silentRefresh("test-profile")` is called
+- **AND** `rotateCookies` returns `false`
+- **AND** the headless browser times out without rotation
+- **THEN** the method returns `false`
 
 #### Scenario: Silent refresh returns false on timeout
 - **WHEN** `silentRefresh("test-profile")` is called and the `CookieMonitor` does not detect auth cookies within 30s
@@ -448,14 +466,6 @@ The `AuthService.silentRefresh(profileName)` method MUST launch a headless Chrom
 #### Scenario: Silent refresh returns false on driver failure
 - **WHEN** `silentRefresh("test-profile")` is called and `openHeadless` throws
 - **THEN** the method catches the error, attempts `closeSession` in `finally`, and returns `false`
-
-#### Scenario: Silent refresh returns false when profile has no saved cookies
-- **WHEN** `silentRefresh("new-profile")` is called and no `storage_state.json` exists for that profile
-- **THEN** the `stateLoad` call fails (or is skipped), `closeSession` is called, and the method returns `false`
-
-#### Scenario: Silent refresh returns false when cookies are expired on Google's side
-- **WHEN** `silentRefresh("expired-profile")` is called and the loaded cookies are no longer recognized (Google shows login page)
-- **THEN** the `CookieMonitor` does not detect auth cookies within 30s, the monitor stops, the browser is closed, and the method returns `false`
 
 #### Scenario: Silent refresh does not print to stdout
 - **WHEN** `silentRefresh("test-profile")` is called and succeeds

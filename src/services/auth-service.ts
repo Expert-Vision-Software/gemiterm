@@ -10,6 +10,8 @@ import { validateProfileName } from "../infrastructure/validators.ts";
 import { getProfilePath } from "../infrastructure/path-utils.ts";
 import { existsFile } from "../infrastructure/io.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
+import { rotateCookies, isGoogleDomainCookie } from "./cookie-rotation.ts";
+import { CookieStorageService } from "./cookie-storage-service.ts";
 
 const GEMINI_AUTH_URL = "https://gemini.google.com/app";
 const DEFAULT_AUTH_TIMEOUT_MS = 300_000;
@@ -19,6 +21,7 @@ export interface AuthServiceDeps {
   driver: PlaywrightCliDriver;
   cookieMonitor: CookieMonitor;
   cookieStorage: CookieStorage;
+  cookieStorageService: CookieStorageService;
   logger: Logger;
   silentRefreshMonitorFactory?: () => CookieMonitor;
 }
@@ -34,6 +37,7 @@ export class AuthService {
   private readonly driver: PlaywrightCliDriver;
   private readonly cookieMonitor: CookieMonitor;
   private readonly cookieStorage: CookieStorage;
+  private readonly cookieStorageService: CookieStorageService;
   private readonly logger: Logger;
   private readonly silentRefreshMonitorFactory: () => CookieMonitor;
 
@@ -41,6 +45,7 @@ export class AuthService {
     this.driver = deps.driver;
     this.cookieMonitor = deps.cookieMonitor;
     this.cookieStorage = deps.cookieStorage;
+    this.cookieStorageService = deps.cookieStorageService;
     this.logger = deps.logger;
     this.silentRefreshMonitorFactory = deps.silentRefreshMonitorFactory
       ?? (() => new CookieMonitorImpl({ driver: deps.driver, logger: deps.logger }));
@@ -201,6 +206,35 @@ export class AuthService {
     this.logger.debug(`Silent refresh attempt for profile: ${name}`);
 
     try {
+      const rotated = await rotateCookies(name, {
+        cookieStorage: this.cookieStorage,
+        cookieStorageService: this.cookieStorageService,
+        logger: this.logger,
+      });
+      if (rotated) {
+        return true;
+      }
+    } catch (err) {
+      this.logger.debug(`silentRefresh: L1 rotateCookies failed: ${err}`);
+    }
+
+    let snapshot: { activePsid: string; activePsidts: string | null } | null = null;
+    try {
+      const stored = this.cookieStorage.load(name);
+      const psid = stored.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value
+        ?? stored.find((c) => c.name === "__Secure-1PSID")?.value
+        ?? "";
+      const psidts = stored.find((c) => c.name === "__Secure-1PSIDTS" && isGoogleDomainCookie(c))?.value
+        ?? stored.find((c) => c.name === "__Secure-1PSIDTS")?.value
+        ?? null;
+      if (psid) {
+        snapshot = { activePsid: psid, activePsidts: psidts };
+      }
+    } catch (err) {
+      this.logger.debug(`silentRefresh: snapshot load failed: ${err}`);
+    }
+
+    try {
       await this.driver.openHeadless(GEMINI_AUTH_URL, name, name);
 
       const statePath = getProfilePath(name);
@@ -216,11 +250,24 @@ export class AuthService {
         return false;
       }
 
-      const cookies = await this.waitForSilentLogin(name, timeoutMs);
-      if (cookies) {
-        await this.extractCookies(name, cookies);
+      const cookies = await this.waitForSilentLogin(name, timeoutMs, snapshot ?? undefined);
+      if (!cookies) {
+        return false;
       }
-      return cookies !== null;
+      if (!snapshot) {
+        this.logger.debug(`silentRefresh: no cookie baseline for profile '${name}'; cannot verify rotation`);
+        return false;
+      }
+      const polledPsid = cookies.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value;
+      const polledPsidts = cookies.find((c) => c.name === "__Secure-1PSIDTS" && isGoogleDomainCookie(c))?.value ?? null;
+      const psidChanged = polledPsid !== undefined && polledPsid !== snapshot.activePsid;
+      const psidtsChanged = polledPsidts !== snapshot.activePsidts;
+      if (!psidChanged && !psidtsChanged) {
+        this.logger.debug(`silentRefresh: cookies unchanged vs baseline, treating as no rotation`);
+        return false;
+      }
+      await this.extractCookies(name, cookies);
+      return true;
     } catch (err) {
       this.logger.debug(`silentRefresh: ${err}`);
       return false;
@@ -229,7 +276,11 @@ export class AuthService {
     }
   }
 
-  private waitForSilentLogin(profileName: string, timeoutMs: number): Promise<Cookie[] | null> {
+  private waitForSilentLogin(
+    profileName: string,
+    timeoutMs: number,
+    requireRotation?: { activePsid: string; activePsidts: string | null },
+  ): Promise<Cookie[] | null> {
     const silentMonitor = this.silentRefreshMonitorFactory();
     return new Promise<Cookie[] | null>((resolve) => {
       let settled = false;
@@ -251,6 +302,7 @@ export class AuthService {
           settle(cookies);
         },
         timeoutMs,
+        requireRotation,
       );
     });
   }

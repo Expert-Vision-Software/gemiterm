@@ -4,6 +4,7 @@ import { homedir, platform, tmpdir } from "node:os";
 
 const STORAGE_STATE_FILE = "storage_state.json";
 const CHAT_METADATA_FILE = "chat-metadata.json";
+const PROFILE_HAS_CHATS_FILE = "profile-has-chats";
 const PROFILES_DIR = "profiles";
 const DEFAULT_PROFILE_MARKER = ".default";
 
@@ -49,6 +50,10 @@ function getProfileChatMetadataPath(name: string): string {
 
 function getProfileDir(name: string): string {
   return join(getProfilesDir(), name);
+}
+
+function getProfileHasChatsPath(name: string): string {
+  return join(getProfileDir(name), PROFILE_HAS_CHATS_FILE);
 }
 
 function getDefaultProfileMarkerPath(): string {
@@ -152,6 +157,7 @@ export {
   getProfilePath,
   getProfileChatMetadataPath,
   getProfileDir,
+  getProfileHasChatsPath,
   getDefaultProfileMarkerPath,
   getTempFilePath,
   isWSL,
@@ -159,6 +165,7 @@ export {
   getPackageJson,
   STORAGE_STATE_FILE,
   CHAT_METADATA_FILE,
+  PROFILE_HAS_CHATS_FILE,
   PROFILES_DIR,
   DEFAULT_PROFILE_MARKER,
 };

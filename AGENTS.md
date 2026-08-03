@@ -55,6 +55,8 @@ Test count and the v2.0.0 release date (2026-06-08) are in `CHANGELOG.md`. Updat
 
 Test baseline files are at `docs/testing-baseline.xml` and `docs/testing-protocol.md`.
 
+`tests/services/phantom-auth.test.ts` uses a `gimme(listChatsFn)` helper to create hand-rolled `IGeminiClientService` stubs with a spied `listChats`. This is the canonical pattern for testing at the `ProfileAuthManager` seam when the server-side probe contract must be asserted.
+
 
 ---
 

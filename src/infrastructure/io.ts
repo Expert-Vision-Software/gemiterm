@@ -22,6 +22,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { getProfileHasChatsPath } from "./path-utils.ts";
 
 export class IOError extends Error {
   override readonly name = "IOError";
@@ -160,6 +161,14 @@ function getFileMtime(path: string): Date | null {
   }
 }
 
+function writeProfileHasChats(profileName: string): void {
+  writeTextFile(getProfileHasChatsPath(profileName), "");
+}
+
+function readProfileHasChats(profileName: string): boolean {
+  return existsFile(getProfileHasChatsPath(profileName));
+}
+
 export {
   ensureDir,
   existsFile,
@@ -174,4 +183,6 @@ export {
   renameDir,
   isDirectory,
   listSubdirectories,
+  writeProfileHasChats,
+  readProfileHasChats,
 };
