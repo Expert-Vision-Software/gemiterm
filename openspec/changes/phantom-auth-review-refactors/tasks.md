@@ -38,3 +38,14 @@
 - [ ] 5.3 Verify no `"__Secure-1PSID"` or `"__Secure-1PSIDTS"` string literals remain in `src/services/` (use `grep -r` / `rg`). All should reference the constants from `cookie-constants.ts`.
 - [ ] 5.4 Verify `writeProfileHasChats` / `readProfileHasChats` / `getProfileHasChatsPath` each have at least 2 call sites across `src/` + `tests/`.
 - [ ] 5.5 Load and run skill `code-review` and confirm the five original findings are resolved.
+
+## 6. Code review follow-ups (non-urgent)
+
+- [ ] 6.1 Fix spec typo in `openspec/specs/silent-refresh-tightening/spec.md`: POST body `[000,"-0000000000000000000"]` should be `[0,"-0000000000000000000"]` (000 is invalid JSON; the code correctly uses `[0,...]`).
+- [ ] 6.2 In `src/services/cookie-rotation.ts`, replace `CookieStorage.save(profileName, next)` direct call with `CookieStorageService.saveCookiesForProfile(profileName, next)` to match the spec contract. Verify no bookkeeping is lost.
+- [ ] 6.3 Evaluate the post-refresh re-probe in `profile-auth-manager.ts:80-82` (`this.probeCache.delete(name); await this.probeServerSession(name)`) — decide whether to keep (adds correctness: re-validates after rotation) or remove (spec doesn't require it). Document decision.
+- [ ] 6.4 Add test for `GEMITERM_PROBE_TTL_MS` env var override (set to `"60000"` and assert TTL is 60_000 ms).
+- [ ] 6.5 Add test for `GEMITERM_SKIP_ROTATE_COOKIES=0` and `=false` (should NOT skip).
+- [ ] 6.6 Add disk-mtime guard boundary test (mtime exactly 600s ago should NOT skip).
+- [ ] 6.7 Run `bun test` and confirm baseline intact.
+- [ ] 6.8 Commit changes in git.
