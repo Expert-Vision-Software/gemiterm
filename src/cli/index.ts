@@ -41,10 +41,12 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
   const profileManager = new ProfileManager(cookieStorage);
   const driver = new PlaywrightCliDriver();
   const cookieMonitor = new CookieMonitor({ driver, logger });
+  const cookieStorageService = new CookieStorageService({ cookieStorage, logger });
   const authService = new AuthService({
     driver,
     cookieMonitor,
     cookieStorage,
+    cookieStorageService,
     logger,
   });
 
@@ -63,7 +65,6 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
     },
   };
 
-  const cookieStorageService = new CookieStorageService({ cookieStorage, logger });
   const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, cookieStorageService);
   try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
   const profileAuthManager = new ProfileAuthManager({

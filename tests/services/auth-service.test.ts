@@ -7,6 +7,7 @@ import { CookieMonitor } from "../../src/services/cookie-monitor.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
+import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
 import * as io from "../../src/infrastructure/io.ts";
 import * as elevation from "../../src/infrastructure/elevation.ts";
 
@@ -86,6 +87,7 @@ function buildService(
     driver: driver as never,
     cookieMonitor: cookieMonitor as never,
     cookieStorage: cookieStorage as never,
+    cookieStorageService: new CookieStorageService({ cookieStorage: cookieStorage as never, logger }) as never,
     logger,
     silentRefreshMonitorFactory: () => cookieMonitor as never,
   });
@@ -760,6 +762,48 @@ describe("AuthService", () => {
       expect(result).toBe(true);
       expect(fetchMock).not.toHaveBeenCalled();
       expect(driver.openHeadless).toHaveBeenCalledTimes(1);
+    });
+
+    test("L2 snapshot strict filter rejects evilgoogle.com; fallback catches by name", async () => {
+      const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+      const spoofedCookies: Cookie[] = [
+        {
+          name: "__Secure-1PSID",
+          value: "spoofed-psid",
+          domain: "evilgoogle.com",
+          path: "/",
+          expires: farFuture,
+          httpOnly: true,
+          secure: true,
+          sameSite: "Lax",
+        },
+        {
+          name: "__Secure-1PSIDTS",
+          value: "spoofed-psidts",
+          domain: "evilgoogle.com",
+          path: "/",
+          expires: farFuture,
+          httpOnly: true,
+          secure: true,
+          sameSite: "Lax",
+        },
+      ];
+      cookieStorage.load.mockReturnValue(spoofedCookies);
+      globalThis.fetch = mock(async () => {
+        throw new Error("network error");
+      }) as unknown as typeof fetch;
+      cookieMonitor.start.mockImplementationOnce(async () => {});
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("test-profile", 50);
+
+      expect(result).toBe(false);
+      expect(driver.openHeadless).toHaveBeenCalledTimes(1);
+      const monitorCall = cookieMonitor.start.mock.calls[0];
+      expect(monitorCall).toBeDefined();
+      const requireRotationArg = monitorCall?.[3] as { activePsid: string; activePsidts: string | null } | undefined;
+      expect(requireRotationArg?.activePsid).toBe("spoofed-psid");
+      expect(requireRotationArg?.activePsidts).toBe("spoofed-psidts");
     });
   });
 });

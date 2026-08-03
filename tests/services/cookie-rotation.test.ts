@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CookieStorage, ProfileManager } from "../../src/infrastructure/storage.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
+import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
 import { rotateCookies, _resetInFlightRotationsForTests } from "../../src/services/cookie-rotation.ts";
 import { getProfilePath } from "../../src/infrastructure/path-utils.ts";
 import type { Cookie } from "../../src/core/types.ts";
@@ -61,12 +62,14 @@ function successResponse(): Response {
 
 describe("rotateCookies", () => {
   let storage: CookieStorage;
+  let cookieStorageService: CookieStorageService;
   let logger: Logger;
 
   beforeEach(() => {
     process.env.GEMITERM_CONFIG_DIR = TEST_DIR;
     mkdirSync(TEST_DIR, { recursive: true });
     storage = new CookieStorage();
+    cookieStorageService = new CookieStorageService({ cookieStorage: storage, logger: new Logger("test") });
     new ProfileManager(storage).create("p");
     logger = new Logger("test");
   });
@@ -94,6 +97,7 @@ describe("rotateCookies", () => {
 
     const result = await rotateCookies("p", {
       cookieStorage: storage,
+      cookieStorageService,
       logger,
       fetcher: fetcher as unknown as typeof fetch,
     });
@@ -114,6 +118,7 @@ describe("rotateCookies", () => {
 
     const result = await rotateCookies("p", {
       cookieStorage: storage,
+      cookieStorageService,
       logger,
       fetcher: fetcher as unknown as typeof fetch,
     });
@@ -134,6 +139,7 @@ describe("rotateCookies", () => {
 
     const result = await rotateCookies("p", {
       cookieStorage: storage,
+      cookieStorageService,
       logger,
       fetcher: fetcher as unknown as typeof fetch,
     });
@@ -153,6 +159,7 @@ describe("rotateCookies", () => {
 
     const result = await rotateCookies("p", {
       cookieStorage: storage,
+      cookieStorageService,
       logger,
       fetcher: fetcher as unknown as typeof fetch,
     });
@@ -171,6 +178,7 @@ describe("rotateCookies", () => {
 
     const result = await rotateCookies("p", {
       cookieStorage: storage,
+      cookieStorageService,
       logger,
       fetcher: fetcher as unknown as typeof fetch,
     });
@@ -192,6 +200,7 @@ describe("rotateCookies", () => {
 
     const result = await rotateCookies("p", {
       cookieStorage: storage,
+      cookieStorageService,
       logger,
       fetcher: fetcher as unknown as typeof fetch,
       now: () => nowDate.getTime(),
@@ -211,12 +220,14 @@ describe("rotateCookies", () => {
     const [r1, r2] = await Promise.all([
       rotateCookies("p", {
         cookieStorage: storage,
-        logger,
+      cookieStorageService,
+      logger,
         fetcher: fetcher as unknown as typeof fetch,
       }),
       rotateCookies("p", {
         cookieStorage: storage,
-        logger,
+      cookieStorageService,
+      logger,
         fetcher: fetcher as unknown as typeof fetch,
       }),
     ]);
@@ -235,6 +246,7 @@ describe("rotateCookies", () => {
 
     const result = await rotateCookies("p", {
       cookieStorage: storage,
+      cookieStorageService,
       logger,
       fetcher: fetcher as unknown as typeof fetch,
     });
@@ -242,5 +254,136 @@ describe("rotateCookies", () => {
     expect(result).toBe(false);
     expect(fetcher).not.toHaveBeenCalled();
     expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  test("parses multiple Set-Cookie headers and merges all cookies", async () => {
+    const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+    const cookiesWith3P = [
+      ...makeGoogleCookies(),
+      {
+        name: "__Secure-3PSIDTS",
+        value: "old-3p",
+        domain: ".google.com",
+        path: "/",
+        expires: farFuture,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ];
+    prepareProfile(cookiesWith3P);
+
+    const headers = new Headers();
+    headers.append("set-cookie", "__Secure-1PSIDTS=NEW; Path=/; Secure");
+    headers.append("set-cookie", "__Secure-3PSIDTS=NEW3P; Path=/; Secure");
+    const fetcher = mock(async () => new Response("", { status: 200, headers }));
+    const saveSpy = spyOn(storage, "save");
+
+    const result = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(result).toBe(true);
+    const saved = saveSpy.mock.calls[0]?.[1] as Cookie[];
+    expect(saved.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("NEW");
+    expect(saved.find((c) => c.name === "__Secure-3PSIDTS")?.value).toBe("NEW3P");
+  });
+
+  test("parses non-PSIDTS Set-Cookie header (SIDCC) and merges it", async () => {
+    const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+    const cookiesWithSidcc = [
+      ...makeGoogleCookies(),
+      {
+        name: "SIDCC",
+        value: "old-sidcc",
+        domain: ".google.com",
+        path: "/",
+        expires: farFuture,
+        httpOnly: false,
+        secure: true,
+        sameSite: "None",
+      },
+    ];
+    prepareProfile(cookiesWithSidcc);
+
+    const headers = new Headers();
+    headers.append("set-cookie", "__Secure-1PSIDTS=NEW; Path=/; Secure");
+    headers.append("set-cookie", "SIDCC=NEWSIDCC; Path=/; Secure");
+    const fetcher = mock(async () => new Response("", { status: 200, headers }));
+    const saveSpy = spyOn(storage, "save");
+
+    const result = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(result).toBe(true);
+    const saved = saveSpy.mock.calls[0]?.[1] as Cookie[];
+    expect(saved.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("NEW");
+    expect(saved.find((c) => c.name === "SIDCC")?.value).toBe("NEWSIDCC");
+  });
+
+  test("excludes cookies with non-matching domain (somethinggoogle.com) from request", async () => {
+    const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+    const spoofedCookies = [
+      {
+        name: "__Secure-1PSID",
+        value: "psid-val",
+        domain: "somethinggoogle.com",
+        path: "/",
+        expires: farFuture,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__Secure-1PSIDTS",
+        value: "ts-val",
+        domain: "somethinggoogle.com",
+        path: "/",
+        expires: farFuture,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ];
+    prepareProfile(spoofedCookies);
+
+    const fetcher = mock(async () => successResponse());
+    const saveSpy = spyOn(storage, "save");
+
+    const result = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(result).toBe(false);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  test("calls saveCookiesForProfile (not CookieStorage.save directly) after successful rotation", async () => {
+    prepareProfile(makeGoogleCookies());
+
+    const fetcher = mock(async () => successResponse());
+    const serviceSpy = spyOn(cookieStorageService, "saveCookiesForProfile");
+
+    const result = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(result).toBe(true);
+    expect(serviceSpy).toHaveBeenCalledTimes(1);
+    expect(serviceSpy).toHaveBeenCalledWith("p", expect.any(Array));
   });
 });

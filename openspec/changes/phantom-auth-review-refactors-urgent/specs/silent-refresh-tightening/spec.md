@@ -9,7 +9,7 @@ function in `src/services/cookie-rotation.ts` that refreshes the
 `__Secure-1PSIDTS` session cookie by POSTing to Google's identity rotation
 endpoint. The function MUST:
 
-1. Load the full cookie jar for the profile via `CookieStorageService.loadAllCookiesForProfile`.
+1. Load the full cookie jar for the profile via `cookieStorage.load(profileName)`.
 2. Filter cookies to `.google.com` domain entries using the strict
    `isGoogleDomainCookie` helper (normalized domain must equal `.google.com`;
    domains like `somethinggoogle.com` MUST NOT match).

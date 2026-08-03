@@ -3,6 +3,7 @@ import type { Cookie } from "../core/types.ts";
 import { getFileMtime } from "../infrastructure/io.ts";
 import { getProfilePath } from "../infrastructure/path-utils.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
+import type { CookieStorageService } from "./cookie-storage-service.ts";
 
 const ROTATE_COOKIES_URL = "https://accounts.google.com/RotateCookies";
 const ROTATE_COOKIES_BODY = JSON.stringify([0, "-0000000000000000000"]);
@@ -13,6 +14,7 @@ const inFlightRotations: Map<string, Promise<boolean>> = new Map();
 
 interface RotateCookiesOptions {
   cookieStorage: CookieStorage;
+  cookieStorageService: CookieStorageService;
   logger: Logger;
   fetcher?: typeof fetch;
   now?: () => number;
@@ -20,6 +22,7 @@ interface RotateCookiesOptions {
 
 interface RotateCookiesHandle {
   cookieStorage: CookieStorage;
+  cookieStorageService: CookieStorageService;
   logger: Logger;
   fetcher: typeof fetch;
   now: () => number;
@@ -31,7 +34,7 @@ function buildCookieHeader(cookies: Cookie[]): string {
     .join("; ");
 }
 
-function isGoogleDomainCookie(cookie: Cookie): boolean {
+export function isGoogleDomainCookie(cookie: Cookie): boolean {
   const d = cookie.domain;
   if (!d) return false;
   const normalized = d.startsWith(".") ? d : `.${d}`;
@@ -44,11 +47,9 @@ function shouldSkipForDiskMtime(profileName: string, now: number): boolean {
   return now - mtime.getTime() < DISK_MTIME_GUARD_MS;
 }
 
-function parseSetCookieHeader(header: string | string[] | undefined): Map<string, string> {
+function parseSetCookieHeader(headers: string[]): Map<string, string> {
   const out = new Map<string, string>();
-  if (!header) return out;
-  const list = Array.isArray(header) ? header : [header];
-  for (const raw of list) {
+  for (const raw of headers) {
     const first = raw.split(";")[0] ?? "";
     const eq = first.indexOf("=");
     if (eq <= 0) continue;
@@ -73,7 +74,7 @@ async function performRotateCookies(
   profileName: string,
   handle: RotateCookiesHandle,
 ): Promise<boolean> {
-  const { cookieStorage, logger, fetcher, now } = handle;
+  const { cookieStorage, cookieStorageService, logger, fetcher, now } = handle;
 
   if (isCookieRotationDisabled()) {
     logger.debug(`rotateCookies: skipped (GEMITERM_SKIP_ROTATE_COOKIES is set) for profile '${profileName}'`);
@@ -122,8 +123,8 @@ async function performRotateCookies(
     return false;
   }
 
-  const setCookieHeader = response.headers.get("set-cookie");
-  const updated = parseSetCookieHeader(setCookieHeader ?? undefined);
+  const setCookieHeaders = response.headers.getSetCookie();
+  const updated = parseSetCookieHeader(setCookieHeaders);
 
   const storedPsidts = findCookie(stored, "__Secure-1PSIDTS");
   const newPsidts = updated.get("__Secure-1PSIDTS");
@@ -149,7 +150,7 @@ async function performRotateCookies(
   }
 
   try {
-    cookieStorage.save(profileName, next);
+    cookieStorageService.saveCookiesForProfile(profileName, next);
   } catch (err) {
     logger.debug(`rotateCookies: save failed for profile '${profileName}': ${err}`);
     return false;
@@ -170,6 +171,7 @@ export async function rotateCookies(
 
   const handle: RotateCookiesHandle = {
     cookieStorage: options.cookieStorage,
+    cookieStorageService: options.cookieStorageService,
     logger: options.logger,
     fetcher: options.fetcher ?? fetch,
     now: options.now ?? Date.now,

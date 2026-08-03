@@ -5,6 +5,7 @@ import { CookieStorage, ProfileManager } from "../../infrastructure/storage.ts";
 import { PlaywrightCliDriver } from "../../services/playwright-cli-driver.ts";
 import { CookieMonitor } from "../../services/cookie-monitor.ts";
 import { AuthService } from "../../services/auth-service.ts";
+import { CookieStorageService } from "../../services/cookie-storage-service.ts";
 import {
   listProfiles,
   getDefaultProfileName,
@@ -49,6 +50,7 @@ export class AuthCommand implements CliCommand {
       driver,
       cookieMonitor,
       cookieStorage,
+      cookieStorageService: new CookieStorageService({ cookieStorage, logger }),
       logger,
     });
 
