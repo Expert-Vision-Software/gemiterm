@@ -510,6 +510,7 @@ describe("ListCommand --interactive flag", () => {
     let deleteExecute: ReturnType<typeof mock>;
     let exportExecute: ReturnType<typeof mock>;
     let fetchExecute: ReturnType<typeof mock>;
+    let continueExecute: ReturnType<typeof mock>;
     let freshChats: ChatInfo[];
 
     const stdinTty = (): PropertyDescriptor | undefined =>
@@ -532,6 +533,7 @@ describe("ListCommand --interactive flag", () => {
       deleteExecute = mock(() => Promise.resolve());
       exportExecute = mock(() => Promise.resolve());
       fetchExecute = mock(() => Promise.resolve());
+      continueExecute = mock(() => Promise.resolve());
       mock.module("../../src/cli/command-registry.ts", () => ({
         CommandRegistry: class {
           registerAllCommands(): void {}
@@ -539,6 +541,7 @@ describe("ListCommand --interactive flag", () => {
             if (name === "delete") return { execute: deleteExecute };
             if (name === "export") return { execute: exportExecute };
             if (name === "fetch") return { execute: fetchExecute };
+            if (name === "continue") return { execute: continueExecute };
             return undefined;
           }
         },
@@ -549,6 +552,7 @@ describe("ListCommand --interactive flag", () => {
       deleteExecute.mockClear();
       exportExecute.mockClear();
       fetchExecute.mockClear();
+      continueExecute.mockClear();
       mock.restore();
     });
 
@@ -610,6 +614,32 @@ describe("ListCommand --interactive flag", () => {
         expect(confirmSpy).not.toHaveBeenCalled();
         expect(exportExecute).not.toHaveBeenCalled();
         expect(fetchExecute).not.toHaveBeenCalled();
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("view forwards the selected chat profile to fetch", async () => {
+      setStdinTty(true);
+      try {
+        const chat = { ...SAMPLE_CHATS[0], profile: "dhb-worker" };
+        spyOn(promptsModule, "browser")
+          .mockResolvedValueOnce({ kind: "pick", chat } as any)
+          .mockResolvedValue({ kind: "quit" } as any);
+        spyOn(promptsModule, "select").mockResolvedValue("view" as any);
+
+        const mockHandler = {
+          queryType: QUERY_TYPES.LIST_CHATS,
+          handle: mock(async () => ({ chats: [chat] })),
+        };
+        mediator.registerQueryHandler(mockHandler as any);
+
+        await command.execute(["--interactive"], context);
+
+        expect(fetchExecute).toHaveBeenCalledWith(
+          [chat.id, "--format", "text", "--profile", "dhb-worker"],
+          context,
+        );
       } finally {
         restoreStdinTty();
       }

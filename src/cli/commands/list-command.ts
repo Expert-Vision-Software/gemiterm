@@ -233,23 +233,24 @@ export class ListCommand implements CliCommand {
     const { CommandRegistry } = await import("../command-registry.ts");
     const registry = new CommandRegistry();
     registry.registerAllCommands();
+    const profileArgs = chat.profile ? ["--profile", chat.profile] : [];
     if (action === "view") {
       const fetch = registry.getHandler("fetch");
-      if (fetch) await fetch.execute([chat.id, "--format", "text"], context);
+      if (fetch) await fetch.execute([chat.id, "--format", "text", ...profileArgs], context);
     } else if (action === "export-markdown") {
       const outPath = await this.promptExportPath(chat.id, "md");
       const exportCmd = registry.getHandler("export");
-      if (exportCmd) await exportCmd.execute([chat.id, "--format", "markdown", "--out", outPath], context);
+      if (exportCmd) await exportCmd.execute([chat.id, "--format", "markdown", "--out", outPath, ...profileArgs], context);
     } else if (action === "export-json") {
       const outPath = await this.promptExportPath(chat.id, "json");
       const exportCmd = registry.getHandler("export");
-      if (exportCmd) await exportCmd.execute([chat.id, "--format", "json", "--out", outPath], context);
+      if (exportCmd) await exportCmd.execute([chat.id, "--format", "json", "--out", outPath, ...profileArgs], context);
     } else if (action === "continue") {
       const continueCmd = registry.getHandler("continue");
-      if (continueCmd) await continueCmd.execute([chat.id], context);
+      if (continueCmd) await continueCmd.execute([chat.id, ...profileArgs], context);
     } else if (action === "delete") {
       const deleteCmd = registry.getHandler("delete");
-      if (deleteCmd) await deleteCmd.execute([chat.id, "--force"], context);
+      if (deleteCmd) await deleteCmd.execute([chat.id, "--force", ...profileArgs], context);
     }
   }
 
