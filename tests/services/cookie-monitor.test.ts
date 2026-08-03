@@ -226,4 +226,84 @@ describe("CookieMonitor", () => {
       monitor.stop();
     });
   });
+
+  describe("requireRotation", () => {
+    test("does not fire when PSID and PSIDTS match baseline", async () => {
+      driver.evalJs.mockResolvedValue("true");
+      driver.cookieListFromState.mockResolvedValue(authCookies);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const callback = mock((_cookies: Cookie[]) => {});
+
+      await monitor.start(
+        "sess1",
+        callback,
+        10_000,
+        { activePsid: "psid-val", activePsidts: "ts-val" },
+      );
+      await new Promise((r) => setTimeout(r, 2100));
+      expect(callback).toHaveBeenCalledTimes(0);
+      monitor.stop();
+    });
+
+    test("fires when PSID differs from baseline", async () => {
+      driver.evalJs.mockResolvedValue("true");
+      const rotatedCookies: Cookie[] = [
+        { ...authCookies[0]!, value: "new-psid" },
+        authCookies[1]!,
+      ];
+      driver.cookieListFromState.mockResolvedValue(rotatedCookies);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const callback = mock((_cookies: Cookie[]) => {});
+
+      await monitor.start(
+        "sess1",
+        callback,
+        10_000,
+        { activePsid: "psid-val", activePsidts: "ts-val" },
+      );
+      await new Promise((r) => setTimeout(r, 2100));
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback.mock.calls[0]![0]).toEqual(rotatedCookies);
+      monitor.stop();
+    });
+
+    test("fires when PSIDTS differs from baseline", async () => {
+      driver.evalJs.mockResolvedValue("true");
+      const rotatedCookies: Cookie[] = [
+        authCookies[0]!,
+        { ...authCookies[1]!, value: "new-psidts" },
+      ];
+      driver.cookieListFromState.mockResolvedValue(rotatedCookies);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const callback = mock((_cookies: Cookie[]) => {});
+
+      await monitor.start(
+        "sess1",
+        callback,
+        10_000,
+        { activePsid: "psid-val", activePsidts: "ts-val" },
+      );
+      await new Promise((r) => setTimeout(r, 2100));
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback.mock.calls[0]![0]).toEqual(rotatedCookies);
+      monitor.stop();
+    });
+
+    test("preserves existing behavior when requireRotation is undefined", async () => {
+      driver.evalJs.mockResolvedValue("true");
+      driver.cookieListFromState.mockResolvedValue(authCookies);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const callback = mock((_cookies: Cookie[]) => {});
+
+      await monitor.start("sess1", callback, 10_000);
+      await new Promise((r) => setTimeout(r, 2100));
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback.mock.calls[0]![0]).toEqual(authCookies);
+      monitor.stop();
+    });
+  });
 });

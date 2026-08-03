@@ -1463,4 +1463,52 @@ describe("persistRefreshedCookies", () => {
 
     expect(chats).toHaveLength(1);
   });
+
+  describe("persistRefreshedCookies merge by (name, baselineValue)", () => {
+    test("SDK rotation overwrites only the matching baseline entry, not cross-domain duplicates", async () => {
+      const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+      const multiDomainCookies: Cookie[] = [
+        { name: "__Secure-1PSID", value: "yt-psid", domain: ".youtube.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "Lax" },
+        { name: "__Secure-1PSID", value: "g-psid", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "Lax" },
+        { name: "__Secure-1PSIDTS", value: "yt-psidts", domain: ".youtube.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "Lax" },
+        { name: "__Secure-1PSIDTS", value: "g-psidts", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "Lax" },
+      ];
+      let savedCookies: Cookie[] | undefined;
+      const storage: CookieStorage = {
+        save: (_profile, cookies) => {
+          savedCookies = cookies;
+        },
+        load: () => multiDomainCookies,
+        delete: () => {},
+        list: () => ["default"],
+      };
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+      const d = installGeminiReverseMock({
+        initImplementation: (client: RawGemini) => {
+          const cookies = (client as unknown as { cookies: Record<string, string> }).cookies;
+          cookies["__Secure-1PSID"] = "NEW-g-psid";
+          cookies["__Secure-1PSIDTS"] = "NEW-g-psidts";
+        },
+        chats: [createMockChatRow()],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService(
+        { secure1psid: "g-psid", secure1psidts: "g-psidts" },
+        logger,
+        css,
+        "default",
+        d,
+      );
+
+      await service.listChats();
+
+      expect(savedCookies).toBeDefined();
+      expect(savedCookies?.find((c) => c.name === "__Secure-1PSID" && c.domain === ".google.com")?.value).toBe("NEW-g-psid");
+      expect(savedCookies?.find((c) => c.name === "__Secure-1PSID" && c.domain === ".youtube.com")?.value).toBe("yt-psid");
+      expect(savedCookies?.find((c) => c.name === "__Secure-1PSIDTS" && c.domain === ".google.com")?.value).toBe("NEW-g-psidts");
+      expect(savedCookies?.find((c) => c.name === "__Secure-1PSIDTS" && c.domain === ".youtube.com")?.value).toBe("yt-psidts");
+    });
+  });
 });

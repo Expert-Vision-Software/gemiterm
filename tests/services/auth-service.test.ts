@@ -589,4 +589,176 @@ describe("AuthService", () => {
       expect(driver.openHeadless).not.toHaveBeenCalled();
     });
   });
+
+  describe("silentRefresh L1/L2 ladder", () => {
+    const originalFetch = globalThis.fetch;
+    const originalSkipRotateCookies = process.env.GEMITERM_SKIP_ROTATE_COOKIES;
+
+    function makeRotationCookies(psid: string, psidts: string): Cookie[] {
+      return makeAuthCookies().map((cookie) => {
+        if (cookie.name === "__Secure-1PSID") {
+          return { ...cookie, value: psid };
+        }
+        if (cookie.name === "__Secure-1PSIDTS") {
+          return { ...cookie, value: psidts };
+        }
+        return cookie;
+      });
+    }
+
+    beforeEach(() => {
+      delete process.env.GEMITERM_SKIP_ROTATE_COOKIES;
+      spyOn(io, "existsFile").mockReturnValue(true);
+      spyOn(io, "getFileMtime").mockReturnValue(null);
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      if (originalSkipRotateCookies === undefined) {
+        delete process.env.GEMITERM_SKIP_ROTATE_COOKIES;
+      } else {
+        process.env.GEMITERM_SKIP_ROTATE_COOKIES = originalSkipRotateCookies;
+      }
+    });
+
+    test("L1 succeeds without launching a browser when PSIDTS rotates", async () => {
+      const storedCookies = makeRotationCookies("active-psid", "old-psidts");
+      cookieStorage.load.mockReturnValue(storedCookies);
+      globalThis.fetch = mock(
+        async () =>
+          new Response(null, {
+            status: 200,
+            headers: {
+              "set-cookie":
+                "__Secure-1PSIDTS=new-psidts; Domain=.google.com; Path=/",
+            },
+          }),
+      ) as unknown as typeof fetch;
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(true);
+      expect(driver.openHeadless).not.toHaveBeenCalled();
+      expect(cookieStorage.save).toHaveBeenCalledTimes(1);
+      const saveCall = cookieStorage.save.mock.calls[0]!;
+      expect(saveCall[0]).toBe("test-profile");
+      expect(
+        saveCall[1].find((cookie) => cookie.name === "__Secure-1PSIDTS")?.value,
+      ).toBe("new-psidts");
+    });
+
+    test("falls through to L2 and succeeds when L1 has a network error", async () => {
+      const storedCookies = makeRotationCookies("active-psid", "active-psidts");
+      const rotatedCookies = makeRotationCookies("new-psid", "new-psidts");
+      cookieStorage.load.mockReturnValue(storedCookies);
+      globalThis.fetch = mock(async () => {
+        throw new Error("network error");
+      }) as unknown as typeof fetch;
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(rotatedCookies);
+        },
+      );
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(true);
+      expect(driver.openHeadless).toHaveBeenCalledTimes(1);
+      expect(cookieStorage.save).toHaveBeenCalledTimes(1);
+      expect(cookieStorage.save.mock.calls[0]![0]).toBe("test-profile");
+      expect(cookieStorage.save.mock.calls[0]![1]).toEqual(rotatedCookies);
+    });
+
+    test("returns false when L2 cookies are identical to the snapshot", async () => {
+      const storedCookies = makeRotationCookies("active-psid", "active-psidts");
+      cookieStorage.load.mockReturnValue(storedCookies);
+      globalThis.fetch = mock(async () => {
+        throw new Error("network error");
+      }) as unknown as typeof fetch;
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(makeRotationCookies("active-psid", "active-psidts"));
+        },
+      );
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(false);
+      expect(driver.openHeadless).toHaveBeenCalledTimes(1);
+      expect(cookieStorage.save).not.toHaveBeenCalled();
+    });
+
+    test("falls through to L2 when L1 returns an unchanged PSIDTS", async () => {
+      const storedCookies = makeRotationCookies("active-psid", "active-psidts");
+      const rotatedCookies = makeRotationCookies("new-psid", "new-psidts");
+      cookieStorage.load.mockReturnValue(storedCookies);
+      globalThis.fetch = mock(
+        async () =>
+          new Response(null, {
+            status: 200,
+            headers: {
+              "set-cookie":
+                "__Secure-1PSIDTS=active-psidts; Domain=.google.com; Path=/",
+            },
+          }),
+      ) as unknown as typeof fetch;
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(rotatedCookies);
+        },
+      );
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(true);
+      expect(driver.openHeadless).toHaveBeenCalledTimes(1);
+      expect(cookieStorage.save).toHaveBeenCalledTimes(1);
+      expect(cookieStorage.save.mock.calls[0]![1]).toEqual(rotatedCookies);
+    });
+
+    test("falls through to L2 and succeeds when L1 returns 401", async () => {
+      const storedCookies = makeRotationCookies("active-psid", "active-psidts");
+      const rotatedCookies = makeRotationCookies("new-psid", "new-psidts");
+      cookieStorage.load.mockReturnValue(storedCookies);
+      globalThis.fetch = mock(
+        async () => new Response(null, { status: 401 }),
+      ) as unknown as typeof fetch;
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(rotatedCookies);
+        },
+      );
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(true);
+      expect(driver.openHeadless).toHaveBeenCalledTimes(1);
+    });
+
+    test("skips L1 and reaches L2 when GEMITERM_SKIP_ROTATE_COOKIES is set", async () => {
+      const storedCookies = makeRotationCookies("active-psid", "active-psidts");
+      const rotatedCookies = makeRotationCookies("new-psid", "new-psidts");
+      const fetchMock = mock(async () => new Response(null, { status: 500 }));
+      process.env.GEMITERM_SKIP_ROTATE_COOKIES = "1";
+      cookieStorage.load.mockReturnValue(storedCookies);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(rotatedCookies);
+        },
+      );
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(driver.openHeadless).toHaveBeenCalledTimes(1);
+    });
+  });
 });
