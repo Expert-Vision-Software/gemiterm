@@ -2,20 +2,26 @@
 
 - [ ] 1.1 In `src/services/cookie-rotation.ts`, replace `response.headers.get("set-cookie")` (line ~125) with `response.headers.getSetCookie()`. Update the `parseSetCookieHeader` function (or its call site) to accept a `string[]` instead of a single `string | undefined`, parsing each element.
 - [ ] 1.2 Update `parseSetCookieHeader` to iterate the array and merge all parsed cookies into the result map. If the function signature changes, update all call sites.
-- [ ] 1.3 Run `bun run typecheck` and confirm clean.
+- [ ] 1.3 Run `bun run typecheck && bun run test:unit` and confirm clean.
+- [ ] 1.4 load skill `code-review` and execute. fix major findings.
+- [ ] 1.5 commit changes to git.
 
 ## 2. Add CookieStorageService dependency to rotateCookies
 
 - [ ] 2.1 In `src/services/cookie-rotation.ts`, add `cookieStorageService: CookieStorageService` to the `RotateCookiesOptions` interface (or the internal handle type). Import `CookieStorageService` from `src/services/cookie-storage-service.ts`.
 - [ ] 2.2 Replace `cookieStorage.save(profileName, merged)` (line ~142) with `cookieStorageService.saveCookiesForProfile(profileName, merged)`. Verify the merged array shape matches what `saveCookiesForProfile` expects.
 - [ ] 2.3 Update `src/services/auth-service.ts` to pass the `cookieStorageService` instance when constructing the `RotateCookiesOptions` for `rotateCookies`.
-- [ ] 2.4 Run `bun run typecheck` and confirm clean.
+- [ ] 2.4 Run `bun run typecheck && bun run test:unit` and confirm clean.
+- [ ] 2.5 load skill `code-review` and execute. fix major findings.
+- [ ] 2.6 commit changes to git.
 
 ## 3. Unify domain matching between cookie-rotation.ts and auth-service.ts
 
 - [ ] 3.1 Export `isGoogleDomainCookie` from `src/services/cookie-rotation.ts` (add `export` keyword). NOTE: if `phantom-auth-review-refactors` has landed and moved it to `src/core/cookie-constants.ts`, import from there instead.
 - [ ] 3.2 In `src/services/auth-service.ts`, import `isGoogleDomainCookie` and replace the `(c.domain ?? "").endsWith("google.com")` calls at lines ~219, ~222, ~256, ~257 with `isGoogleDomainCookie(c)`. Keep the existing fallback logic (non-domain-filtered lookup) intact.
-- [ ] 3.3 Run `bun run typecheck` and confirm clean.
+- [ ] 3.3 Run `bun run typecheck && bun run test:unit` and confirm clean.
+- [ ] 3.4 load skill `code-review` and execute. fix major findings.
+- [ ] 3.5 commit changes to git.
 
 ## 4. Fix spec typo in silent-refresh-tightening
 
@@ -37,7 +43,6 @@
 
 ## 8. Final verification
 
-- [ ] 8.1 Run `bun run typecheck` and confirm clean.
-- [ ] 8.2 Run `bun test` and confirm 899 pass, 0 fail, 2 skip, 901 total — no regressions.
-- [ ] 8.3 Run `openspec validate --all --strict` and confirm all specs pass.
-- [ ] 8.4 Commit changes in git.
+- [ ] 8.1 Load skill 'test-baselining' and run skill command `eval`, ensure all passes.. Update BL if stats changed.
+- [ ] 8.2 Run `openspec validate --all --strict` and confirm all specs pass.
+- [ ] 8.3 Commit changes in git.
