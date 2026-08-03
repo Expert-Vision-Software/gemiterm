@@ -24,6 +24,9 @@
     - If "stale": log warning, call `autoExtendSession(name)`.
       - If auto-extend returns `true`: re-probe (fresh call, skip cache) to update state, return cookies.
       - If auto-extend returns `false`: throw `AuthenticationError`.
+  - [ ] 2.5 Commit changes in git.
+  - [ ] 2.6 Run `bun test:unit` and confirm all tests pass.
+  - [ ] 2.7 load and run skill `code-review` and apply any suggested improvements to the code.
 
 ## 3. RotateCookies L1 silent refresh (new)
 
@@ -42,6 +45,9 @@
   - **In-process throttle:** use a module-level `Map<string, Promise<boolean>>` to deduplicate concurrent rotate calls for the same profile.
 - [ ] 3.3 Add `GEMITERM_SKIP_ROTATE_COOKIES` env var check (if set, skip L1 and go directly to L2). Document in `README.md`.
 - [ ] 3.4 Wire `rotateCookies` into `AuthService.silentRefresh` as the first step (L1). Only proceed to headless browser (L2) if L1 returns `false`.
+- [ ] 3.5 Commit changes in git.
+- [ ] 3.6 Run `bun test:unit` and confirm all tests pass.
+- [ ] 3.7 load and run skill `code-review` and apply any suggested improvements to the code.
 
 ## 4. Headless browser L2 silent refresh hardening
 
@@ -52,10 +58,16 @@
 - [ ] 4.2 Modify `AuthService.silentRefresh`:
   - L1: call `rotateCookies(name)`. If `true`, return `true`.
   - L2 (fallback): snap active cookie values, launch headless browser, `waitForSilentLogin` with `requireRotation`, compare returned values against snapshot. Return `true` only if values differ.
+- [ ] 4.3 Commit changes in git.
+- [ ] 4.4 Run `bun test:unit` and confirm all tests pass.
+- [ ] 4.5 load and run skill `code-review` and apply any suggested improvements to the code.
 
 ## 5. `persistRefreshedCookies` merge fix
 
 - [ ] 5.1 In `GeminiClientService.persistRefreshedCookies` (`src/services/gemini-client-wrapper.ts:119-151`), change merge condition from `c.name === "__Secure-1PSID"` to `c.name === "__Secure-1PSID" && c.value === this.baselineSecure1psid`. Same for `__Secure-1PSIDTS`.
+- [ ] 5.2 Commit changes in git.
+- [ ] 5.3 Run `bun test:unit` and confirm all tests pass.
+- [ ] 5.4 load and run skill `code-review` and apply any suggested improvements to the code.
 
 ## 6. Existing test updates
 
@@ -69,19 +81,13 @@
 
 - [ ] 7.1 Run `bun test tests/services/phantom-auth.test.ts` and confirm all 5 scenarios pass.
 - [ ] 7.2 Adjust mock assertions if implementation details differ from the test's expected call patterns.
+- [ ] 7.3 Complete section 5 in `openspec/changes/phatom-auth-repro-with-tests/tasks.md`
 
 ## 8. Baseline, typecheck, and documentation
 
-- [ ] 8.1 Run full `bun test` suite. Confirm 5 phantom-auth tests pass, no regressions.
+- [ ] 8.1 Execute `test-baselining eval` and Confirm 5 phantom-auth tests pass along with all else, no regressions.
 - [ ] 8.2 Update `docs/testing-baseline.xml`: new counts and `<LastUpdated>` timestamp.
 - [ ] 8.3 Run `bun run typecheck` and confirm clean.
 - [ ] 8.4 Add env var docs to `README.md`: `GEMITERM_PROBE_TTL_MS`, `GEMITERM_SKIP_ROTATE_COOKIES`.
-- [ ] 8.5 Add entry to `CHANGELOG.md` under "Unreleased" describing the fix.
+- [ ] 8.5 Add entry to `CHANGELOG.md` under "v2.6.0" describing the fix.
 
-## 9. OpenSpec delta specs
-
-- [ ] 9.1 Write `specs/phantom-auth-detection/spec.md` (ADDED: server-side probe, has-chats flag, probe cache, env var).
-- [ ] 9.2 Write `specs/silent-refresh-tightening/spec.md` (ADDED: RotateCookies L1, headless L2, `requireRotation`, rotation rate-limiting).
-- [ ] 9.3 Write `specs/auth/spec.md` (MODIFIED: `ensureAuthenticated` probe path, `silentRefresh` ladder).
-- [ ] 9.4 Write `specs/gemini-client/spec.md` (MODIFIED: `persistRefreshedCookies` merge key).
-- [ ] 9.5 Run `npx openspec validate --strict phantom-auth-ultimate-fix` and confirm pass.
