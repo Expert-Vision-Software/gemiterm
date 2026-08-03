@@ -129,11 +129,11 @@ export class GeminiClientService
       const stored = this.cookieStorageService.loadAllCookiesForProfile(this.profileName);
       let changed = false;
       const merged = stored.map((c) => {
-        if (c.name === "__Secure-1PSID" && changed1psid) {
+        if (c.name === "__Secure-1PSID" && changed1psid && c.value === this.baselineSecure1psid) {
           changed = true;
           return { ...c, value: live1psid };
         }
-        if (c.name === "__Secure-1PSIDTS" && changed1psidts) {
+        if (c.name === "__Secure-1PSIDTS" && changed1psidts && c.value === this.baselineSecure1psidts) {
           changed = true;
           return { ...c, value: live1psidts };
         }
