@@ -26,7 +26,7 @@
       - If `silentRefresh` returns `false`: throw `AuthenticationError`.
   - [x] 2.5 Commit changes in git.
   - [x] 2.6 Run `bun test:unit` and confirm all tests pass.
-  - [ ] 2.7 load and run skill `code-review` and apply any suggested improvements to the code.
+  - [x] 2.7 load and run skill `code-review` and apply any suggested improvements to the code.
 
 ## 3. RotateCookies L1 silent refresh (new)
 
@@ -47,7 +47,7 @@
 - [x] 3.4 Wire `rotateCookies` into `AuthService.silentRefresh` as the first step (L1). Only proceed to headless browser (L2) if L1 returns `false`.
 - [x] 3.5 Commit changes in git.
 - [x] 3.6 Run `bun test:unit` and confirm all tests pass.
-- [ ] 3.7 load and run skill `code-review` and apply any suggested improvements to the code.
+- [x] 3.7 load and run skill `code-review` and apply any suggested improvements to the code.
 
 ## 4. Headless browser L2 silent refresh hardening
 
@@ -60,14 +60,14 @@
   - L2 (fallback): snap active cookie values, launch headless browser, `waitForSilentLogin` with `requireRotation`, compare returned values against snapshot. Return `true` only if values differ.
 - [x] 4.3 Commit changes in git.
 - [x] 4.4 Run `bun test:unit` and confirm all tests pass.
-- [ ] 4.5 load and run skill `code-review` and apply any suggested improvements to the code.
+- [x] 4.5 load and run skill `code-review` and apply any suggested improvements to the code.
 
 ## 5. `persistRefreshedCookies` merge fix
 
 - [x] 5.1 In `GeminiClientService.persistRefreshedCookies` (`src/services/gemini-client-wrapper.ts:119-151`), change merge condition from `c.name === "__Secure-1PSID"` to `c.name === "__Secure-1PSID" && c.value === this.baselineSecure1psid`. Same for `__Secure-1PSIDTS`.
 - [x] 5.2 Commit changes in git.
 - [x] 5.3 Run `bun test:unit` and confirm all tests pass.
-- [ ] 5.4 load and run skill `code-review` and apply any suggested improvements to the code.
+- [x] 5.4 load and run skill `code-review` and apply any suggested improvements to the code.
 
 ## 6. Existing test updates
 
