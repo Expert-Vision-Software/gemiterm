@@ -155,10 +155,11 @@ export class ProfileAuthManager {
     const hasChatsFlag = readProfileHasChats(name);
     if (hasChatsFlag) {
       this.logger.warn(`Server-side session for profile '${name}' appears stale; forcing refresh`);
-    } else {
-      this.logger.debug(`probeServerSession: empty result for profile '${name}' with no has-chats flag; treating as stale`);
+      this.probeCache.set(name, { ts: now, result: "stale" });
+      return "stale";
     }
-    this.probeCache.set(name, { ts: now, result: "stale" });
-    return "stale";
+    this.logger.debug(`probeServerSession: no server chat history found for profile '${name}'`);
+    this.probeCache.set(name, { ts: now, result: "ambiguous" });
+    return "ambiguous";
   }
 }

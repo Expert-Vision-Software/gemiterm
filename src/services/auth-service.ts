@@ -216,8 +216,12 @@ export class AuthService {
     let snapshot: { activePsid: string; activePsidts: string | null } | null = null;
     try {
       const stored = this.cookieStorage.load(name);
-      const psid = stored.find((c) => c.name === "__Secure-1PSID")?.value ?? "";
-      const psidts = stored.find((c) => c.name === "__Secure-1PSIDTS")?.value ?? null;
+      const psid = stored.find((c) => c.name === "__Secure-1PSID" && (c.domain ?? "").endsWith("google.com"))?.value
+        ?? stored.find((c) => c.name === "__Secure-1PSID")?.value
+        ?? "";
+      const psidts = stored.find((c) => c.name === "__Secure-1PSIDTS" && (c.domain ?? "").endsWith("google.com"))?.value
+        ?? stored.find((c) => c.name === "__Secure-1PSIDTS")?.value
+        ?? null;
       if (psid) {
         snapshot = { activePsid: psid, activePsidts: psidts };
       }
@@ -245,13 +249,17 @@ export class AuthService {
       if (!cookies) {
         return false;
       }
-      if (snapshot) {
-        const psidChanged = cookies.find((c) => c.name === "__Secure-1PSID")?.value !== snapshot.activePsid;
-        const psidtsChanged = (cookies.find((c) => c.name === "__Secure-1PSIDTS")?.value ?? null) !== snapshot.activePsidts;
-        if (!psidChanged && !psidtsChanged) {
-          this.logger.debug(`silentRefresh: cookies unchanged vs baseline, treating as no rotation`);
-          return false;
-        }
+      if (!snapshot) {
+        this.logger.debug(`silentRefresh: no cookie baseline for profile '${name}'; cannot verify rotation`);
+        return false;
+      }
+      const polledPsid = cookies.find((c) => c.name === "__Secure-1PSID" && (c.domain ?? "").endsWith("google.com"))?.value;
+      const polledPsidts = cookies.find((c) => c.name === "__Secure-1PSIDTS" && (c.domain ?? "").endsWith("google.com"))?.value ?? null;
+      const psidChanged = polledPsid !== undefined && polledPsid !== snapshot.activePsid;
+      const psidtsChanged = polledPsidts !== snapshot.activePsidts;
+      if (!psidChanged && !psidtsChanged) {
+        this.logger.debug(`silentRefresh: cookies unchanged vs baseline, treating as no rotation`);
+        return false;
       }
       await this.extractCookies(name, cookies);
       return true;

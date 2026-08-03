@@ -574,7 +574,7 @@ describe("ProfileAuthManager", () => {
       expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
-    test("stale probe with no has-chats marker still triggers silent refresh", async () => {
+    test("ambiguous probe (empty + no has-chats marker) trusts local freshness, no silent refresh", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -590,8 +590,8 @@ describe("ProfileAuthManager", () => {
       const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
+      expect(listChatsFn).toHaveBeenCalledTimes(1);
     });
 
     test("listChats throw falls through to local freshness and does not refresh", async () => {

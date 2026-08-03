@@ -474,8 +474,9 @@ describe("AuthService", () => {
 
   describe("silentRefresh", () => {
     test("launches headless browser, loads state, and returns true on monitor success", async () => {
+      cookieStorage.load.mockReturnValue(makeAuthCookies());
       cookieMonitor.start.mockImplementationOnce(async (_session, callback) => {
-        callback(makeAuthCookies());
+        callback(makeAuthCookies().map((c) => c.name === "__Secure-1PSIDTS" ? { ...c, value: "rotated-psidts" } : c));
       });
 
       const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);

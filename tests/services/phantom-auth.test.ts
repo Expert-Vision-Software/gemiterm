@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ProfileAuthManager } from "../../src/services/profile-auth-manager.ts";
@@ -145,6 +145,7 @@ describe("phantom-auth regression suite", () => {
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeActiveCookies());
+      writeFileSync(join(TEST_DIR, "profiles", "default", "profile-has-chats"), "");
 
       const listChatsFn = mock(async (_opts?: { limit?: number }) => [] as ChatInfo[]);
       const geminiClient = gimme(listChatsFn as unknown as (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfo[]>);
@@ -175,6 +176,7 @@ describe("phantom-auth regression suite", () => {
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeActiveCookies());
+      writeFileSync(join(TEST_DIR, "profiles", "default", "profile-has-chats"), "");
 
       const listChatsFn = mock(async (_opts?: { limit?: number }) => [] as ChatInfo[]);
       const geminiClient = gimme(listChatsFn as unknown as (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfo[]>);
