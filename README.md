@@ -361,6 +361,8 @@ Upgrading from v1.4.1 keeps these paths and files unchanged.
 | Variable | Description | Default |
 | --- | --- | --- |
 | `GEMITERM_CONFIG_DIR` | Override the configuration directory | Platform default |
+| `GEMITERM_PROBE_TTL_MS` | Server-side session probe cache TTL (milliseconds). Controls how long `gemiterm` reuses a cached `listChats` probe result before asking Gemini again. Invalid or non-positive values fall back to the default. | `150000` (2.5 min) |
+| `GEMITERM_SKIP_ROTATE_COOKIES` | When set (any truthy value), skips the L1 `accounts.google.com/RotateCookies` POST and falls through directly to the L2 headless browser refresh. Use as an escape hatch if RotateCookies misbehaves. | unset |
 
 ## Contributing
 

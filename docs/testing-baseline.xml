@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <TestingBaseline>
     <Metadata>
-        <LastUpdated>2026-08-02T23:10:00Z</LastUpdated>
-        <BaselineId>BL-004</BaselineId>
+        <LastUpdated>2026-08-03T03:32:00Z</LastUpdated>
+        <BaselineId>BL-006</BaselineId>
         <Framework>Bun + TypeScript CLI</Framework>
     </Metadata>
 
     <Solution>
         <UnitTests>
             <Framework>bun test</Framework>
-            <TestFiles>54</TestFiles>
-            <Passed>868</Passed>
-            <Failed>5</Failed>
+            <TestFiles>55</TestFiles>
+            <Passed>899</Passed>
+            <Failed>0</Failed>
             <Skipped>2</Skipped>
-            <Total>875</Total>
-            <Duration>11.80</Duration>
-            <ExpectCalls>1764</ExpectCalls>
+            <Total>901</Total>
+            <Duration>20.34</Duration>
+            <ExpectCalls>1866</ExpectCalls>
         </UnitTests>
         <IntegrationTests>
             <Framework>bun test</Framework>
@@ -90,6 +90,12 @@
     </Dependencies>
 
     <Changelog>
+        <Entry>
+            <BaselineId>BL-006</BaselineId>
+            <Date>2026-08-03</Date>
+            <Changes>Updated baseline: 899 unit pass, 0 fail, 2 skip, 901 total, 55 files. Phantom-auth regression suite (5 failing tests) flipped to green by phantom-auth-ultimate-fix; added 26 new tests for has-chats marker, server-side probe, L1 RotateCookies, L2 requireRotation, multi-domain cookie merge.</Changes>
+            <Reason>phantom-auth-ultimate-fix landed: server-side probe, L1 RotateCookies, L2 hardened refresh, (name, baseline) merge. Phantom-auth regression suite (5 tests) now green.</Reason>
+        </Entry>
         <Entry>
             <BaselineId>BL-005</BaselineId>
             <Date>2026-08-02</Date>

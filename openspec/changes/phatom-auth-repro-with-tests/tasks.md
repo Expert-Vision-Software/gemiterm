@@ -65,8 +65,8 @@
 ## 5. Coordination with the fix change
 
 - [x] 5.1 Add a note to `openspec/changes/phantom-auth-ultimate-fix/proposal.md` (via amendment in the next session) referencing the `phantom-auth-detection` capability spec defined in this change's `specs/phantom-auth-detection/spec.md`.
-- [ ] 5.2 When `phantom-auth-ultimate-fix` lands, re-run `bun test tests/services/phantom-auth.test.ts` to confirm the five scenarios pass (green).
-- [ ] 5.3 Open Question A (probe budget / cache TTL) and Open Question B (empty-list vs. legitimate empty profile) are resolved by the fix change's design; adjust test #4's exact assertion if the chosen TTL differs from the spec's default 5 minutes.
+- [x] 5.2 When `phantom-auth-ultimate-fix` lands, re-run `bun test tests/services/phantom-auth.test.ts` to confirm the five scenarios pass (green). Confirmed 2026-08-03 — all 5 scenarios green.
+- [x] 5.3 Open Question A (probe budget / cache TTL) and Open Question B (empty-list vs. legitimate empty profile) are resolved by the fix change's design. Resolved TTL: 150_000 ms (2.5 min, `GEMITERM_PROBE_TTL_MS` override). Resolved empty-list behavior: empty `listChats` triggers silent refresh regardless of marker presence, with the marker retained as a future-use signal. Test #4's assertion `expect(listChatsFn).toHaveBeenCalledTimes(1)` was preserved unchanged.
 
 ## 6. Documentation
 
