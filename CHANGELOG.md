@@ -11,6 +11,7 @@
 
 - `GeminiClientService.persistRefreshedCookies` now matches stored cookies by `(name, baselineValue)` instead of `name` only. The SDK jar carries only a `Record<string, string>` (no domain info), so the match key compares the stored cookie's value against `baselineSecure1psid` / `baselineSecure1psidts` captured at construction. On profiles whose storage file contains duplicate `__Secure-1PSID` / `__Secure-1PSIDTS` entries across domains (`.youtube.com` and `.google.com`), this prevents silently overwriting the non-matching domain entry.
 - Phantom-authentication symptom (post-2h `gemiterm list` returns empty despite locally-valid cookies and `Profile '<name>' is authenticated` log line). The server-side probe in `ProfileAuthManager.ensureAuthenticated` now detects Google-side session invalidation and triggers silent recovery via the L1 → L2 ladder.
+- `list -i` interactive browser: `executeAction` now forwards `chat.profile` to sub-commands (`fetch`, `export`, `continue`, `delete`). Previously the profile was discarded when building argv, forcing the sub-commands through `findProfileForConversation`'s sequential probe and throwing `AuthenticationError` for chats owned by non-default profiles when multiple authenticated profiles exist.
 
 ---
 
