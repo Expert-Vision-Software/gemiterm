@@ -203,7 +203,7 @@ export class GeminiClientService
     return new GeminiAPIError("Unexpected error: " + String(e));
   }
 
-  forProfile(profileName: string): GeminiClientService {
+  async forProfile(profileName: string): Promise<GeminiClientService> {
     if (!this.cookieStorageService) {
       throw new Error("CookieStorageService is required for forProfile");
     }
@@ -219,7 +219,7 @@ export class GeminiClientService
   }
 
   async profileHasConversation(profileName: string, conversationId: string): Promise<boolean> {
-    const profileClient = this.forProfile(profileName);
+    const profileClient = await this.forProfile(profileName);
     const chats = await profileClient.listChats();
     return chats.some((chat) => chat.id === conversationId);
   }

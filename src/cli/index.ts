@@ -117,7 +117,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
   mediator.registerQueryHandler(new GetProfileStatusesQueryHandler(profileQueryService));
   mediator.registerQueryHandler(new ListChatsQueryHandler(async () => getGeminiClient(), profileManager, logger));
 
-  const { clientService, commandClientService } = createClientServices(getGeminiClient, () => geminiClient);
+  const { clientService, commandClientService } = createClientServices(getGeminiClient);
 
   mediator.registerQueryHandler(new FetchChatQueryHandler(clientService));
   mediator.registerQueryHandler(new ListModelsQueryHandler(clientService));

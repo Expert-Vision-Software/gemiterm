@@ -92,7 +92,7 @@ function createManager(
       async startNewChat() { return { response: "", conversationId: "" }; },
       async profileHasConversation() { return false; },
       async models() { return []; },
-      forProfile() { return this as unknown as IGeminiClientService; },
+      async forProfile() { return this as unknown as IGeminiClientService; },
     },
     silentRefresh,
   });
@@ -174,7 +174,7 @@ describe("ProfileAuthManager", () => {
           async startNewChat() { return { response: "", conversationId: "" }; },
           async profileHasConversation() { return false; },
           async models() { return []; },
-          forProfile() { return this as unknown as IGeminiClientService; },
+          async forProfile() { return this as unknown as IGeminiClientService; },
         },
         silentRefresh,
       });
@@ -343,7 +343,7 @@ describe("ProfileAuthManager", () => {
           return profileName === "work";
         },
         async models() { return []; },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        async forProfile() { return this as unknown as IGeminiClientService; },
       };
 
       const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
@@ -364,7 +364,7 @@ describe("ProfileAuthManager", () => {
         async startNewChat() { return { response: "", conversationId: "" }; },
         async profileHasConversation() { return false; },
         async models() { return []; },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        async forProfile() { return this as unknown as IGeminiClientService; },
       };
 
       const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
@@ -397,7 +397,7 @@ describe("ProfileAuthManager", () => {
         async startNewChat() { return { response: "", conversationId: "" }; },
         async profileHasConversation() { return false; },
         async models() { return []; },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        async forProfile() { return this as unknown as IGeminiClientService; },
       };
 
       const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
@@ -424,7 +424,7 @@ describe("ProfileAuthManager", () => {
           return profileName === "profile1" || profileName === "profile3";
         },
         async models() { return []; },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        async forProfile() { return this as unknown as IGeminiClientService; },
       };
 
       const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
@@ -449,7 +449,7 @@ describe("ProfileAuthManager", () => {
           return false;
         },
         async models() { return []; },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        async forProfile() { return this as unknown as IGeminiClientService; },
       };
 
       const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
@@ -476,7 +476,7 @@ describe("ProfileAuthManager", () => {
           return false;
         },
         async models() { return []; },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        async forProfile() { return this as unknown as IGeminiClientService; },
       };
 
       const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
@@ -493,7 +493,7 @@ describe("ProfileAuthManager", () => {
     ): IGeminiClientService {
       return {
         models: modelsImpl as unknown as IGeminiClientService["models"],
-        forProfile() { return this as unknown as IGeminiClientService; },
+        async forProfile() { return this as unknown as IGeminiClientService; },
         async deleteChat() {},
         async sendMessage() { return ""; },
         async startNewChat() { return { response: "", conversationId: "" }; },

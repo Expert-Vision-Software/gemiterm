@@ -361,7 +361,7 @@ describe("GeminiClientService", () => {
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
-      const profileService = service.forProfile("work");
+      const profileService = await service.forProfile("work");
 
       const chats = await profileService.listChats();
 
@@ -1141,7 +1141,7 @@ describe("GeminiClientService", () => {
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
 
-      const profileService = service.forProfile("work");
+      const profileService = await service.forProfile("work");
       await profileService.listChats();
 
       expect(receivedSid).toBe("work-sid");
@@ -1395,7 +1395,7 @@ describe("persistRefreshedCookies", () => {
 
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
     const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
-    const profileService = service.forProfile("work");
+    const profileService = await service.forProfile("work");
 
     await profileService.listChats();
 
@@ -1431,7 +1431,7 @@ describe("persistRefreshedCookies", () => {
     const d = installGeminiReverseMock({ chats: [createMockChatRow()] });
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
     const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
-    const profileService = service.forProfile("work");
+    const profileService = await service.forProfile("work");
 
     await profileService.listChats();
 
@@ -1479,7 +1479,7 @@ describe("persistRefreshedCookies", () => {
 
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
     const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
-    const profileService = service.forProfile("work");
+    const profileService = await service.forProfile("work");
 
     const chats = await profileService.listChats();
 

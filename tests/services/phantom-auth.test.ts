@@ -160,7 +160,7 @@ function gimme(modelsImpl: ReturnType<typeof mock>): GimmeClient {
     async sendMessage() { return ""; },
     async startNewChat() { return { response: "", conversationId: "" }; },
     async profileHasConversation() { return false; },
-    forProfile() { return this as unknown as IGeminiClientService; },
+    async forProfile() { return this as unknown as IGeminiClientService; },
   };
 }
 

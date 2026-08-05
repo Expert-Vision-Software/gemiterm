@@ -1,10 +1,8 @@
 import type { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import type { IGeminiClientService } from "../core/command-handlers.ts";
 import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
-import { AuthenticationError } from "../core/errors.ts";
 
 export type GetGeminiClientFn = (profileName?: string) => Promise<GeminiClientService>;
-export type GetCachedClientFn = () => GeminiClientService | null;
 
 export interface ClientServices {
   clientService: IGeminiClientQueryService;
@@ -13,7 +11,6 @@ export interface ClientServices {
 
 export function createClientServices(
   getGeminiClient: GetGeminiClientFn,
-  getCachedClient: GetCachedClientFn,
 ): ClientServices {
   const clientService: IGeminiClientQueryService = {
     async listChats(options?: { limit?: number; offset?: number; search?: string }) {
@@ -25,9 +22,8 @@ export function createClientServices(
     async listModels() {
       return (await getGeminiClient()).listModels();
     },
-    forProfile(name: string) {
-      const c = getCachedClient();
-      if (!c) throw new AuthenticationError();
+    async forProfile(name: string) {
+      const c = await getGeminiClient(name);
       return c.forProfile(name);
     },
   };
@@ -45,9 +41,8 @@ export function createClientServices(
     async profileHasConversation(name: string, id: string) {
       return (await getGeminiClient()).profileHasConversation(name, id);
     },
-    forProfile(name: string) {
-      const c = getCachedClient();
-      if (!c) throw new AuthenticationError();
+    async forProfile(name: string) {
+      const c = await getGeminiClient(name);
       return c.forProfile(name);
     },
     async listChats(options?: { limit?: number; offset?: number; search?: string }) {

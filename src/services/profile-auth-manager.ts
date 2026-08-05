@@ -139,7 +139,8 @@ export class ProfileAuthManager {
     }
 
     try {
-      await this.geminiClient.forProfile(name).models();
+      const probed = await this.geminiClient.forProfile(name);
+      await probed.models();
     } catch (err) {
       this.logger.warn(`Server-side session for profile '${name}' appears stale; forcing refresh`);
       this.logger.debug(`probeServerSession: models failed for profile '${name}': ${err}`);

@@ -94,7 +94,7 @@ export interface IGeminiClientService {
   sendMessage(conversationId: string, message: string): Promise<string>;
   startNewChat(message: string): Promise<{ response: string; conversationId: string }>;
   profileHasConversation(profileName: string, conversationId: string): Promise<boolean>;
-  forProfile(profileName: string): IGeminiClientService;
+  forProfile(profileName: string): Promise<IGeminiClientService>;
   listChats(options?: { limit?: number; offset?: number; search?: string }): Promise<ChatInfo[]>;
   models(): Promise<string[]>;
 }
@@ -196,7 +196,7 @@ export class DeleteConversationCommandHandler
     command: Command<DeleteConversationCommandPayload>,
   ): Promise<DeleteConversationCommandResult> {
     const { conversationId, profileName } = extractPayload(command);
-    const client = profileName ? this.geminiClient.forProfile(profileName) : this.geminiClient;
+    const client = profileName ? await this.geminiClient.forProfile(profileName) : this.geminiClient;
     await client.deleteChat(conversationId);
     return { success: true };
   }
@@ -214,7 +214,7 @@ export class SendMessageCommandHandler
 
   async handle(command: Command<SendMessageCommandPayload>): Promise<SendMessageCommandResult> {
     const { conversationId, message, profileName } = extractPayload(command);
-    const client = profileName ? this.geminiClient.forProfile(profileName) : this.geminiClient;
+    const client = profileName ? await this.geminiClient.forProfile(profileName) : this.geminiClient;
     const response = await client.sendMessage(conversationId, message);
     return { response };
   }
@@ -234,7 +234,7 @@ export class StartNewChatCommandHandler
     command: Command<StartNewChatCommandPayload>,
   ): Promise<StartNewChatCommandResult> {
     const { message, profileName } = extractPayload(command);
-    const client = profileName ? this.geminiClient.forProfile(profileName) : this.geminiClient;
+    const client = profileName ? await this.geminiClient.forProfile(profileName) : this.geminiClient;
     const result = await client.startNewChat(message);
     return { response: result.response, conversationId: result.conversationId };
   }

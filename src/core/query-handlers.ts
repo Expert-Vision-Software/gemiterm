@@ -61,7 +61,7 @@ export interface IGeminiClientQueryService {
   listChats(options?: { limit?: number; offset?: number; search?: string }): Promise<ChatInfo[]>;
   fetchChat(conversationId: string): Promise<Message[]>;
   listModels(): Promise<string[]>;
-  forProfile(profileName: string): IGeminiClientQueryService;
+  forProfile(profileName: string): Promise<IGeminiClientQueryService>;
 }
 
 export interface IProfileQueryService {
@@ -95,7 +95,7 @@ export class ListChatsQueryHandler
 
     let chats: ChatInfo[];
     if (profile) {
-      chats = await client.forProfile(profile).listChats(options);
+      chats = await (await client.forProfile(profile)).listChats(options);
     } else if (allProfiles) {
       const allProfilesList = this.profileManager.list();
       const authenticated = allProfilesList.filter((name) => {
@@ -110,8 +110,8 @@ export class ListChatsQueryHandler
         chats = [];
       } else {
         const results = await Promise.allSettled(
-          authenticated.map((name) =>
-            client.forProfile(name).listChats(options),
+          authenticated.map(async (name) =>
+            (await client.forProfile(name)).listChats(options),
           ),
         );
         chats = [];
@@ -145,7 +145,7 @@ export class FetchChatQueryHandler
 
   async handle(query: Query<FetchChatQueryPayload>): Promise<FetchChatQueryResult> {
     const { conversationId, profileName } = extractPayload(query);
-    const client = profileName ? this.geminiClient.forProfile(profileName) : this.geminiClient;
+    const client = profileName ? await this.geminiClient.forProfile(profileName) : this.geminiClient;
     const messages = await client.fetchChat(conversationId);
     return { messages };
   }
