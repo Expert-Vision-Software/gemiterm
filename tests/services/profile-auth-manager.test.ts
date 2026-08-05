@@ -77,6 +77,7 @@ function createManager(
   profileManager: ProfileManagerType,
   geminiClient?: IGeminiClientService,
   silentRefresh: (profileName: string) => Promise<boolean> = async () => false,
+  rotateCookies: (profileName: string) => Promise<boolean> = async () => false,
 ): ProfileAuthManager {
   const cookieStorage = new CookieStorageService({
     cookieStorage: new CookieStorage(),
@@ -95,6 +96,7 @@ function createManager(
       async forProfile() { return this as unknown as IGeminiClientService; },
     },
     silentRefresh,
+    rotateCookies,
   });
 }
 
@@ -518,6 +520,7 @@ describe("ProfileAuthManager", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => true);
 
       const infoSpy = mock(() => {});
       const testLogger = new Logger("test");
@@ -530,14 +533,16 @@ describe("ProfileAuthManager", () => {
         logger: testLogger,
         geminiClient: geminiClient as unknown as IGeminiClientService,
         silentRefresh,
+        rotateCookies,
       });
 
       const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
       expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
+      expect(rotateCookies).toHaveBeenCalledTimes(1);
+      expect(rotateCookies).toHaveBeenCalledWith("default");
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
       expect(infoSpy).toHaveBeenCalledWith(
         expect.stringContaining("Profile 'default' is authenticated"),
       );
@@ -597,8 +602,9 @@ describe("ProfileAuthManager", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => true);
 
-      const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
+      const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh, rotateCookies);
 
       const r1 = await mgr.ensureAuthenticated("default");
       const r2 = await mgr.ensureAuthenticated("default");
@@ -608,7 +614,8 @@ describe("ProfileAuthManager", () => {
       expect(r2.secure_1psid).toBe("test-psid-value");
       expect(r3.secure_1psid).toBe("test-psid-value");
       expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(3);
+      expect(rotateCookies).toHaveBeenCalledTimes(3);
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
 
     test("separate ProfileAuthManager instances each perform their own probe", async () => {
@@ -621,15 +628,17 @@ describe("ProfileAuthManager", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => true);
 
-      const mgr1 = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
-      const mgr2 = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
+      const mgr1 = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh, rotateCookies);
+      const mgr2 = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh, rotateCookies);
 
       await mgr1.ensureAuthenticated("default");
       await mgr2.ensureAuthenticated("default");
 
       expect(modelsFn).toHaveBeenCalledTimes(2);
-      expect(silentRefresh).toHaveBeenCalledTimes(2);
+      expect(rotateCookies).toHaveBeenCalledTimes(2);
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
 
     test("rotates cookies even when models() succeeds (stale __Secure-1PSIDTS detection)", async () => {
@@ -642,12 +651,14 @@ describe("ProfileAuthManager", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => true);
 
-      const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
+      const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh, rotateCookies);
 
       await mgr.ensureAuthenticated("default");
 
-      expect(silentRefresh).toHaveBeenCalledWith("default");
+      expect(rotateCookies).toHaveBeenCalledWith("default");
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
   });
 });

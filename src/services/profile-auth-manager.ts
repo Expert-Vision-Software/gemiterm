@@ -9,6 +9,7 @@ import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 
 export type SilentRefreshFn = (profileName: string) => Promise<boolean>;
+export type RotateCookiesFn = (profileName: string) => Promise<boolean>;
 
 export interface ProfileAuthManagerDeps {
   profileManager: ProfileManager;
@@ -16,6 +17,7 @@ export interface ProfileAuthManagerDeps {
   logger: Logger;
   geminiClient: IGeminiClientService;
   silentRefresh: SilentRefreshFn;
+  rotateCookies: RotateCookiesFn;
 }
 
 type ProbeResult = "valid" | "stale";
@@ -41,6 +43,7 @@ export class ProfileAuthManager {
   private readonly logger: Logger;
   private readonly geminiClient: IGeminiClientService;
   private readonly silentRefresh: SilentRefreshFn;
+  private readonly rotateCookies: RotateCookiesFn;
   private readonly probeCache: Map<string, ProbeCacheEntry> = new Map();
 
   constructor(deps: ProfileAuthManagerDeps) {
@@ -49,6 +52,7 @@ export class ProfileAuthManager {
     this.logger = deps.logger;
     this.geminiClient = deps.geminiClient;
     this.silentRefresh = deps.silentRefresh;
+    this.rotateCookies = deps.rotateCookies;
   }
 
   async autoExtendSession(profileName: string): Promise<boolean> {
@@ -99,7 +103,7 @@ export class ProfileAuthManager {
     }
 
     try {
-      await this.silentRefresh(name);
+      await this.rotateCookies(name);
     } catch (e) {
       this.logger.debug(`ensureAuthenticated: best-effort rotation failed for profile '${name}': ${e}`);
     }

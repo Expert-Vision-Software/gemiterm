@@ -207,6 +207,25 @@ export class AuthService {
     }
   }
 
+  async rotateCookies(profileName: string): Promise<boolean> {
+    const name = profileName ?? getDefaultProfileName();
+    try {
+      validateProfileName(name);
+    } catch {
+      return false;
+    }
+    try {
+      return await rotateCookies(name, {
+        cookieStorage: this.cookieStorage,
+        cookieStorageService: this.cookieStorageService,
+        logger: this.logger,
+      });
+    } catch (err) {
+      this.logger.debug(`rotateCookies failed for profile '${name}': ${err}`);
+      return false;
+    }
+  }
+
   async silentRefresh(profileName: string, timeoutMs: number = SILENT_REFRESH_TIMEOUT_MS): Promise<boolean> {
     const name = profileName ?? getDefaultProfileName();
     try {

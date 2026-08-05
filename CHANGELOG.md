@@ -1,3 +1,18 @@
+## [2.6.2] - 2026-08-05
+
+### Fixed
+
+- **Profile-scoped data commands broken on first call (`fetch`/`export`/`continue`/`delete`).** The CLI client-service `forProfile` read a module singleton populated only by a prior `getGeminiClient` call, so the first profile-scoped operation in a process threw `AuthenticationError("Not authenticated. Please run 'gemiterm login' first.")`. Both the explicit `--profile` path and the auto-discovery path (`findProfileForConversation` → `forProfile`) were affected. `forProfile` is now async and lazily initializes via `getGeminiClient` (which runs `ensureAuthenticated` + reauth). Internal interface change: `IGeminiClientService` / `IGeminiClientQueryService` `forProfile` returns `Promise<Self>`.
+- **`findProfileForConversation` missed non-newest chats.** `GeminiClientService.profileHasConversation` used `listChats({ limit: 1 })`, but `listChats` sorts DESC by timestamp before slicing, so only the newest chat was visible. Any non-newest conversation resolved to "no owning profile". Replaced with an unbounded `listChats()` membership scan.
+- **`list` returned 0 chats after a silent server-side `__Secure-1PSIDTS` rotation.** `probeServerSession` only called `models()`, a PSID-only RPC, so a stale `__Secure-1PSIDTS` looked valid and no silent refresh fired. `ensureAuthenticated` now invokes `silentRefresh` (L1 `RotateCookies`) on every valid-cookie call regardless of probe outcome; the existing 600 s disk-mtime guard throttles actual posts. Rotation failure on the success path is non-fatal.
+
+### Internal
+
+- `createClientServices` extracted from `src/cli/index.ts` into `src/cli/client-services.ts` to expose a testable seam for the `forProfile` wiring.
+- Test suite: 913 pass / 0 fail (was 909). Red-then-green regression tests added for each fix at the cheapest seam.
+
+---
+
 ## [2.6.1] - 2026-08-04
 
 ### Changed
@@ -8,6 +23,10 @@
 ### Removed
 
 - **`profile-has-chats` marker retired.** The per-profile marker file existed only to disambiguate `listChats([])` — stale vs. genuinely empty. With `models()` directly answering "valid or not", the marker has no purpose. `writeProfileHasChats`, `readProfileHasChats` (`io.ts`), and `getProfileHasChatsPath` (`path-utils.ts`) are removed. Existing marker files on disk are harmless zero-byte files; no cleanup migration needed.
+
+### Fixed
+
+- **Cookie jar merge upsert (Proposal A, commit `65b0c38` — previously undocumented in this entry).** `silentRefresh`'s wholesale jar overwrite was replaced with a `mergeCookies` upsert that preserves existing entries (e.g. the `.google.com` `__Secure-1PSIDTS`) instead of evicting them. `CookieStorageService.resolveCookie` now prefers `.google.com`-domain entries, and the L2 `requireRotation` baseline check is domain-preferring, so rotation commits only when the matching domain's cookie actually changed.
 
 ### Internal
 

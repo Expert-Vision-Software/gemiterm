@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <TestingBaseline>
     <Metadata>
-        <LastUpdated>2026-08-03T03:32:00Z</LastUpdated>
-        <BaselineId>BL-006</BaselineId>
+        <LastUpdated>2026-08-05T11:36:00Z</LastUpdated>
+        <BaselineId>BL-007</BaselineId>
         <Framework>Bun + TypeScript CLI</Framework>
     </Metadata>
 
     <Solution>
         <UnitTests>
             <Framework>bun test</Framework>
-            <TestFiles>55</TestFiles>
-            <Passed>899</Passed>
+            <TestFiles>56</TestFiles>
+            <Passed>913</Passed>
             <Failed>0</Failed>
             <Skipped>2</Skipped>
-            <Total>901</Total>
-            <Duration>20.34</Duration>
-            <ExpectCalls>1866</ExpectCalls>
+            <Total>915</Total>
+            <Duration>20.48</Duration>
+            <ExpectCalls>1903</ExpectCalls>
         </UnitTests>
         <IntegrationTests>
             <Framework>bun test</Framework>
@@ -36,7 +36,7 @@
         <Build>
             <Windows>
                 <Status>Success</Status>
-                <BuildTime>0.5</BuildTime>
+                <BuildTime>0.62</BuildTime>
                 <TypeCheckStatus>Success</TypeCheckStatus>
                 <FileCount>1</FileCount>
                 <TotalSizeMB>94.4</TotalSizeMB>
@@ -49,7 +49,7 @@
             </Windows>
             <Linux>
                 <Status>Success</Status>
-                <BuildTime>0.4</BuildTime>
+                <BuildTime>0.41</BuildTime>
                 <TypeCheckStatus>Success</TypeCheckStatus>
                 <FileCount>1</FileCount>
                 <TotalSizeMB>90.7</TotalSizeMB>
@@ -90,6 +90,12 @@
     </Dependencies>
 
     <Changelog>
+        <Entry>
+            <BaselineId>BL-007</BaselineId>
+            <Date>2026-08-05</Date>
+            <Changes>Updated baseline: 913 unit pass, 0 fail, 2 skip, 915 total, 56 files, 1903 expect() calls. Windows/Linux builds Success (94.4/90.7 MB, 0.62s/0.41s). Added 14 tests (3 red-then-green regression tests for the v2.6.2 profile/auth bugfixes: profileHasConversation non-newest lookup, client-service forProfile first-call init x2, stale-1PSIDTS rotate-on-success; plus updated 5 probe tests for the new rotate-on-valid-probe contract).</Changes>
+            <Reason>v2.6.2 release: three production bugfixes (profile-has-conversation-lookup, profile-resolution-client-init, silent-refresh-stale-psidts-detection). Within threshold (test count +1.55%) but updated per explicit request for release.</Reason>
+        </Entry>
         <Entry>
             <BaselineId>BL-006</BaselineId>
             <Date>2026-08-03</Date>

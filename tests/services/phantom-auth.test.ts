@@ -241,6 +241,7 @@ describe("phantom-auth regression suite", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => true);
 
       const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
       const mgr = new ProfileAuthManager({
@@ -249,14 +250,16 @@ describe("phantom-auth regression suite", () => {
         logger,
         geminiClient: geminiClient as unknown as IGeminiClientService,
         silentRefresh,
+        rotateCookies,
       });
 
       const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("active-psid");
       expect(cookies.secure_1psidts).toBe("active-psidts");
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
+      expect(rotateCookies).toHaveBeenCalledTimes(1);
+      expect(rotateCookies).toHaveBeenCalledWith("default");
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
       expect(modelsFn).toHaveBeenCalledTimes(1);
     });
 
@@ -270,6 +273,7 @@ describe("phantom-auth regression suite", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => true);
 
       const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
       const mgr = new ProfileAuthManager({
@@ -278,6 +282,7 @@ describe("phantom-auth regression suite", () => {
         logger,
         geminiClient: geminiClient as unknown as IGeminiClientService,
         silentRefresh,
+        rotateCookies,
       });
 
       const r1 = await mgr.ensureAuthenticated("default");
@@ -285,7 +290,8 @@ describe("phantom-auth regression suite", () => {
       const r3 = await mgr.ensureAuthenticated("default");
 
       expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(3);
+      expect(rotateCookies).toHaveBeenCalledTimes(3);
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
       expect(r2.secure_1psid).toBe(r1.secure_1psid);
       expect(r3.secure_1psid).toBe(r1.secure_1psid);
     });
