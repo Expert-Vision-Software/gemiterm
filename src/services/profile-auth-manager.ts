@@ -109,8 +109,8 @@ export class ProfileAuthManager {
       this.logger.debug(`ensureAuthenticated: best-effort rotation failed for profile '${name}': ${e}`);
     }
     if (!rotated) {
-      this.logger.info(
-        `ensureAuthenticated: cookie rotation did not refresh PSIDTS for profile '${name}'. Run 'gemiterm auth' to refresh.`,
+      this.logger.warn(
+        `ensureAuthenticated: session is authenticated. best-effort cookie rotation did not refresh PSIDTS for profile '${name}'. Run 'gemiterm auth -e ${name}' to refresh.`,
       );
     }
 
