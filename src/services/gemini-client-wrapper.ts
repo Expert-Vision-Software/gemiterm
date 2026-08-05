@@ -220,7 +220,7 @@ export class GeminiClientService
 
   async profileHasConversation(profileName: string, conversationId: string): Promise<boolean> {
     const profileClient = this.forProfile(profileName);
-    const chats = await profileClient.listChats({ limit: 1 });
+    const chats = await profileClient.listChats();
     return chats.some((chat) => chat.id === conversationId);
   }
 

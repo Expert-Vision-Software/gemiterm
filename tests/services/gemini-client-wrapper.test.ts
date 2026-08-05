@@ -1206,7 +1206,7 @@ describe("GeminiClientService", () => {
       await expect(service.profileHasConversation("work", "abc-123")).rejects.toThrow("Session expired or invalid");
     });
 
-    test("passes limit:1 to listChats for targeted lookup", async () => {
+    test("scans the full chat list for membership (no truncating limit)", async () => {
       const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
         work: { secure_1psid: "work-sid", secure_1psidts: null },
       };
@@ -1230,7 +1230,7 @@ describe("GeminiClientService", () => {
       await service.profileHasConversation("work", "abc-123");
 
       GeminiClientService.prototype.listChats = originalListChats;
-      expect(capturedOptions?.limit).toBe(1);
+      expect(capturedOptions?.limit).toBeUndefined();
     });
 
     test("does not mutate the calling instance's cookie config", async () => {
