@@ -30,11 +30,13 @@ Constraints:
 
 ## Decisions
 
-### Decision 1: Unconditional rotation on the valid-cookies path (option b, user-confirmed)
+### Decision 1: Unconditional L1 rotation on the valid-cookies path (option b, user-confirmed)
 
-In `ensureAuthenticated`, after the `models()` probe runs, call `silentRefresh(name)` regardless of the probe outcome. Concretely the success path becomes: probe → `silentRefresh(name)` (rotate, 600 s-guarded) → return loaded cookies.
+In `ensureAuthenticated`, after the `models()` probe runs, call the injected `rotateCookies(name)` (the L1 `RotateCookies` POST only) regardless of the probe outcome. Concretely the success path becomes: probe → `rotateCookies(name)` (L1, 600 s-guarded, no browser) → return loaded cookies. The full `silentRefresh` ladder (L1 + L2 headless browser) is reserved for the stale-probe path (`models()` threw → genuinely dead session).
 
-**Rationale**: The 600 s disk-mtime guard inside `rotateCookies` already throttles, so calling `silentRefresh` every time is safe and is the smallest behavioral change that closes the blind spot. It reuses the existing, tested L1 path.
+**Rationale**: The 600 s disk-mtime guard inside `rotateCookies` already throttles, so calling it on every valid-cookie `ensureAuthenticated` is safe and is the smallest behavioral change that closes the blind spot. It reuses the existing, tested L1 path.
+
+**Critical distinction discovered during smoke testing**: `silentRefresh` is the full L1→L2 ladder — when L1 returns `false` (including a 600 s-guard skip or an identical-noop), it falls through to the L2 headless browser. Calling `silentRefresh` on the valid path therefore launched a ~30 s browser on every command once the guard began skipping L1 — a severe UX regression. Option (b) as specified is `rotateCookies` (L1 POST) only, which never launches a browser. A new `rotateCookies` dependency (backed by `AuthService.rotateCookies`) is injected into `ProfileAuthManager` for this path; `silentRefresh` remains for the stale path.
 
 **Alternatives considered** (from the diagnostic handoff):
 - **(a) Augment probe with `listChats({limit:1})`** — rejected; requires reviving the `profile-has-chats` marker that Proposal B deliberately retired (regressive).
@@ -53,10 +55,10 @@ The 150 s TTL probe cache (`GEMITERM_PROBE_TTL_MS`) stays to avoid repeated `mod
 
 ## Risks / Trade-offs
 
-- **[Extra round-trip] Every `ensureAuthenticated` now issues a `silentRefresh` call** → the 600 s guard means a real `RotateCookies` POST happens at most once per 10 min per profile; sub-threshold calls return early. Acceptable.
-- **[Test semantics] `silentRefresh` mocks in tests have no guard** → the probe-success / probe-budget tests that assert `silentRefresh` called 0 times must be updated to assert it IS called. This is the intended behavior change, not a regression.
-- **[Residual edge case] `models()` succeeds but rotation fails (network) and the session's 1PSIDTS was stale** → the user may still see 0 chats for that operation; this is a transient network failure, same as today's rotate failures, and self-heals on the next call once the guard window allows a retry. Not treated as an auth error.
-- **[Probe/rotate ordering] Calling `silentRefresh` after the probe means two server round-trips on a cache miss** → the probe cache (150 s) and the rotate guard (600 s) bound the steady-state cost.
+- **[Extra round-trip] Every `ensureAuthenticated` now issues a `rotateCookies` call** → the 600 s guard means a real `RotateCookies` POST happens at most once per 10 min per profile; sub-threshold calls return early without network I/O. No browser is ever launched on this path.
+- **[Test semantics] `rotateCookies` mocks in tests have no guard** → the probe-success / probe-budget tests assert `rotateCookies` IS called (and `silentRefresh` is NOT, on the valid path). This is the intended behavior change.
+- **[Residual edge case] `models()` succeeds but L1 rotation fails (e.g. 401 for a day-old `__Secure-1PSIDTS`) and the session's token is too degraded for L1** → the user still sees 0 chats until re-auth; L1 cannot recover a fully stale token, and escalating to the L2 browser on every command was rejected (UX regression). Such a session must be recovered via the stale path (`models()` eventually throwing) or an explicit `login`. Confirmed against the stale `.gemiterm` smoke profiles.
+- **[Probe/rotate ordering] `rotateCookies` after the probe means up to two server round-trips on a cache miss** → the probe cache (150 s) and the rotate guard (600 s) bound the steady-state cost.
 
 ## Migration Plan
 

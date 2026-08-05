@@ -14,8 +14,8 @@
             <Failed>0</Failed>
             <Skipped>2</Skipped>
             <Total>915</Total>
-            <Duration>20.48</Duration>
-            <ExpectCalls>1903</ExpectCalls>
+            <Duration>20.45</Duration>
+            <ExpectCalls>1909</ExpectCalls>
         </UnitTests>
         <IntegrationTests>
             <Framework>bun test</Framework>
@@ -93,7 +93,7 @@
         <Entry>
             <BaselineId>BL-007</BaselineId>
             <Date>2026-08-05</Date>
-            <Changes>Updated baseline: 913 unit pass, 0 fail, 2 skip, 915 total, 56 files, 1903 expect() calls. Windows/Linux builds Success (94.4/90.7 MB, 0.62s/0.41s). Added 14 tests (3 red-then-green regression tests for the v2.6.2 profile/auth bugfixes: profileHasConversation non-newest lookup, client-service forProfile first-call init x2, stale-1PSIDTS rotate-on-success; plus updated 5 probe tests for the new rotate-on-valid-probe contract).</Changes>
+            <Changes>Updated baseline: 913 unit pass, 0 fail, 2 skip, 915 total, 56 files, 1909 expect() calls. Windows/Linux builds Success (94.4/90.7 MB, 0.62s/0.41s). Added 14 tests (3 red-then-green regression tests for the v2.6.2 profile/auth bugfixes: profileHasConversation non-newest lookup, client-service forProfile first-call init x2, stale-1PSIDTS rotate-on-success; plus updated probe tests for the new L1-rotate-on-valid-probe contract).</Changes>
             <Reason>v2.6.2 release: three production bugfixes (profile-has-conversation-lookup, profile-resolution-client-init, silent-refresh-stale-psidts-detection). Within threshold (test count +1.55%) but updated per explicit request for release.</Reason>
         </Entry>
         <Entry>
