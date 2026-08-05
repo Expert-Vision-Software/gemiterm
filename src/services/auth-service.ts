@@ -17,6 +17,18 @@ const GEMINI_AUTH_URL = "https://gemini.google.com/app";
 const DEFAULT_AUTH_TIMEOUT_MS = 300_000;
 const SILENT_REFRESH_TIMEOUT_MS = 30_000;
 
+export function mergeCookies(existing: Cookie[], polled: Cookie[]): Cookie[] {
+  const key = (c: Cookie) => `${c.name}|${c.domain}|${c.path}`;
+  const polledByKey = new Map(polled.map((c) => [key(c), c]));
+  const merged = existing.map((c) => polledByKey.has(key(c)) ? polledByKey.get(key(c))! : c);
+  for (const c of polled) {
+    if (!existing.some((e) => key(e) === key(c))) {
+      merged.push(c);
+    }
+  }
+  return merged;
+}
+
 export interface AuthServiceDeps {
   driver: PlaywrightCliDriver;
   cookieMonitor: CookieMonitor;
@@ -266,7 +278,9 @@ export class AuthService {
         this.logger.debug(`silentRefresh: cookies unchanged vs baseline, treating as no rotation`);
         return false;
       }
-      await this.extractCookies(name, cookies);
+      const existing = this.cookieStorageService.loadAllCookiesForProfile(name);
+      const merged = mergeCookies(existing, cookies);
+      this.cookieStorageService.saveCookiesForProfile(name, merged);
       return true;
     } catch (err) {
       this.logger.debug(`silentRefresh: ${err}`);

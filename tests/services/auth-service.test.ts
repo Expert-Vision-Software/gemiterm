@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:
 import {
   AuthService,
   AuthServiceTimeoutError,
+  mergeCookies,
 } from "../../src/services/auth-service.ts";
 import { CookieMonitor } from "../../src/services/cookie-monitor.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
@@ -393,6 +394,87 @@ describe("AuthService", () => {
 
       expect(cookieStorage.save).toHaveBeenCalledTimes(1);
       expect(cookieStorage.save).toHaveBeenCalledWith("default", cookies);
+    });
+  });
+
+  describe("mergeCookies", () => {
+    function cookie(name: string, value: string, domain: string, path = "/"): Cookie {
+      return {
+        name,
+        value,
+        domain,
+        path,
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "None",
+      };
+    }
+
+    test("preserves existing entry when polled set lacks it", () => {
+      const existing: Cookie[] = [
+        cookie("__Secure-1PSID", "g-psid", ".google.com"),
+        cookie("__Secure-1PSIDTS", "g-psidts", ".google.com"),
+        cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
+        cookie("__Secure-1PSIDTS", "yt-psidts", ".youtube.com"),
+      ];
+      const polled: Cookie[] = [
+        cookie("__Secure-1PSID", "new-g-psid", ".google.com"),
+        cookie("__Secure-1PSIDTS", "new-yt-psidts", ".youtube.com"),
+        cookie("__Secure-1PSID", "new-yt-psid", ".youtube.com"),
+      ];
+
+      const merged = mergeCookies(existing, polled);
+
+      expect(merged).toHaveLength(4);
+      const gPsid = merged.find((c) => c.name === "__Secure-1PSID" && c.domain === ".google.com");
+      expect(gPsid?.value).toBe("new-g-psid");
+      const gPsidts = merged.find((c) => c.name === "__Secure-1PSIDTS" && c.domain === ".google.com");
+      expect(gPsidts).toBeDefined();
+      expect(gPsidts?.value).toBe("g-psidts");
+    });
+
+    test("overwrites when key matches", () => {
+      const existing: Cookie[] = [
+        cookie("__Secure-1PSID", "old-value", ".google.com"),
+      ];
+      const polled: Cookie[] = [
+        cookie("__Secure-1PSID", "new-value", ".google.com"),
+      ];
+
+      const merged = mergeCookies(existing, polled);
+
+      expect(merged).toHaveLength(1);
+      expect(merged[0]!.value).toBe("new-value");
+    });
+
+    test("handles empty existing jar", () => {
+      const existing: Cookie[] = [];
+      const polled: Cookie[] = [
+        cookie("__Secure-1PSID", "g-psid", ".google.com"),
+        cookie("__Secure-1PSIDTS", "g-psidts", ".google.com"),
+      ];
+
+      const merged = mergeCookies(existing, polled);
+
+      expect(merged).toHaveLength(2);
+      expect(merged.find((c) => c.name === "__Secure-1PSID")?.value).toBe("g-psid");
+      expect(merged.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("g-psidts");
+    });
+
+    test("adds new polled entries not in existing jar", () => {
+      const existing: Cookie[] = [
+        cookie("__Secure-1PSID", "g-psid", ".google.com"),
+      ];
+      const polled: Cookie[] = [
+        cookie("__Secure-1PSID", "g-psid", ".google.com"),
+        cookie("__Secure-1PSIDTS", "new-psidts", ".google.com"),
+      ];
+
+      const merged = mergeCookies(existing, polled);
+
+      expect(merged).toHaveLength(2);
+      expect(merged.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("new-psidts");
     });
   });
 
