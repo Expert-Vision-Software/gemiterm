@@ -98,6 +98,12 @@ export class ProfileAuthManager {
       );
     }
 
+    try {
+      await this.silentRefresh(name);
+    } catch (e) {
+      this.logger.debug(`ensureAuthenticated: best-effort rotation failed for profile '${name}': ${e}`);
+    }
+
     this.logger.info(`Profile '${name}' is authenticated`);
     return this.cookieStorageService.loadCookiesForProfile(name);
   }

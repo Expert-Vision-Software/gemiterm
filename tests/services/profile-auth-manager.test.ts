@@ -508,7 +508,7 @@ describe("ProfileAuthManager", () => {
       delete process.env.GEMITERM_PROBE_TTL_MS;
     });
 
-    test("models() succeeds logs is authenticated; no silent refresh spent", async () => {
+    test("models() succeeds still rotates (stale 1PSIDTS detection) and logs authenticated", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -536,7 +536,8 @@ describe("ProfileAuthManager", () => {
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
       expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
+      expect(silentRefresh).toHaveBeenCalledTimes(1);
+      expect(silentRefresh).toHaveBeenCalledWith("default");
       expect(infoSpy).toHaveBeenCalledWith(
         expect.stringContaining("Profile 'default' is authenticated"),
       );
@@ -607,7 +608,7 @@ describe("ProfileAuthManager", () => {
       expect(r2.secure_1psid).toBe("test-psid-value");
       expect(r3.secure_1psid).toBe("test-psid-value");
       expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
+      expect(silentRefresh).toHaveBeenCalledTimes(3);
     });
 
     test("separate ProfileAuthManager instances each perform their own probe", async () => {
@@ -628,7 +629,7 @@ describe("ProfileAuthManager", () => {
       await mgr2.ensureAuthenticated("default");
 
       expect(modelsFn).toHaveBeenCalledTimes(2);
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
+      expect(silentRefresh).toHaveBeenCalledTimes(2);
     });
 
     test("rotates cookies even when models() succeeds (stale __Secure-1PSIDTS detection)", async () => {

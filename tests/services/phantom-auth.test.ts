@@ -231,7 +231,7 @@ describe("phantom-auth regression suite", () => {
       expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
-    test("models() succeeds means session is valid; no silent refresh spent", async () => {
+    test("models() succeeds still rotates (stale 1PSIDTS detection)", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -255,7 +255,8 @@ describe("phantom-auth regression suite", () => {
 
       expect(cookies.secure_1psid).toBe("active-psid");
       expect(cookies.secure_1psidts).toBe("active-psidts");
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
+      expect(silentRefresh).toHaveBeenCalledTimes(1);
+      expect(silentRefresh).toHaveBeenCalledWith("default");
       expect(modelsFn).toHaveBeenCalledTimes(1);
     });
 
@@ -284,7 +285,7 @@ describe("phantom-auth regression suite", () => {
       const r3 = await mgr.ensureAuthenticated("default");
 
       expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
+      expect(silentRefresh).toHaveBeenCalledTimes(3);
       expect(r2.secure_1psid).toBe(r1.secure_1psid);
       expect(r3.secure_1psid).toBe(r1.secure_1psid);
     });
