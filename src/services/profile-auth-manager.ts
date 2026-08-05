@@ -102,10 +102,16 @@ export class ProfileAuthManager {
       );
     }
 
+    let rotated = false;
     try {
-      await this.rotateCookies(name);
+      rotated = await this.rotateCookies(name);
     } catch (e) {
       this.logger.debug(`ensureAuthenticated: best-effort rotation failed for profile '${name}': ${e}`);
+    }
+    if (!rotated) {
+      this.logger.info(
+        `ensureAuthenticated: cookie rotation did not refresh PSIDTS for profile '${name}'. Run 'gemiterm auth' to refresh.`,
+      );
     }
 
     this.logger.info(`Profile '${name}' is authenticated`);
