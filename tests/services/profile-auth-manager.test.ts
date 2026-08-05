@@ -630,5 +630,23 @@ describe("ProfileAuthManager", () => {
       expect(modelsFn).toHaveBeenCalledTimes(2);
       expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
+
+    test("rotates cookies even when models() succeeds (stale __Secure-1PSIDTS detection)", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeValidCookies());
+
+      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
+      const geminiClient = gimme(modelsFn);
+
+      const silentRefresh = mock(async (_profileName: string) => true);
+
+      const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
+
+      await mgr.ensureAuthenticated("default");
+
+      expect(silentRefresh).toHaveBeenCalledWith("default");
+    });
   });
 });

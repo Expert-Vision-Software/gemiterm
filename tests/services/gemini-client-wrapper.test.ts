@@ -1253,6 +1253,28 @@ describe("GeminiClientService", () => {
       const authAfter = service.isAuthenticated();
       expect(authBefore).toBe(authAfter);
     });
+
+    test("returns true for a non-newest conversation when profile has multiple chats (limit:1 bug)", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        work: { secure_1psid: "work-sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+      const d = installGeminiReverseMock({
+        chats: [
+          createMockChatRow({ cid: "newest", title: "Newest", timestamp: 2000000000 }),
+          createMockChatRow({ cid: "older-target", title: "Older Target", timestamp: 1000000000 }),
+        ],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
+
+      const result = await service.profileHasConversation("work", "older-target");
+
+      expect(result).toBe(true);
+    });
   });
 
   describe("init() idempotency", () => {
