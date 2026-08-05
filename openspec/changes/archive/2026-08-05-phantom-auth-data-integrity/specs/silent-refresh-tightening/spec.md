@@ -2,8 +2,6 @@
 
 ### Requirement: AuthService.silentRefresh uses multi-layer recovery ladder
 
-The existing requirement is MODIFIED to require merge-by-name-domain-path upsert in the L2 persistence path.
-
 The `AuthService.silentRefresh(profileName)` method MUST attempt session recovery in a ladder, escalating from the cheapest mechanism to the heaviest:
 
 1. **L1:** Call `rotateCookies(name)`. If it returns `true`, return `true`.
@@ -19,15 +17,12 @@ The method MUST NOT produce console output (silent operation). The method MUST s
 - **THEN** `silentRefresh` returns `true`
 - **AND** no browser is launched (no `openHeadless` call)
 
-#### Scenario: L1 fails, L2 headless browser succeeds with cookie merge
+#### Scenario: L1 fails, L2 headless browser succeeds
 
 - **WHEN** `silentRefresh("default")` is called
 - **AND** `rotateCookies("default")` returns `false`
 - **AND** the headless browser flow detects rotated cookies within 30s
-- **AND** the existing jar has 4 multi-domain cookies
-- **AND** the polled set has only 3 (`.google.com` PSIDTS absent)
 - **THEN** `silentRefresh` returns `true`
-- **AND** the persisted jar maintains 4 cookies (existing `.google.com` PSIDTS preserved via merge)
 - **AND** the browser session is closed
 
 #### Scenario: Both L1 and L2 fail
@@ -43,3 +38,14 @@ The method MUST NOT produce console output (silent operation). The method MUST s
 - **AND** the profile's stored cookies include `__Secure-1PSID` with domain `somethinggoogle.com` (which does NOT normalize to `.google.com`)
 - **THEN** the L2 snapshot MUST NOT include the `somethinggoogle.com` cookie
 - **AND** the cookie value MUST fall back to the non-domain-filtered lookup (or be excluded from the baseline if no valid `.google.com` match exists)
+
+#### Scenario: L1 fails, L2 headless browser succeeds with cookie merge
+
+- **WHEN** `silentRefresh("default")` is called
+- **AND** `rotateCookies("default")` returns `false`
+- **AND** the headless browser flow detects rotated cookies within 30s
+- **AND** the existing jar has 4 multi-domain cookies
+- **AND** the polled set has only 3 (`.google.com` PSIDTS absent)
+- **THEN** `silentRefresh` returns `true`
+- **AND** the persisted jar maintains 4 cookies (existing `.google.com` PSIDTS preserved via merge)
+- **AND** the browser session is closed
