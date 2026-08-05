@@ -12,6 +12,6 @@
     "serena": {"enabled": true}
   },
   "plugin": [
-    "opencode-intellisearch"
+    "opencode-intellisearch", "opencode-auto-qcgates"
   ]
 }
