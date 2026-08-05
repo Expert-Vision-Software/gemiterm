@@ -1,3 +1,22 @@
+## [2.6.1] - 2026-08-04
+
+### Changed
+
+- **Server-side probe replaced with `models()` RPC.** `ProfileAuthManager.probeServerSession` now calls `geminiClient.models()` instead of `listChats({ limit: 1 })`. The `models()` RPC is the gemini-web-sdk's cheapest definitive positive liveness signal — success means the session is valid, throw means stale. The probe cache TTL and `GEMITERM_PROBE_TTL_MS` override are preserved unchanged.
+- **Probe classification simplified from 3 branches to 2.** The "ambiguous" branch (empty `listChats` + no marker) is removed. With `models()` as a definitive yes/no signal, classification is: RPC succeeds → "valid", RPC throws → "stale". A failed RPC is definitive proof of session problems, unlike the prior `listChats`-based probe which treated network failures as "ambiguous" (trust local freshness).
+
+### Removed
+
+- **`profile-has-chats` marker retired.** The per-profile marker file existed only to disambiguate `listChats([])` — stale vs. genuinely empty. With `models()` directly answering "valid or not", the marker has no purpose. `writeProfileHasChats`, `readProfileHasChats` (`io.ts`), and `getProfileHasChatsPath` (`path-utils.ts`) are removed. Existing marker files on disk are harmless zero-byte files; no cleanup migration needed.
+
+### Internal
+
+- `IGeminiClientService` gains `models(): Promise<string[]>`; `GeminiClientService.models()` delegates to the SDK's `models` method.
+- `ProbeResult` type reduced from `"valid" | "stale" | "ambiguous"` to `"valid" | "stale"`.
+- Phantom-auth test suite and profile-auth-manager tests updated to exercise the `models()` probe path.
+
+---
+
 ## [2.6.0] - 2026-08-03
 
 ### Added
