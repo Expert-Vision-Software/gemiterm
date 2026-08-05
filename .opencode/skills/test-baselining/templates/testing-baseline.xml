@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TestingBaseline>
+    <Metadata>
+        <LastUpdated>2026-04-10T00:00:00Z</LastUpdated>
+        <BaselineId>BL-001</BaselineId>
+        <Framework>Generic Multi-Stack</Framework>
+    </Metadata>
+
+    <Backend>
+        <UnitTests>
+            <Framework>xUnit/NUnit/Jest/Vitest/pytest</Framework>
+            <TestFiles>0</TestFiles>
+            <TestProjects>
+                <Project name="Backend.Tests" tests="0" />
+            </TestProjects>
+            <Passed>0</Passed>
+            <Failed>0</Failed>
+            <Skipped>0</Skipped>
+            <Total>0</Total>
+            <Errors>0</Errors>
+            <Duration>0.00</Duration>
+        </UnitTests>
+        <IntegrationTests>
+            <Framework>xUnit + Moq / Jest / pytest</Framework>
+            <Status>Active</Status>
+            <Total>0</Total>
+            <Passed>0</Passed>
+            <Failed>0</Failed>
+        </IntegrationTests>
+        <E2ETests>
+            <Framework>WebApplicationFactory / Playwright / Cypress</Framework>
+            <Status>Active</Status>
+            <Total>0</Total>
+            <Passed>0</Passed>
+            <Failed>0</Failed>
+        </E2ETests>
+        <Coverage>
+            <LineRate>0.00</LineRate>
+            <BranchRate>0.00</BranchRate>
+            <LinesCovered>0</LinesCovered>
+            <LinesValid>0</LinesValid>
+            <BranchesCovered>0</BranchesCovered>
+            <BranchesValid>0</BranchesValid>
+            <Complexity>0</Complexity>
+        </Coverage>
+        <Build>
+            <Status>Success</Status>
+            <BuildTime>0.00</BuildTime>
+            <TotalProjects>0</TotalProjects>
+            <Warnings>0</Warnings>
+            <WarningsByCategory>
+                <Nullability>0</Nullability>
+                <Obsolete>0</Obsolete>
+                <UnusedVariables>0</UnusedVariables>
+                <PossibleNullReference>0</PossibleNullReference>
+                <PackageResolution>0</PackageResolution>
+                <DeprecatedAPIs>0</DeprecatedAPIs>
+            </WarningsByCategory>
+            <OutputDirectory>./bin</OutputDirectory>
+            <FileCount>0</FileCount>
+            <TotalSizeMB>0</TotalSizeMB>
+        </Build>
+    </Backend>
+
+    <Frontend>
+        <UnitTests>
+            <Framework>Vitest/Jest</Framework>
+            <CoverageTool>@vitest/coverage-v8 / jest-coverage</CoverageTool>
+            <TestFiles>0</TestFiles>
+            <Passed>0</Passed>
+            <Failed>0</Failed>
+            <Skipped>0</Skipped>
+            <Total>0</Total>
+            <Duration>0.00</Duration>
+        </UnitTests>
+        <ComponentTests>
+            <Framework>@aurelia/testing / @testing-library</Framework>
+            <Status>Planned</Status>
+            <Total>0</Total>
+            <Passed>0</Passed>
+            <Failed>0</Failed>
+        </ComponentTests>
+        <E2ETests>
+            <Framework>Playwright/Cypress/Selenium</Framework>
+            <Status>Active</Status>
+            <TestFiles>0</TestFiles>
+            <Total>0</Total>
+            <Passed>0</Passed>
+            <Skipped>0</Skipped>
+            <Failed>0</Failed>
+            <Duration>0.00</Duration>
+        </E2ETests>
+        <Coverage>
+            <Statements>0.00</Statements>
+            <Branches>0.00</Branches>
+            <Functions>0.00</Functions>
+            <Lines>0.00</Lines>
+        </Coverage>
+        <BuildArtifacts>
+            <BuildTime>0.00</BuildTime>
+            <OutputDirectory>./dist</OutputDirectory>
+            <TotalSizeMB>0</TotalSizeMB>
+            <KeyFiles>
+                <File>
+                    <Name>index.html</Name>
+                    <SizeKB>0.00</SizeKB>
+                    <SizeGzippedKB>0.00</SizeGzippedKB>
+                </File>
+            </KeyFiles>
+        </BuildArtifacts>
+    </Frontend>
+
+    <FailedTests>
+        <Test>
+            <Name>None</Name>
+        </Test>
+    </FailedTests>
+
+    <FlakyTests>
+        <Test>
+            <Name>None</Name>
+        </Test>
+    </FlakyTests>
+
+    <KnownErrors>
+        <Error>
+            <Description>None</Description>
+        </Error>
+    </KnownErrors>
+
+    <Dependencies>
+        <Backend>
+            <TargetFramework>.NET/Node/Java</TargetFramework>
+            <PrimaryTestFramework>xUnit/Jest/Vitest/pytest</PrimaryTestFramework>
+            <BuildTooling>dotnet/npm/mvn/gradle</BuildTooling>
+        </Backend>
+        <Frontend>
+            <NodeVersion>22.x</NodeVersion>
+            <PackageManager>yarn/npm/pnpm</PackageManager>
+            <PrimaryTestFramework>Vitest/Jest</PrimaryTestFramework>
+            <E2ETestFramework>Playwright/Cypress</E2ETestFramework>
+        </Frontend>
+    </Dependencies>
+
+    <Changelog>
+        <Entry>
+            <BaselineId>BL-001</BaselineId>
+            <Date>2026-04-10</Date>
+            <Changes>Initial baseline</Changes>
+            <Reason>Project baseline established</Reason>
+        </Entry>
+    </Changelog>
+</TestingBaseline>
