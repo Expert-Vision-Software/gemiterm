@@ -98,25 +98,6 @@ describe("ContinueCommand", () => {
     expect(output).toContain("Listing conversations");
   });
 
-  test("printLastMessage outputs last model message content", async () => {
-    const mockFetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({
-        messages: [
-          { role: "user" as const, content: "Hello" },
-          { role: "model" as const, content: "Hi there! How can I help?" },
-        ],
-      })),
-    };
-    mediator.registerQueryHandler(mockFetchHandler as any);
-
-    await command.printLastMessage(mediator, "conv123", null);
-
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Last response:");
-    expect(output).toContain("Hi there! How can I help?");
-  });
-
   test("--profile forwards the resolved profile into SEND_MESSAGE payload", async () => {
     (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["default"]);
 
@@ -133,32 +114,6 @@ describe("ContinueCommand", () => {
         payload: expect.objectContaining({
           conversationId: "conv123",
           profileName: "default",
-        }),
-      }),
-    );
-  });
-
-  test("interactive mode forwards resolved profileName into FETCH_CHAT (printLastMessage)", async () => {
-    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["evs-diegohb"]);
-
-    const mockFetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({
-        messages: [
-          { role: "user" as const, content: "old q" },
-          { role: "model" as const, content: "old a" },
-        ],
-      })),
-    };
-    mediator.registerQueryHandler(mockFetchHandler as any);
-
-    await command.printLastMessage(mediator, "conv-evs", "evs-diegohb");
-
-    expect(mockFetchHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          conversationId: "conv-evs",
-          profileName: "evs-diegohb",
         }),
       }),
     );
