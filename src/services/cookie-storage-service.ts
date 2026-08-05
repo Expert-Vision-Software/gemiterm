@@ -1,9 +1,15 @@
 import type { Cookie } from "../core/types.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
 import type { Logger } from "../infrastructure/logger.ts";
+import { isGoogleDomainCookie } from "./cookie-rotation.ts";
 
 const COOKIE_EXPIRY_THRESHOLD_MS = 60 * 60 * 1000;
 const REQUIRED_COOKIE_NAMES = new Set(["__Secure-1PSID", "__Secure-1PSIDTS"]);
+
+function resolveCookie(cookies: Cookie[], name: string): string | undefined {
+  const googleMatch = cookies.find((c) => c.name === name && isGoogleDomainCookie(c));
+  return googleMatch?.value ?? cookies.find((c) => c.name === name)?.value;
+}
 
 export interface LoadedCookies {
   secure_1psid: string;
@@ -26,8 +32,7 @@ export class CookieStorageService {
 
   loadCookiesForProfile(profileName: string): LoadedCookies {
     const cookies = this.cookieStorage.load(profileName);
-    const map = new Map(cookies.map((c) => [c.name, c.value]));
-    const secure1psid = map.get("__Secure-1PSID");
+    const secure1psid = resolveCookie(cookies, "__Secure-1PSID");
     if (!secure1psid) {
       throw new Error(
         `Missing required cookie __Secure-1PSID for profile '${profileName}'. Run 'gemiterm auth' to re-authenticate.`,
@@ -35,7 +40,7 @@ export class CookieStorageService {
     }
     return {
       secure_1psid: secure1psid,
-      secure_1psidts: map.get("__Secure-1PSIDTS") ?? null,
+      secure_1psidts: resolveCookie(cookies, "__Secure-1PSIDTS") ?? null,
     };
   }
 

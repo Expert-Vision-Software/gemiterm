@@ -1,6 +1,6 @@
 {
   "name": "gemiterm",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "module": "index.ts",
   "type": "module",
   "repository": {
@@ -31,7 +31,6 @@
     "test": "bun test --isolate",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
-    "test:parity": "bun test tests/parity",
     "test:smoke": "bun test tests/smoke",
     "test:all": "bun run lint && bun test --isolate",
     "lint": "bun run typecheck",

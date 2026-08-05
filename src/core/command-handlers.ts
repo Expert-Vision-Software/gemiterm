@@ -96,6 +96,7 @@ export interface IGeminiClientService {
   profileHasConversation(profileName: string, conversationId: string): Promise<boolean>;
   forProfile(profileName: string): IGeminiClientService;
   listChats(options?: { limit?: number; offset?: number; search?: string }): Promise<ChatInfo[]>;
+  models(): Promise<string[]>;
 }
 
 export class AuthenticateCommandHandler

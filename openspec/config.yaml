@@ -18,3 +18,9 @@ schema: spec-driven
 #       - Always include a "Non-goals" section
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
+operations:
+  apply:
+    guidance:
+      - "Once all tasks.md are completed, run `/test-baseline eval` to evaluate the baseline tests, update BL if skill suggests it."
+
+  

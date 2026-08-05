@@ -1,6 +1,7 @@
 import type { Cookie } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { PlaywrightCliDriver } from "./playwright-cli-driver.ts";
+import { isGoogleDomainCookie } from "./cookie-rotation.ts";
 
 const POLL_INTERVAL_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -161,8 +162,11 @@ export class CookieMonitor {
     }
 
     if (requireRotation) {
-      const psid = authCookies.find((c) => c.name === "__Secure-1PSID")?.value;
-      const psidts = authCookies.find((c) => c.name === "__Secure-1PSIDTS")?.value ?? null;
+      const psid = authCookies.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value
+        ?? authCookies.find((c) => c.name === "__Secure-1PSID")?.value;
+      const psidts = authCookies.find((c) => c.name === "__Secure-1PSIDTS" && isGoogleDomainCookie(c))?.value
+        ?? authCookies.find((c) => c.name === "__Secure-1PSIDTS")?.value
+        ?? null;
       const psidChanged = psid !== undefined && psid !== requireRotation.activePsid;
       const psidtsChanged = psidts !== requireRotation.activePsidts;
       if (!psidChanged && !psidtsChanged) {

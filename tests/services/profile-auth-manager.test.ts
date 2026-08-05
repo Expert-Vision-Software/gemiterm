@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ProfileAuthManager } from "../../src/services/profile-auth-manager.ts";
@@ -91,6 +91,7 @@ function createManager(
       async sendMessage() { return ""; },
       async startNewChat() { return { response: "", conversationId: "" }; },
       async profileHasConversation() { return false; },
+      async models() { return []; },
       forProfile() { return this as unknown as IGeminiClientService; },
     },
     silentRefresh,
@@ -172,6 +173,7 @@ describe("ProfileAuthManager", () => {
           async sendMessage() { return ""; },
           async startNewChat() { return { response: "", conversationId: "" }; },
           async profileHasConversation() { return false; },
+          async models() { return []; },
           forProfile() { return this as unknown as IGeminiClientService; },
         },
         silentRefresh,
@@ -340,6 +342,7 @@ describe("ProfileAuthManager", () => {
         async profileHasConversation(profileName: string) {
           return profileName === "work";
         },
+        async models() { return []; },
         forProfile() { return this as unknown as IGeminiClientService; },
       };
 
@@ -360,6 +363,7 @@ describe("ProfileAuthManager", () => {
         async sendMessage() { return ""; },
         async startNewChat() { return { response: "", conversationId: "" }; },
         async profileHasConversation() { return false; },
+        async models() { return []; },
         forProfile() { return this as unknown as IGeminiClientService; },
       };
 
@@ -392,6 +396,7 @@ describe("ProfileAuthManager", () => {
         async sendMessage() { return ""; },
         async startNewChat() { return { response: "", conversationId: "" }; },
         async profileHasConversation() { return false; },
+        async models() { return []; },
         forProfile() { return this as unknown as IGeminiClientService; },
       };
 
@@ -418,6 +423,7 @@ describe("ProfileAuthManager", () => {
         async profileHasConversation(profileName: string) {
           return profileName === "profile1" || profileName === "profile3";
         },
+        async models() { return []; },
         forProfile() { return this as unknown as IGeminiClientService; },
       };
 
@@ -442,6 +448,7 @@ describe("ProfileAuthManager", () => {
           calls.push([profileName, conversationId]);
           return false;
         },
+        async models() { return []; },
         forProfile() { return this as unknown as IGeminiClientService; },
       };
 
@@ -468,6 +475,7 @@ describe("ProfileAuthManager", () => {
           probedNames.push(profileName);
           return false;
         },
+        async models() { return []; },
         forProfile() { return this as unknown as IGeminiClientService; },
       };
 
@@ -479,21 +487,12 @@ describe("ProfileAuthManager", () => {
     });
   });
 
-  describe("server-side probe and has-chats marker", () => {
-    type ChatInfoT = {
-      id: string;
-      title: string;
-      isPinned: boolean;
-      timestamp: number;
-      profile?: string;
-    };
-
+  describe("server-side probe", () => {
     function gimme(
-      listChatsFn: (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfoT[]>,
+      modelsImpl: ReturnType<typeof mock>,
     ): IGeminiClientService {
-      const listChatsSpy = mock(listChatsFn);
       return {
-        listChats: listChatsSpy as unknown as IGeminiClientService["listChats"],
+        models: modelsImpl as unknown as IGeminiClientService["models"],
         forProfile() { return this as unknown as IGeminiClientService; },
         async deleteChat() {},
         async sendMessage() { return ""; },
@@ -509,16 +508,14 @@ describe("ProfileAuthManager", () => {
       delete process.env.GEMITERM_PROBE_TTL_MS;
     });
 
-    test("non-empty probe writes has-chats marker and logs is authenticated", async () => {
+    test("models() succeeds logs is authenticated; no silent refresh spent", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeValidCookies());
 
-      const listChatsFn = mock(async () => [
-        { id: "c1", title: "t", isPinned: false, timestamp: Date.now() },
-      ] as ChatInfoT[]);
-      const geminiClient = gimme(listChatsFn);
+      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
+      const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
 
@@ -535,32 +532,26 @@ describe("ProfileAuthManager", () => {
         silentRefresh,
       });
 
-      const markerPath = join(TEST_DIR, "profiles", "default", "profile-has-chats");
-      expect(existsSync(markerPath)).toBe(false);
-
       const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(listChatsFn).toHaveBeenCalledTimes(1);
+      expect(modelsFn).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledTimes(0);
-      expect(existsSync(markerPath)).toBe(true);
       expect(infoSpy).toHaveBeenCalledWith(
         expect.stringContaining("Profile 'default' is authenticated"),
       );
     });
 
-    test("stale probe with existing has-chats marker triggers silent refresh", async () => {
+    test("models() throws triggers silent refresh", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeValidCookies());
 
-      const markerDir = join(TEST_DIR, "profiles", "default");
-      mkdirSync(markerDir, { recursive: true });
-      writeFileSync(join(markerDir, "profile-has-chats"), "");
-
-      const listChatsFn = mock(async () => [] as ChatInfoT[]);
-      const geminiClient = gimme(listChatsFn);
+      const modelsFn = mock(async () => {
+        throw new Error("network error");
+      });
+      const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
 
@@ -569,51 +560,30 @@ describe("ProfileAuthManager", () => {
       const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(listChatsFn).toHaveBeenCalledTimes(2);
+      expect(modelsFn).toHaveBeenCalledTimes(2);
       expect(silentRefresh).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
-    test("ambiguous probe (empty + no has-chats marker) trusts local freshness, no silent refresh", async () => {
+    test("models() throws + silent refresh fails surfaces AuthenticationError", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeValidCookies());
 
-      const listChatsFn = mock(async () => [] as ChatInfoT[]);
-      const geminiClient = gimme(listChatsFn);
-
-      const silentRefresh = mock(async (_profileName: string) => true);
-
-      const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
-
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
-      expect(listChatsFn).toHaveBeenCalledTimes(1);
-    });
-
-    test("listChats throw falls through to local freshness and does not refresh", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeValidCookies());
-
-      const listChatsFn = mock(async () => {
+      const modelsFn = mock(async () => {
         throw new Error("network error");
       });
-      const geminiClient = gimme(listChatsFn);
+      const geminiClient = gimme(modelsFn);
 
-      const silentRefresh = mock(async (_profileName: string) => true);
+      const silentRefresh = mock(async (_profileName: string) => false);
 
       const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
 
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(listChatsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
+      expect(modelsFn).toHaveBeenCalledTimes(1);
+      expect(silentRefresh).toHaveBeenCalledTimes(1);
+      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("probe cache TTL: repeat ensureAuthenticated within TTL reuses cached result", async () => {
@@ -622,10 +592,8 @@ describe("ProfileAuthManager", () => {
       manager.create("default");
       storage.save("default", makeValidCookies());
 
-      const listChatsFn = mock(async () => [
-        { id: "c1", title: "t", isPinned: false, timestamp: Date.now() },
-      ] as ChatInfoT[]);
-      const geminiClient = gimme(listChatsFn);
+      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
+      const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
 
@@ -638,7 +606,7 @@ describe("ProfileAuthManager", () => {
       expect(r1.secure_1psid).toBe("test-psid-value");
       expect(r2.secure_1psid).toBe("test-psid-value");
       expect(r3.secure_1psid).toBe("test-psid-value");
-      expect(listChatsFn).toHaveBeenCalledTimes(1);
+      expect(modelsFn).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
 
@@ -648,10 +616,8 @@ describe("ProfileAuthManager", () => {
       manager.create("default");
       storage.save("default", makeValidCookies());
 
-      const listChatsFn = mock(async () => [
-        { id: "c1", title: "t", isPinned: false, timestamp: Date.now() },
-      ] as ChatInfoT[]);
-      const geminiClient = gimme(listChatsFn);
+      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
+      const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
 
@@ -661,29 +627,8 @@ describe("ProfileAuthManager", () => {
       await mgr1.ensureAuthenticated("default");
       await mgr2.ensureAuthenticated("default");
 
-      expect(listChatsFn).toHaveBeenCalledTimes(2);
+      expect(modelsFn).toHaveBeenCalledTimes(2);
       expect(silentRefresh).toHaveBeenCalledTimes(0);
-    });
-
-    test("has-chats marker is created at <testDir>/profiles/default/profile-has-chats on non-empty probe", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeValidCookies());
-
-      const markerPath = join(TEST_DIR, "profiles", "default", "profile-has-chats");
-      expect(existsSync(markerPath)).toBe(false);
-
-      const listChatsFn = mock(async () => [
-        { id: "c1", title: "t", isPinned: false, timestamp: Date.now() },
-      ] as ChatInfoT[]);
-      const geminiClient = gimme(listChatsFn);
-
-      const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService);
-
-      await mgr.ensureAuthenticated("default");
-
-      expect(existsSync(markerPath)).toBe(true);
     });
   });
 });
