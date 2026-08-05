@@ -157,6 +157,9 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
     async listChats(options?: { limit?: number; offset?: number; search?: string }) {
       return (await getGeminiClient()).listChats(options);
     },
+    async models() {
+      return (await getGeminiClient()).models();
+    },
   };
 
   mediator.registerCommandHandler(new AuthenticateCommandHandler(null as any));

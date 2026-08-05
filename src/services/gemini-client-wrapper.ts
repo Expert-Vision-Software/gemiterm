@@ -364,6 +364,20 @@ export class GeminiClientService
     }
   }
 
+  async models(): Promise<string[]> {
+    await this.init();
+    try {
+      const raw = await this.client!.models();
+      const result = (raw ?? []).map((m: RawAvailableModel) => this.toDomainModelName(m));
+      this.persistRefreshedCookies();
+      return result;
+    } catch (e) {
+      const err = this.translateError(e);
+      this.logger.debug(`models failed: ${e}`);
+      throw err;
+    }
+  }
+
   async listModels(): Promise<string[]> {
     await this.init();
     try {

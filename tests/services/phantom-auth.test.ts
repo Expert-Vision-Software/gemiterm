@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ProfileAuthManager } from "../../src/services/profile-auth-manager.ts";
@@ -7,7 +7,7 @@ import { ProfileManager, CookieStorage } from "../../src/infrastructure/storage.
 import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import { AuthenticationError } from "../../src/core/errors.ts";
-import type { Cookie, ChatInfo } from "../../src/core/types.ts";
+import type { Cookie } from "../../src/core/types.ts";
 import type { IGeminiClientService } from "../../src/core/command-handlers.ts";
 
 const TEST_DIR = join(tmpdir(), "gemiterm-test-phantom-auth");
@@ -148,14 +148,14 @@ function makeMultiDomainCookies(): Cookie[] {
 }
 
 interface GimmeClient extends IGeminiClientService {
-  _listChatsSpy: ReturnType<typeof mock>;
+  _modelsSpy: ReturnType<typeof mock>;
 }
 
-function gimme(listChatsFn: (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfo[]>): GimmeClient {
-  const _listChatsSpy = mock(listChatsFn);
+function gimme(modelsImpl: ReturnType<typeof mock>): GimmeClient {
   return {
-    _listChatsSpy,
-    listChats: _listChatsSpy as unknown as IGeminiClientService["listChats"],
+    _modelsSpy: modelsImpl,
+    models: modelsImpl as unknown as IGeminiClientService["models"],
+    async listChats() { return []; },
     async deleteChat() {},
     async sendMessage() { return ""; },
     async startNewChat() { return { response: "", conversationId: "" }; },
@@ -176,15 +176,13 @@ afterEach(() => {
 
 describe("phantom-auth regression suite", () => {
   describe("ProfileAuthManager server-side probe", () => {
-    test("locally-valid cookies + server returns [] triggers silent refresh, not silent success", async () => {
+    test("models() throws triggers silent refresh, not silent success", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeActiveCookies());
-      writeFileSync(join(TEST_DIR, "profiles", "default", "profile-has-chats"), "");
 
-      const listChatsFn = mock(async (_opts?: { limit?: number }) => [] as ChatInfo[]);
-      const geminiClient = gimme(listChatsFn as unknown as (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfo[]>);
+      const geminiClient = gimme(mock(async () => { throw new Error("auth error"); }));
 
       const silentRefresh = mock(async (_profileName: string) => {
         storage.save("default", makeRefreshedCookies());
@@ -207,15 +205,13 @@ describe("phantom-auth regression suite", () => {
       expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
-    test("listChats([]) followed by a failed silent refresh surfaces AuthenticationError", async () => {
+    test("models() throws followed by a failed silent refresh surfaces AuthenticationError", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeActiveCookies());
-      writeFileSync(join(TEST_DIR, "profiles", "default", "profile-has-chats"), "");
 
-      const listChatsFn = mock(async (_opts?: { limit?: number }) => [] as ChatInfo[]);
-      const geminiClient = gimme(listChatsFn as unknown as (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfo[]>);
+      const geminiClient = gimme(mock(async () => { throw new Error("auth error"); }));
 
       const silentRefresh = mock(async (_profileName: string) => false);
 
@@ -235,16 +231,14 @@ describe("phantom-auth regression suite", () => {
       expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
-    test("listChats(non-empty) means session is valid; no silent refresh spent", async () => {
+    test("models() succeeds means session is valid; no silent refresh spent", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeActiveCookies());
 
-      const listChatsFn = mock(async (_opts?: { limit?: number }) => [
-        { id: "c1", title: "t", isPinned: false, timestamp: Date.now() },
-      ] as ChatInfo[]);
-      const geminiClient = gimme(listChatsFn as unknown as (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfo[]>);
+      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
+      const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
 
@@ -262,7 +256,7 @@ describe("phantom-auth regression suite", () => {
       expect(cookies.secure_1psid).toBe("active-psid");
       expect(cookies.secure_1psidts).toBe("active-psidts");
       expect(silentRefresh).toHaveBeenCalledTimes(0);
-      expect(listChatsFn).toHaveBeenCalledTimes(1);
+      expect(modelsFn).toHaveBeenCalledTimes(1);
     });
 
     test("Probe budget — repeat ensureAuthenticated within TTL reuses the cached result", async () => {
@@ -271,10 +265,8 @@ describe("phantom-auth regression suite", () => {
       manager.create("default");
       storage.save("default", makeActiveCookies());
 
-      const listChatsFn = mock(async (_opts?: { limit?: number }) => [
-        { id: "c1", title: "t", isPinned: false, timestamp: Date.now() },
-      ] as ChatInfo[]);
-      const geminiClient = gimme(listChatsFn as unknown as (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfo[]>);
+      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
+      const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
 
@@ -291,7 +283,7 @@ describe("phantom-auth regression suite", () => {
       const r2 = await mgr.ensureAuthenticated("default");
       const r3 = await mgr.ensureAuthenticated("default");
 
-      expect(listChatsFn).toHaveBeenCalledTimes(1);
+      expect(modelsFn).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledTimes(0);
       expect(r2.secure_1psid).toBe(r1.secure_1psid);
       expect(r3.secure_1psid).toBe(r1.secure_1psid);
@@ -299,15 +291,13 @@ describe("phantom-auth regression suite", () => {
   });
 
   describe("Smoke harness — B1+B2 (false-positive probe) + B3 (jar corruption)", () => {
-    test("B1+B2 — multi-domain cookies + listChats([]) triggers silentRefresh (false positive)", async () => {
+    test("B1+B2 — multi-domain cookies + models() throws triggers silentRefresh (false positive)", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeMultiDomainCookies());
-      writeFileSync(join(TEST_DIR, "profiles", "default", "profile-has-chats"), "");
 
-      const listChatsFn = mock(async (_opts?: { limit?: number }) => [] as ChatInfo[]);
-      const geminiClient = gimme(listChatsFn as unknown as (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfo[]>);
+      const geminiClient = gimme(mock(async () => { throw new Error("auth error"); }));
 
       const silentRefresh = mock(async (_profileName: string) => true);
 
@@ -331,10 +321,8 @@ describe("phantom-auth regression suite", () => {
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeMultiDomainCookies());
-      writeFileSync(join(TEST_DIR, "profiles", "default", "profile-has-chats"), "");
 
-      const listChatsFn = mock(async (_opts?: { limit?: number }) => [] as ChatInfo[]);
-      const geminiClient = gimme(listChatsFn as unknown as (opts?: { limit?: number; offset?: number; search?: string }) => Promise<ChatInfo[]>);
+      const geminiClient = gimme(mock(async () => { throw new Error("auth error"); }));
 
       const droppedCookies = makeDroppedCookies();
       let savedDropCount = 0;

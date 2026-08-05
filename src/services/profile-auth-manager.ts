@@ -7,7 +7,6 @@ import type { IGeminiClientService } from "../core/command-handlers.ts";
 import { AuthenticationError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
-import { readProfileHasChats, writeProfileHasChats } from "../infrastructure/io.ts";
 
 export type SilentRefreshFn = (profileName: string) => Promise<boolean>;
 
@@ -19,7 +18,7 @@ export interface ProfileAuthManagerDeps {
   silentRefresh: SilentRefreshFn;
 }
 
-type ProbeResult = "valid" | "stale" | "ambiguous";
+type ProbeResult = "valid" | "stale";
 
 interface ProbeCacheEntry {
   ts: number;
@@ -133,33 +132,16 @@ export class ProfileAuthManager {
       }
     }
 
-    let chats;
     try {
-      chats = await this.geminiClient.forProfile(name).listChats({ limit: 1 });
+      await this.geminiClient.forProfile(name).models();
     } catch (err) {
-      this.logger.debug(`probeServerSession: listChats failed for profile '${name}': ${err}`);
-      this.probeCache.set(name, { ts: now, result: "ambiguous" });
-      return "ambiguous";
-    }
-
-    if (chats.length > 0) {
-      try {
-        writeProfileHasChats(name);
-      } catch (err) {
-        this.logger.debug(`probeServerSession: writeProfileHasChats failed: ${err}`);
-      }
-      this.probeCache.set(name, { ts: now, result: "valid" });
-      return "valid";
-    }
-
-    const hasChatsFlag = readProfileHasChats(name);
-    if (hasChatsFlag) {
       this.logger.warn(`Server-side session for profile '${name}' appears stale; forcing refresh`);
+      this.logger.debug(`probeServerSession: models failed for profile '${name}': ${err}`);
       this.probeCache.set(name, { ts: now, result: "stale" });
       return "stale";
     }
-    this.logger.debug(`probeServerSession: no server chat history found for profile '${name}'`);
-    this.probeCache.set(name, { ts: now, result: "ambiguous" });
-    return "ambiguous";
+
+    this.probeCache.set(name, { ts: now, result: "valid" });
+    return "valid";
   }
 }
