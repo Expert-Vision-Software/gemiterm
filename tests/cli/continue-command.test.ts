@@ -118,4 +118,31 @@ describe("ContinueCommand", () => {
       }),
     );
   });
+
+  test("--profile <name> does not consume <name> as the message positional", async () => {
+    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["work"]);
+
+    const mockHandler = {
+      commandType: COMMAND_TYPES.SEND_MESSAGE,
+      handle: mock(async () => ({ response: "ok" })),
+    };
+    mediator.registerCommandHandler(mockHandler as any);
+
+    // ["conv-evs", "--profile", "work", "msg"] - the parser must skip "work"
+    // (the profile flag's value) and treat "msg" as the message. With the
+    // old parser, "work" would be assigned to `message` and "msg" ignored,
+    // dispatching SEND_MESSAGE with message="work" instead of "msg".
+    await command.execute(["conv-evs", "--profile", "work", "msg"], context);
+
+    expect(mockHandler.handle).toHaveBeenCalledTimes(1);
+    expect(mockHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          conversationId: "conv-evs",
+          message: "msg",
+          profileName: "work",
+        }),
+      }),
+    );
+  });
 });

@@ -41,9 +41,22 @@ export class ContinueCommand implements CliCommand {
     let conversationId: string | null = null;
     let message: string | null = null;
 
-    for (const arg of args) {
-      if (arg.startsWith("--") || arg.startsWith("-")) continue;
-      if (options.promptFile && arg === options.promptFile) continue;
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === "--help" || arg === "-h") {
+        continue;
+      }
+      if (arg === "--prompt-file" || arg === "-f") {
+        i++;
+        continue;
+      }
+      if (arg === "--profile" || arg === "-p") {
+        i++;
+        continue;
+      }
+      if (arg.startsWith("--") || arg.startsWith("-")) {
+        continue;
+      }
       if (!conversationId) {
         conversationId = arg;
       } else if (!message) {
