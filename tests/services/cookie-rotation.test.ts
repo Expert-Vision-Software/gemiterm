@@ -110,7 +110,7 @@ describe("rotateCookies", () => {
     expect(savedTs?.value).toBe("NEW-ts");
   });
 
-  test("401 response returns false and does not save", async () => {
+  test("401 response marks session invalid and does not save", async () => {
     prepareProfile(makeGoogleCookies());
 
     const fetcher = mock(async () => new Response("unauthorized", { status: 401 }));
@@ -123,9 +123,42 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toEqual({ rotated: false, attempted: false });
+    expect(result).toEqual({ rotated: false, attempted: false, sessionInvalid: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  test("403 response marks session invalid and does not save", async () => {
+    prepareProfile(makeGoogleCookies());
+
+    const fetcher = mock(async () => new Response("forbidden", { status: 403 }));
+    const saveSpy = spyOn(storage, "save");
+
+    const result = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(result).toEqual({ rotated: false, attempted: false, sessionInvalid: true });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  test("500 response is transient: no sessionInvalid flag", async () => {
+    prepareProfile(makeGoogleCookies());
+
+    const fetcher = mock(async () => new Response("server error", { status: 500 }));
+
+    const result = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(result).toEqual({ rotated: false, attempted: false });
   });
 
   test("same PSIDTS in response returns false and does not save", async () => {

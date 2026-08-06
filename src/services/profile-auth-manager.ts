@@ -112,6 +112,16 @@ export class ProfileAuthManager {
       this.logger.debug(`ensureAuthenticated: best-effort rotation failed for profile '${name}': ${e}`);
     }
 
+    if (rotation.sessionInvalid) {
+      // RotateCookies returned 401/403: the server rejected the session outright.
+      // models() (PSID-only) can still succeed in this state, so the stale-probe path
+      // never fires — but the session is dead for PSIDTS-requiring RPCs (listChats).
+      // Only a headed reauth recovers this; throw so the CLI's reauth prompt fires.
+      throw new AuthenticationError(
+        `Session for profile '${name}' is no longer valid (server rejected RotateCookies). Run 'gemiterm login' to re-authenticate.`,
+      );
+    }
+
     if (rotation.rotated) {
       // Fresh __Secure-1PSIDTS obtained; session is fully usable.
     } else if (rotation.attempted) {
@@ -137,15 +147,15 @@ export class ProfileAuthManager {
     const now = Date.now();
     const lastAttempt = this.escalationCooldown.get(name) ?? 0;
     if (now - lastAttempt < ESCALATION_COOLDOWN_MS) {
-      this.logger.warn(
-        `ensureAuthenticated: L1 RotateCookies reached Google but returned no fresh __Secure-1PSIDTS for profile '${name}', and L2 browser refresh was attempted recently (within ${Math.round(ESCALATION_COOLDOWN_MS / 1000)} s). List/continue may return empty until re-auth. Run 'gemiterm auth -e ${name}' or 'gemiterm login'.`,
+      throw new AuthenticationError(
+        `Session for profile '${name}' is degraded; a recent automatic refresh attempt failed. Run 'gemiterm login' to re-authenticate.`,
       );
-      return;
     }
     this.escalationCooldown.set(name, now);
     this.logger.info(`ensureAuthenticated: L1 RotateCookies declined by server for profile '${name}'; escalating to L2 silent refresh.`);
+    let refreshed = false;
     try {
-      const refreshed = await this.silentRefresh(name);
+      refreshed = await this.silentRefresh(name);
       if (refreshed) {
         this.logger.info(`ensureAuthenticated: L2 silent refresh recovered profile '${name}'.`);
         return;
@@ -153,8 +163,8 @@ export class ProfileAuthManager {
     } catch (e) {
       this.logger.debug(`ensureAuthenticated: L2 silent refresh threw for profile '${name}': ${e}`);
     }
-    this.logger.warn(
-      `ensureAuthenticated: L2 silent refresh could not recover profile '${name}'. Session is degraded; list/continue may return empty. Run 'gemiterm auth -e ${name}' or 'gemiterm login' to re-authenticate.`,
+    throw new AuthenticationError(
+      `Session for profile '${name}' is degraded and could not be auto-refreshed. Run 'gemiterm login' to re-authenticate.`,
     );
   }
 

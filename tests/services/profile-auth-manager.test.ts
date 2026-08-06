@@ -738,8 +738,8 @@ describe("ProfileAuthManager", () => {
         rotateCookies,
       });
 
-      await mgr.ensureAuthenticated("default");
-      await mgr.ensureAuthenticated("default");
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("re-authenticate");
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("re-authenticate");
 
       expect(rotateCookies).toHaveBeenCalledTimes(2);
       expect(silentRefresh).toHaveBeenCalledTimes(1);

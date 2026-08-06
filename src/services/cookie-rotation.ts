@@ -17,6 +17,7 @@ const lastRotatePostAt: Map<string, number> = new Map();
 export interface RotateCookiesResult {
   rotated: boolean;
   attempted: boolean;
+  sessionInvalid?: boolean;
 }
 
 const inFlightRotations: Map<string, Promise<RotateCookiesResult>> = new Map();
@@ -130,8 +131,11 @@ async function performRotateCookies(
   }
 
   if (response.status !== 200) {
+    const sessionInvalid = response.status === 401 || response.status === 403;
     logger.debug(`rotateCookies: non-200 status ${response.status} for profile '${profileName}'`);
-    return { rotated: false, attempted: false };
+    return sessionInvalid
+      ? { rotated: false, attempted: false, sessionInvalid: true }
+      : { rotated: false, attempted: false };
   }
 
   const setCookieHeaders = response.headers.getSetCookie();

@@ -263,6 +263,65 @@ describe("phantom-auth regression suite", () => {
       expect(modelsFn).toHaveBeenCalledTimes(1);
     });
 
+    test("rotateCookies reports session-invalid (401/403) => throws AuthenticationError, no L2 attempt", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeActiveCookies());
+
+      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
+      const geminiClient = gimme(modelsFn);
+
+      const silentRefresh = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => ({
+        rotated: false,
+        attempted: false,
+        sessionInvalid: true,
+      }));
+
+      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
+      const mgr = new ProfileAuthManager({
+        profileManager: manager,
+        cookieStorageService: cookieStorage,
+        logger,
+        geminiClient: geminiClient as unknown as IGeminiClientService,
+        silentRefresh,
+        rotateCookies,
+      });
+
+      const err = await mgr.ensureAuthenticated("default").catch((e) => e);
+      expect(err).toBeInstanceOf(AuthenticationError);
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
+    });
+
+    test("rotateCookies declined (200, no fresh PSIDTS) + L2 silentRefresh fails => throws AuthenticationError", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeActiveCookies());
+
+      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
+      const geminiClient = gimme(modelsFn);
+
+      const silentRefresh = mock(async (_profileName: string) => false);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: true }));
+
+      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
+      const mgr = new ProfileAuthManager({
+        profileManager: manager,
+        cookieStorageService: cookieStorage,
+        logger,
+        geminiClient: geminiClient as unknown as IGeminiClientService,
+        silentRefresh,
+        rotateCookies,
+      });
+
+      const err = await mgr.ensureAuthenticated("default").catch((e) => e);
+      expect(err).toBeInstanceOf(AuthenticationError);
+      expect(silentRefresh).toHaveBeenCalledTimes(1);
+      expect(silentRefresh).toHaveBeenCalledWith("default");
+    });
+
     test("Probe budget — repeat ensureAuthenticated within TTL reuses the cached result", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
