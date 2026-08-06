@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <TestingBaseline>
     <Metadata>
-        <LastUpdated>2026-08-05T11:36:00Z</LastUpdated>
-        <BaselineId>BL-007</BaselineId>
+        <LastUpdated>2026-08-06T01:41:55Z</LastUpdated>
+        <BaselineId>BL-008</BaselineId>
         <Framework>Bun + TypeScript CLI</Framework>
     </Metadata>
 
     <Solution>
         <UnitTests>
             <Framework>bun test</Framework>
-            <TestFiles>56</TestFiles>
-            <Passed>913</Passed>
+            <TestFiles>57</TestFiles>
+            <Passed>928</Passed>
             <Failed>0</Failed>
             <Skipped>2</Skipped>
-            <Total>915</Total>
-            <Duration>20.45</Duration>
-            <ExpectCalls>1909</ExpectCalls>
+            <Total>930</Total>
+            <Duration>22.79</Duration>
+            <ExpectCalls>1945</ExpectCalls>
         </UnitTests>
         <IntegrationTests>
             <Framework>bun test</Framework>
@@ -36,27 +36,27 @@
         <Build>
             <Windows>
                 <Status>Success</Status>
-                <BuildTime>0.62</BuildTime>
+                <BuildTime>0.60</BuildTime>
                 <TypeCheckStatus>Success</TypeCheckStatus>
                 <FileCount>1</FileCount>
-                <TotalSizeMB>94.4</TotalSizeMB>
+                <TotalSizeMB>94.41</TotalSizeMB>
                 <KeyFiles>
                     <File>
                         <Name>gemiterm.exe</Name>
-                        <SizeMB>94.4</SizeMB>
+                        <SizeMB>94.41</SizeMB>
                     </File>
                 </KeyFiles>
             </Windows>
             <Linux>
                 <Status>Success</Status>
-                <BuildTime>0.41</BuildTime>
+                <BuildTime>0.44</BuildTime>
                 <TypeCheckStatus>Success</TypeCheckStatus>
                 <FileCount>1</FileCount>
-                <TotalSizeMB>90.7</TotalSizeMB>
+                <TotalSizeMB>90.71</TotalSizeMB>
                 <KeyFiles>
                     <File>
                         <Name>gemiterm</Name>
-                        <SizeMB>90.7</SizeMB>
+                        <SizeMB>90.71</SizeMB>
                     </File>
                 </KeyFiles>
             </Linux>
@@ -90,6 +90,12 @@
     </Dependencies>
 
     <Changelog>
+        <Entry>
+            <BaselineId>BL-008</BaselineId>
+            <Date>2026-08-06</Date>
+            <Changes>Updated baseline: 928 unit pass, 0 fail, 2 skip, 930 total, 57 files, 1945 expect() calls. Windows/Linux builds Success (94.41/90.71 MB, 0.60s/0.44s). +15 tests from BL-007; test duration +11.4% (22.79s vs 20.45s) but within 20% threshold.</Changes>
+            <Reason>User requested baseline update; within threshold (test count +1.64%, duration +11.4%); updated per explicit request.</Reason>
+        </Entry>
         <Entry>
             <BaselineId>BL-007</BaselineId>
             <Date>2026-08-05</Date>
