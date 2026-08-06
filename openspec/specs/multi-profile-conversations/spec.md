@@ -164,9 +164,13 @@ The `GeminiClientService` class in `src/services/gemini-client-wrapper.ts` MUST 
 - **WHEN** `geminiClient.profileHasConversation("work", "abc-123")` is called on an instance configured for the default profile
 - **THEN** the calling instance's cookie config and `authenticated` flag are unchanged after the call returns (verified by reading the instance fields in a test)
 
-#### Scenario: profileHasConversation uses a targeted lookup
+#### Scenario: profileHasConversation returns true for a non-newest conversation
+- **WHEN** `await geminiClient.profileHasConversation("work", "older-target")` is called and profile `work` has multiple chats where `older-target` is not the newest chat
+- **THEN** the method returns `true` (the lookup does not exclude older conversations)
+
+#### Scenario: profileHasConversation scans the full chat list for membership
 - **WHEN** `geminiClient.profileHasConversation("work", "abc-123")` is called
-- **THEN** the underlying `listChats()` call uses `limit` to avoid fetching all conversations
+- **THEN** the underlying `listChats()` call is made without a `limit` that would truncate the result before membership is determined
 
 ### Requirement: Regression test update for profile-auth-manager documents the bug fix
 
