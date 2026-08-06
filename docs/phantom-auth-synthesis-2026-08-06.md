@@ -122,9 +122,15 @@ This is why the `models()` probe reported "valid" indefinitely while `listChats`
 
 ---
 
-## Current state (updated for the cookie-jar fix)
+## Current state (updated for session 3)
 
-**The capture-integrity bug is fixed and verified deterministically (`6bc51f6`).** Open changes (excluding `commander-cli-parser`, unrelated):
+**The capture-integrity bug is fixed and verified deterministically (`6bc51f6`).** The recovery-ladder gaps (A + B) are fixed (`a780788`, `4dfe13c`), the L2-escalation-removal (`9762845`) closes the 401-on-fresh-login regression, the continue-conversation regression is fixed (`809240a`), and the status PROBE column (`b1d0df0`) makes the phantom-auth state visible at a glance.
+
+Branch `fix/v2.6.1-bugs` is now at 8 commits: `6bc51f6` → `f747fc6` → `fced072` → `df7ab32` → `a780788` → `4dfe13c` → **`9762845`** → **`809240a`** → **`b1d0df0`**.
+
+**932 pass / 0 fail / 1 skip / 1952 expects**, typecheck clean. Baseline BL-010 (was BL-009 at 933/1959 in session 2; the −1 test is the removed cooldown contract from `profile-auth-manager.test.ts`, the un-skipped test in `gemini-client-wrapper.test.ts` cancels that out — net test count: −1 test, −7 expects; the `seedMetadataFromChat` change net +1 expect).
+
+Open changes (excluding `commander-cli-parser`, unrelated):
 
 | Change | Status | Notes |
 |---|---|---|
@@ -132,17 +138,17 @@ This is why the `models()` probe reported "valid" indefinitely while `listChats`
 | `silent-refresh-stale-psidts-detection` | Tasks 1–4 done, task 5.1 spec sync pending | Code shipped in v2.6.2; delta pending merge into `openspec/specs/phantom-auth-detection/spec.md`. |
 | `auth-daemon` (concurrent, `f747fc6`) | Proposal only | Background heartbeat. Its premise (see below) is reframed by the cookie-jar fix; also carries an `auth` spec delta — **archive order vs `cookie-jar-integrity` matters to avoid a delta conflict.** |
 | `phantom-auth-review-refactors` | No tasks done | Extract `cookie-constants.ts`, lift `gimme` helper, fix `io.ts` single-call-site violations. Pure refactor. |
-| `profile-aware-factory-wiring` | Open | `gemiterm list -p <name>` authenticates the default profile instead of the named one. |
+| `profile-aware-factory-wiring` | Open | `gemiterm list -p <name>` authenticates the default profile instead of the named one. (Discovered during session 3 PROBE work — `ListChatsQueryHandler` is wired with `getGeminiClient()` (no profile arg) at `cli/index.ts:119`, so the auth path always uses the default profile even when a specific profile is requested.) |
 | `interactive-non-interactive-divergence` | Open, large | Interactive paths must route through the mediator. |
 
 Remaining open work:
 
-1. **Investigate 401 on fresh login.** The recovery-ladder fixes (`a780788`, `4dfe13c`) correctly surface dead sessions, but live testing (2026-08-06 evening) shows `rotateCookies` → 401 immediately after a fresh headed `gemiterm login` (41 cookies captured, PSID present). The cookies work for `models()` (PSID-only) but the API rejects them. Possible causes: login cookies differ from API-required cookies; L2 silentRefresh overwrites with API-invalid browser cookies; cookie quality issue; RotateCookies endpoint bot-detection. This must be diagnosed before the fix can be judged effective.
-2. **Live-verify the recovery-ladder fix.** After #1 is resolved, confirm `list` returns chats with the full fix in place.
+1. **Design + implement phantom-auth recovery (the current focus).** With L2 escalation removed (`9762845`), sessions in phantom-auth state (models works, listChats empty) cannot self-recover — the user must re-login every time. The leading design idea is a *targeted L2* that refreshes only PSIDTS-related cookies (from `COOKIE_NAMES_OF_INTEREST`) instead of `mergeCookies` (which replaces the full set). See §Session 3 — phantom-auth is now visible for the design sketch.
+2. **Investigate whether targeted L2 + phantom detection should replace L1 decline's `logger.debug` branch.** Today's `else if (rotation.attempted)` branch is a no-op. The replacement path needs to: detect phantom (models ✓ AND listChats empty) → trigger targeted L2 → recover or throw `AuthenticationError`.
 3. **Archive `cookie-jar-integrity`** (task 5.1) → syncs the two MODIFIED `auth` CookieMonitor requirements into the main spec. ⚠️ Coordinate with `auth-daemon` (also an `auth` delta).
-4. **`/test-baseline eval`** — promote `docs/testing-baseline.xml` from BL-007 (913/1909) → BL-009 (933/1959).
-5. **Ship gate HOLD** — v2.6.2 must not tag until #1 is resolved and #2 confirms live `list` returns chats. The test baseline is at 933/1959 (0 fail, typecheck clean); the code changes are 2 surgical commits on `fix/v2.6.1-bugs`.
-6. Already-degraded on-disk jars are **not** retroactively backfilled by the fix; users run `gemiterm login` / `auth -e <name>` once to repopulate. `status -v` surfaces cookie ages.
+4. **`/test-baseline eval`** — promote `docs/testing-baseline.xml` from BL-009 (933/1959) → BL-010 (932/1952).
+5. **Ship gate HOLD** — v2.6.2 must not tag until #1 lands and live `list` returns chats on phantom-auth sessions. Code changes are 5 surgical commits on `fix/v2.6.1-bugs`.
+6. Already-degraded on-disk jars are **not** retroactively backfilled by the cookie-jar fix; users run `gemiterm login` / `auth -e <name>` once to repopulate. `status` PROBE column now flags in-place whether a jar is functional (`✓ live`), phantom (`⚠ phantom`), or dead (`✗ dead`).
 
 ---
 
@@ -191,6 +197,96 @@ The grill decision (Q2/Q3) chose "401 → throw immediately, skip L2" on the ass
 
 ---
 
+## Session 3 (2026-08-06, late evening) — L2-removal, continue-chat fix, PROBE column
+
+Three more commits on `fix/v2.6.1-bugs`. This section is a strict addendum — the previous narrative stands; these updates close two residual gaps and add one diagnostic.
+
+### 3a. `9762845` — L2 escalation on L1 decline is **harmful**; remove it
+
+**Discovered by:** live verification of the recovery-ladder fix (session 2). Symptom: after a fresh headed `gemiterm login` (40 cookies captured, PSID present, expiry 1 year out), `bun run dev list` returns 23 chats on the first call but throws `AuthenticationError` (rotateCookies 401) on the second call ~30 seconds later.
+
+**Root cause (Hypothesis #2 from session 2 confirmed):** the L2 `silentRefresh` path's `mergeCookies(existing, cookies)` (auth-service.ts:300-302) replaces ALL cookies in the stored jar with browser session cookies. The browser creates a new session (different PSID, different companion cookies), and the merged set is rejected by `accounts.google.com/RotateCookies` with 401 on the next command.
+
+Evidence that the *cookies* are valid (not the session):
+- `GEMITERM_SKIP_ROTATE_COOKIES=1 bun run dev list -p evs-diegohb` → listChats call returns "No conversations found" (no error). The cookies work for listChats.
+- `bun run dev models -p evs-diegohb` → 7 models returned. The cookies work for models.
+- `gemini.google.com/app` GET with the cookies returns 200, with a redirect header to gemini.google.com. The cookies work for the frontend.
+
+So the session is in **phantom-auth state**, not dead. L2 was attempting to "recover" by launching a headless browser that re-signed-in and captured a different session's cookies, then merged them in — actively breaking what was working.
+
+**The fix (commit `9762845`):** remove `escalateAfterServerDecline()` from `ProfileAuthManager`. When L1 RotateCookies returns 200-but-declined (no fresh PSIDTS in Set-Cookie), the session is valid — just log and continue. Three test files updated; the cooldown test and the L2-success-after-decline test were removed (no longer relevant). **931 pass / 0 fail / 2 skip.**
+
+Verified live: two consecutive `bun run dev list` calls after fresh login both return 23 conversations. No 401. The recovery-ladder recurrence (`a780788` + `4dfe13c`) still works correctly for genuinely-dead sessions — that contract is preserved.
+
+### 3b. `809240a` — `continue conversation` regression (pre-existing, exposed by `list -i` flow)
+
+**Discovered by:** user ran `bun run dev list -i`, picked a conversation, chose "Continue conversation". The model responded "I'd love to, but we're just starting our conversation!" — a new chat started instead of threading onto the existing one.
+
+**Root cause:** `sendMessage` in `src/services/gemini-client-wrapper.ts:311-344` had a cid-only fallback when `chatMetadata.lookup` returned null. The fallback built a session with only `session.cid` set (which populates `_meta[0]`) but no `rid` (`_meta[1]`) or `rcid` (`_meta[2]`). The Gemini server requires all three slots to thread onto an existing conversation turn — without `rid`/`rcid`, it treats the request as a new chat and starts a fresh conversation.
+
+This was an explicit non-goal of the archived OpenSpec change `2026-07-27-fix-continue-chat-session-metadata`: "Backfilling metadata for chats that existed before this change." The `list -i` "Continue conversation" path doesn't call `fetchChat` to seed metadata (only the "View full conversation" action does), so the user hits the cid-only fallback.
+
+**The fix:** added a `seedMetadataFromChat()` private method that reads the existing conversation via `this.client!.readChat()`, extracts `rid`/`rcid` from the last model turn, saves to `chatMetadata`, then `sendMessage` re-runs `lookup` and uses the proper metadata path. Self-healing at the service layer — covers `list -i` continue, direct `gemiterm continue <cid>`, and REPL. Test: un-skipped the existing `test.skip(...)` and rewrote it to validate metadata seeding.
+
+### 3c. `b1d0df0` — `status` PROBE column
+
+**User insight:** "what column is missing so that status display is truly indication of things working or not?" Status previously only validated cookies locally (`checkCookieFreshness` on `__Secure-1PSIDTS.expires`) — never touched Google's API. A profile showed `✓ Yes` if its jar file had fresh-looking cookies, even if those cookies were server-side dead.
+
+**The fix:** new `ProbeProfileQueryHandler` in `src/core/query-handlers.ts` runs `models()` and `listChats({ limit: 1 })` in parallel via `Promise.allSettled`. The result is one of three states:
+
+| State | Meaning | Detection |
+|---|---|---|
+| `✓ live (N≥1)` | Session works for listChats | listChats returned ≥1 chat |
+| `⚠ phantom (models N)` | PSID valid, but listChats returns empty — **the bug state** | models works, listChats empty |
+| `✗ dead: <error>` | Session is server-side dead | both probes rejected (401, network error, etc.) |
+
+This catches the exact phantom-auth state that was hiding from the local freshness check. The column is always-on (per user's request) — `bun run dev status` now probes every profile on every invocation.
+
+Verified live against the user's 3 profiles:
+
+```
+NAME             ACTIVE    PROBE             EXPIRES              LAST USED            DEFAULT
+dhb-diegohb      ✓ Yes     ⚠ phantom (mode…  Sep 10, 2027, 04:22… Aug 6, 2026, 04:23 …
+dhb-worker       ✓ Yes     ⚠ phantom (mode…  Sep 10, 2027, 04:24… Aug 6, 2026, 04:24 …
+evs-diegohb *    ✓ Yes     ⚠ phantom (mode…  Sep 10, 2027, 04:13… Aug 6, 2026, 04:25 … Yes
+```
+
+All 3 confirmed in phantom-auth. The user can now see exactly which sessions need re-login and which are dead vs recoverable.
+
+### What session 3 didn't fix (the real remaining problem)
+
+The PROBE column made phantom-auth visible. But phantom-auth is **not yet recoverable** in the current code — the recovery-ladder recurrence (`a780788` + `4dfe13c`) only catches dead sessions (401/403), and the L2 path that *could* recover phantom-auth was removed in 3a because it was actively corrupting cookies.
+
+The leading design idea (not yet implemented) is a **targeted L2 recovery** — modify `silentRefresh` to only update PSIDTS-related cookies (from the `COOKIE_NAMES_OF_INTEREST` set in `cookie-rotation.ts:9` — `__Secure-1PSIDTS`, `__Secure-3PSIDTS`, `SIDCC`) when the browser captures a fresh session, instead of calling `mergeCookies` which replaces the full set. This keeps the original login's PSID + companion cookies (`SID`/`HSID`/`SSID`/`APISID`/`SAPISID`) aligned with each other (so RotateCookies still accepts them) while picking up a fresh PSIDTS from the browser session.
+
+Sketch:
+
+```typescript
+// instead of:
+const merged = mergeCookies(existing, cookies);
+this.cookieStorageService.saveCookiesForProfile(name, merged);
+
+// do:
+let updated = false;
+const next = existing.map((c) => {
+  const browser = cookies.find((bc) => bc.name === c.name && bc.domain === c.domain && bc.path === c.path);
+  if (browser && COOKIE_NAMES_OF_INTEREST.has(c.name) && browser.value !== c.value) {
+    updated = true;
+    return { ...c, value: browser.value };
+  }
+  return c;
+});
+if (updated) this.cookieStorageService.saveCookiesForProfile(name, next);
+```
+
+Trigger condition: L1 declines (200 OK, no fresh PSIDTS) AND models probe succeeds AND listChats returns empty (phantom-auth detected). Models fails → throw `AuthenticationError` (full reauth). ListChats returns ≥1 → no recovery needed. The detection logic is the new bit — today the L1-decline branch is a `logger.debug` no-op.
+
+### Profile-routing bug noticed during session 3 (not fixed)
+
+When the user ran `bun run dev list -p dhb-worker`, the auth/rotation log said `rotateCookies: ... for profile 'evs-diegohb'` — the default profile, not the requested one. Root cause: `ListChatsQueryHandler` is wired with `getGeminiClient()` (no profile arg) at `src/cli/index.ts:119`, so the auth path always uses the default profile. Then `client.forProfile(profile)` loads the target profile's cookies directly without auth. So the auth/rotation phase runs against the default, while the listChats phase runs against the named profile — a real bug, listed as `profile-aware-factory-wiring` in the open-changes table. Not fixed this session (out of scope for the recovery-ladder work); flagged for the next session.
+
+---
+
 ## The background-service idea — re-evaluation
 
 **Original framing:** a persistent process that heartbeats L1 rotation keeps the session fresh between CLI invocations, preventing the symptom.
@@ -214,13 +310,14 @@ So:
 
 ---
 
-## Recommendation (rewritten)
+## Recommendation (rewritten, post-session-3)
 
-The original recommendation ("confirm whether v2.6.2 closed the bug") is moot — we now know it did **not** close the 0-chats symptom, and the capture fix that does close it has landed (`6bc51f6`). The path forward:
+The original recommendation ("confirm whether v2.6.2 closed the bug") is moot — we now know it did **not** close the 0-chats symptom, and the capture fix that does close it has landed (`6bc51f6`). Session 3 closed two more gaps (L2 cookie-corruption, continue-conversation) and added one diagnostic (status PROBE column). The path forward:
 
-1. **Live-verify** the capture fix: headed `gemiterm login` on a degraded profile, then immediate `gemiterm list` — confirm chats return. (User-driven; closes the inference loop.)
-2. **Archive `cookie-jar-integrity`** (task 5.1) and run `/test-baseline eval` (BL-008). Coordinate archive order with `auth-daemon`'s `auth` delta.
-3. **Tag v2.6.2** only after step 1 confirms. The CHANGELOG already attaches the 0-chats headline to the capture fix.
-4. **Then** decide on the background service: if the user wants warm-session automation, ship `gemiterm watch` as a small opt-in follow-up. Defer a real OS daemon to a separate proposal *after* confirming `gemiterm watch` is insufficient.
+1. **Design + implement phantom-auth recovery** (the *new* top-priority item). The L2-escalation-removal (`9762845`) made phantom-auth visible and stable — sessions don't degrade from cookie corruption anymore — but phantom-auth itself is not yet recoverable. See §Session 3 — phantom-auth is now visible for the targeted-L2 design sketch. TDD at the `ProfileAuthManager` DI seam (`gimme(modelsImpl)` pattern from `tests/services/phantom-auth.test.ts`); write RED tests first.
+2. **Live-verify** the capture fix *and* the recovery-ladder fix: headed `gemiterm login` on a degraded profile, then `gemiterm list` after the session naturally drifts into phantom-auth — confirm the targeted L2 recovers without user intervention. (User-driven; closes the inference loop.)
+3. **Archive `cookie-jar-integrity`** (task 5.1) and run `/test-baseline eval` (BL-010). Coordinate archive order with `auth-daemon`'s `auth` delta.
+4. **Tag v2.6.2** only after steps 1–2 confirm. The CHANGELOG will need to attach the targeted-L2 fix to v2.6.2 if it lands in time.
+5. **Then** decide on the background service: if the user wants warm-session automation, ship `gemiterm watch` as a small opt-in follow-up. Defer a real OS daemon to a separate proposal *after* confirming `gemiterm watch` is insufficient.
 
-The background service is not wrong; it was just answering the wrong question. The capture fix answers the right one.
+The background service is not wrong; it was just answering the wrong question. The capture fix answers the right one. With session 3's PROBE column, the user can finally see the question clearly: phantom sessions exist, they're stable, and now they need a recovery mechanism that doesn't break what's working.
