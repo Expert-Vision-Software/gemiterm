@@ -1,15 +1,24 @@
 ## [2.6.2] - 2026-08-05
 
+### Added
+
+- **`gemiterm status --verbose` (`-v`).** Prints per-profile cookie counts and the next `__Secure-1PSIDTS` expiry countdown, followed by the absolute path to each profile storage directory — useful for diagnosing cookie expiry without opening the `%APPDATA%\gemiterm` directory by hand. New `formatDuration(ms)` helper in `infrastructure/formatters.ts` renders compact age strings ("4d 6h" / "2h 30m" / "expired").
+
 ### Fixed
 
 - **Profile-scoped data commands broken on first call (`fetch`/`export`/`continue`/`delete`).** The CLI client-service `forProfile` read a module singleton populated only by a prior `getGeminiClient` call, so the first profile-scoped operation in a process threw `AuthenticationError("Not authenticated. Please run 'gemiterm login' first.")`. Both the explicit `--profile` path and the auto-discovery path (`findProfileForConversation` → `forProfile`) were affected. `forProfile` is now async and lazily initializes via `getGeminiClient` (which runs `ensureAuthenticated` + reauth). Internal interface change: `IGeminiClientService` / `IGeminiClientQueryService` `forProfile` returns `Promise<Self>`.
 - **`findProfileForConversation` missed non-newest chats.** `GeminiClientService.profileHasConversation` used `listChats({ limit: 1 })`, but `listChats` sorts DESC by timestamp before slicing, so only the newest chat was visible. Any non-newest conversation resolved to "no owning profile". Replaced with an unbounded `listChats()` membership scan.
 - **`list` returned 0 chats after a silent server-side `__Secure-1PSIDTS` rotation.** `probeServerSession` only called `models()`, a PSID-only RPC, so a stale `__Secure-1PSIDTS` looked valid and no refresh fired. `ensureAuthenticated` now invokes `rotateCookies` (the L1 `RotateCookies` POST) on every valid-cookie call regardless of probe outcome, proactively keeping `__Secure-1PSIDTS` fresh; the existing 600 s disk-mtime guard throttles actual posts. The full `silentRefresh` ladder (L1 + L2 headless browser) remains reserved for the stale-probe path (`models()` threw → genuinely dead session). Rotation failure on the success path is non-fatal (L1 cannot recover a fully stale session; that requires re-auth via the stale path).
+- **`continue` positional-arg parsing misread `--profile`/`--prompt-file` values.** The argv loop now skips the value following `--profile`/`-p` and `--prompt-file`/`-f` when collecting positional `conversation_id` / `message` args, so `gemiterm continue <conv> --profile <name>` no longer risks treating the flag value as the message.
+- **`continue` `fetchChat` corrupted `chatMetadata.ctx`.** `GeminiClientService.fetchChat` was overwriting the per-conversation `chatMetadata` record with `{rid, rcid, ctx: null}` on every read; `sendMessage` then treated the empty ctx as authoritative (using `""` instead of the server-issued string). The record is now read-then-merged so an existing ctx is preserved across rid/rcid updates.
+- **Profile-resolution error hint referenced the retired `--renew` flag.** The "no authenticated profile" path now suggests `gemiterm login` instead of the obsolete `--renew <name>`.
+- **L1 rotation failure hint.** When `rotateCookies` fails on a probe-valid session, `ProfileAuthManager.ensureAuthenticated` now emits a hint pointing to re-auth, with the profile name interpolated correctly.
 
 ### Internal
 
 - `createClientServices` extracted from `src/cli/index.ts` into `src/cli/client-services.ts` to expose a testable seam for the `forProfile` wiring.
-- Test suite: 913 pass / 0 fail (was 909). Red-then-green regression tests added for each fix at the cheapest seam.
+- Test suite: 919 pass / 0 fail / 1920 expects (was 913 / 1909 at 2.6.1). Red-then-green regression tests added for each fix at the cheapest seam.
+- `printLastMessage` (the "Last response:" pre-fetch in the `continue` interactive REPL) remains dropped for this release. It was briefly restored during 2.6.2 development but produced stale-by-one-turn output when Google's backend failed to persist a `SEND_MESSAGE` to chat history while still streaming the model reply in-band; the upstream SDK behaviour is under investigation for a future release.
 
 ---
 
