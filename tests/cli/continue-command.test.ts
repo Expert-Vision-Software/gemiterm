@@ -145,4 +145,68 @@ describe("ContinueCommand", () => {
       }),
     );
   });
+
+  test("interactive REPL fetches and prints the last model message before prompting", async () => {
+    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["work"]);
+
+    const fetchChatHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => ({
+        messages: [
+          { role: "user", content: "Earlier question" },
+          { role: "model", content: "Earlier response from Gemini" },
+        ],
+      })),
+    };
+    const sendMessageHandler = {
+      commandType: COMMAND_TYPES.SEND_MESSAGE,
+      handle: mock(async () => ({ response: "new response" })),
+    };
+    mediator.registerQueryHandler(fetchChatHandler as any);
+    mediator.registerCommandHandler(sendMessageHandler as any);
+
+    const promptsModule = await import("../../src/cli/utils/prompts.ts");
+    const textSpy = spyOn(promptsModule, "text").mockImplementation(async () => "/exit");
+
+    await command.execute(["conv-1", "--profile", "work"], context);
+
+    expect(fetchChatHandler.handle).toHaveBeenCalledTimes(1);
+    expect(fetchChatHandler.handle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: QUERY_TYPES.FETCH_CHAT,
+        payload: expect.objectContaining({
+          conversationId: "conv-1",
+          profileName: "work",
+        }),
+      }),
+    );
+
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Last response:");
+    expect(output).toContain("Earlier response from Gemini");
+    expect(textSpy).toHaveBeenCalled();
+  });
+
+  test("interactive REPL skips the last-message print when fetchChat returns no model messages", async () => {
+    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["work"]);
+
+    const fetchChatHandler = {
+      queryType: QUERY_TYPES.FETCH_CHAT,
+      handle: mock(async () => ({ messages: [] })),
+    };
+    const sendMessageHandler = {
+      commandType: COMMAND_TYPES.SEND_MESSAGE,
+      handle: mock(async () => ({ response: "new response" })),
+    };
+    mediator.registerQueryHandler(fetchChatHandler as any);
+    mediator.registerCommandHandler(sendMessageHandler as any);
+
+    const promptsModule = await import("../../src/cli/utils/prompts.ts");
+    spyOn(promptsModule, "text").mockImplementation(async () => "/exit");
+
+    await command.execute(["conv-1"], context);
+
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).not.toContain("Last response:");
+  });
 });

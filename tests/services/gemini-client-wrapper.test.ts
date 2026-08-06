@@ -459,6 +459,47 @@ describe("GeminiClientService", () => {
       expect(saved).toEqual({ rid: "r_model1", rcid: "rc_model1", ctx: null });
     });
 
+    test("preserves existing ctx when updating rid/rcid", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        testprofile: { secure_1psid: "sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const chatMetadata = new ChatMetadataStorage(logger);
+      chatMetadata.save("testprofile", "conv-abc", { rid: "old-rid", rcid: "old-rcid", ctx: "preserved-ctx-value" });
+
+      const d: GeminiClientDeps = {
+        Gemini: function() {
+          return {
+            cookies: { "__Secure-1PSID": "sid" },
+            init: async () => {},
+            chats: async () => [],
+            readChat: async (_cid: string) => [
+              createMockChatTurn("user", "Hello", "r_user1"),
+              createMockChatTurn("model", "Hi there!", "new-rid", "new-rcid"),
+            ],
+            newChat: () => createMockSession(),
+            deleteChat: async () => {},
+            models: async () => [],
+          };
+        },
+        AuthError: MockAuthError,
+        GeminiError: MockGeminiError,
+        UsageLimitExceeded: MockUsageLimitExceeded,
+        TemporarilyBlocked: MockTemporarilyBlocked,
+        ModelInvalid: MockModelInvalid,
+        APIError: MockAPIError,
+      };
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "sid" }, logger, css, "testprofile", d, chatMetadata);
+
+      await service.fetchChat("conv-abc");
+
+      const saved = chatMetadata.lookup("testprofile", "conv-abc");
+      expect(saved).toEqual({ rid: "new-rid", rcid: "new-rcid", ctx: "preserved-ctx-value" });
+    });
+
     test("does not save metadata when readChat returns empty array", async () => {
       const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
         "testprofile-empty": { secure_1psid: "sid", secure_1psidts: null },

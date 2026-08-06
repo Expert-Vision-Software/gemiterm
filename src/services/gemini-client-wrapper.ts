@@ -268,10 +268,11 @@ export class GeminiClientService
       if (turns.length > 0) {
         const lastModelTurn = [...turns].reverse().find((t) => t.role === "model");
         if (lastModelTurn?.rid && this.profileName) {
+          const existing = this.chatMetadata.lookup(this.profileName, conversationId);
           this.chatMetadata.save(this.profileName, conversationId, {
             rid: lastModelTurn.rid,
             rcid: lastModelTurn.rcid ?? "",
-            ctx: null,
+            ctx: existing?.ctx ?? null,
           });
         }
       }
