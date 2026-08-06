@@ -47,12 +47,26 @@ export interface ListModelsQueryResult {
   models: string[];
 }
 
+export type ProbeResult = "live" | "phantom" | "dead";
+
+export interface ProbeProfileQueryPayload {
+  profileName: string;
+}
+
+export interface ProbeProfileQueryResult {
+  result: ProbeResult;
+  chatsCount: number;
+  modelsCount: number;
+  error?: string;
+}
+
 export const QUERY_TYPES = {
   LIST_CHATS: "list-chats",
   FETCH_CHAT: "fetch-chat",
   GET_PROFILE_STATUSES: "get-profile-statuses",
   GET_AUTH_STATUS: "get-auth-status",
   LIST_MODELS: "list-models",
+  PROBE_PROFILE: "probe-profile",
 } as const;
 
 export type QueryType = (typeof QUERY_TYPES)[keyof typeof QUERY_TYPES];
@@ -196,5 +210,60 @@ export class ListModelsQueryHandler
   async handle(_query: Query<ListModelsQueryPayload>): Promise<ListModelsQueryResult> {
     const models = await this.geminiClient.listModels();
     return { models };
+  }
+}
+
+export class ProbeProfileQueryHandler
+  implements QueryHandler<ProbeProfileQueryPayload, ProbeProfileQueryResult>
+{
+  readonly queryType = QUERY_TYPES.PROBE_PROFILE;
+  private readonly getGeminiClient: (profileName?: string) => Promise<IGeminiClientQueryService>;
+
+  constructor(getGeminiClient: (profileName?: string) => Promise<IGeminiClientQueryService>) {
+    this.getGeminiClient = getGeminiClient;
+  }
+
+  async handle(query: Query<ProbeProfileQueryPayload>): Promise<ProbeProfileQueryResult> {
+    const { profileName } = query.payload;
+    const [modelsResult, chatsResult] = await Promise.allSettled([
+      this.probeModels(profileName),
+      this.probeChats(profileName),
+    ]);
+
+    if (modelsResult.status === "rejected") {
+      return {
+        result: "dead",
+        chatsCount: 0,
+        modelsCount: 0,
+        error: modelsResult.reason instanceof Error ? modelsResult.reason.message : String(modelsResult.reason),
+      };
+    }
+
+    if (chatsResult.status === "rejected") {
+      return {
+        result: "dead",
+        chatsCount: 0,
+        modelsCount: modelsResult.value,
+        error: chatsResult.reason instanceof Error ? chatsResult.reason.message : String(chatsResult.reason),
+      };
+    }
+
+    if (chatsResult.value === 0) {
+      return { result: "phantom", chatsCount: 0, modelsCount: modelsResult.value };
+    }
+
+    return { result: "live", chatsCount: chatsResult.value, modelsCount: modelsResult.value };
+  }
+
+  private async probeModels(profileName: string): Promise<number> {
+    const client = await this.getGeminiClient(profileName);
+    const models = await client.listModels();
+    return models.length;
+  }
+
+  private async probeChats(profileName: string): Promise<number> {
+    const client = await this.getGeminiClient(profileName);
+    const chats = await client.listChats({ limit: 1 });
+    return chats.length;
   }
 }

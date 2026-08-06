@@ -26,6 +26,7 @@ import {
   GetProfileStatusesQueryHandler,
   GetAuthStatusQueryHandler,
   ListModelsQueryHandler,
+  ProbeProfileQueryHandler,
 } from "../core/query-handlers.ts";
 import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
 import { CookieMonitor } from "../services/cookie-monitor.ts";
@@ -122,6 +123,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
 
   mediator.registerQueryHandler(new FetchChatQueryHandler(clientService));
   mediator.registerQueryHandler(new ListModelsQueryHandler(clientService));
+  mediator.registerQueryHandler(new ProbeProfileQueryHandler(getGeminiClient));
 
   mediator.registerCommandHandler(new AuthenticateCommandHandler(null as any));
   mediator.registerCommandHandler(new DeleteProfileCommandHandler(null as any));

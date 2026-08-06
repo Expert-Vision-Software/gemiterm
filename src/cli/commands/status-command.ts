@@ -5,6 +5,8 @@ import { Logger } from "../../infrastructure/logger.ts";
 import { getConfigDir, ensureConfigDir, listProfiles, getDefaultProfileName } from "../../infrastructure/config.ts";
 import { getProfileDir } from "../../infrastructure/path-utils.ts";
 import { formatProfileTable, formatDuration } from "../../infrastructure/formatters.ts";
+import { QUERY_TYPES } from "../../core/query-handlers.ts";
+import type { ProbeProfileQueryResult } from "../../core/query-handlers.ts";
 
 export class StatusCommand implements CliCommand {
   readonly name = "status";
@@ -43,8 +45,26 @@ export class StatusCommand implements CliCommand {
       return { ...status, isDefault: name === getDefaultProfileName() };
     });
 
+    const probes = await Promise.all(
+      profileNames.map((name) =>
+        context.mediator
+          .send<ProbeProfileQueryResult>({
+            type: QUERY_TYPES.PROBE_PROFILE,
+            payload: { profileName: name },
+          })
+          .catch((err): ProbeProfileQueryResult => ({
+            result: "dead",
+            chatsCount: 0,
+            modelsCount: 0,
+            error: err instanceof Error ? err.message : String(err),
+          })),
+      ),
+    );
+
+    const probeByName = new Map(profileNames.map((name, i) => [name, probes[i]!]));
+    const enriched = statuses.map((s) => ({ ...s, probe: probeByName.get(s.name) }));
     console.log(chalk.bold("Profiles"));
-    console.log(formatProfileTable(statuses));
+    console.log(formatProfileTable(enriched));
 
     if (verbose) {
       console.log("");
