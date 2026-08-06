@@ -294,7 +294,7 @@ describe("phantom-auth regression suite", () => {
       expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
 
-    test("rotateCookies declined (200, no fresh PSIDTS) + L2 silentRefresh fails => throws AuthenticationError", async () => {
+    test("rotateCookies declined (200, no fresh PSIDTS) does NOT escalate to L2 silentRefresh", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -316,10 +316,10 @@ describe("phantom-auth regression suite", () => {
         rotateCookies,
       });
 
-      const err = await mgr.ensureAuthenticated("default").catch((e) => e);
-      expect(err).toBeInstanceOf(AuthenticationError);
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
+      const cookies = await mgr.ensureAuthenticated("default");
+
+      expect(cookies.secure_1psid).toBe("active-psid");
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
 
     test("Probe budget — repeat ensureAuthenticated within TTL reuses the cached result", async () => {

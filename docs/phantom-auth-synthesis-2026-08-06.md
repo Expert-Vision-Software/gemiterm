@@ -118,7 +118,7 @@ This is why the `models()` probe reported "valid" indefinitely while `listChats`
 
 ### What the L1 rotation actually does (unchanged, accurate)
 
-`src/services/cookie-rotation.ts` POSTs `[0,"-0000000000000000000"]` to `https://accounts.google.com/RotateCookies` with the current `.google.com` cookie jar. Google's response carries fresh `Set-Cookie` headers for `__Secure-1PSIDTS`, `__Secure-3PSIDTS`, and `SIDCC`. The new values are merged into storage if different. Three guards protect against abuse: a 600 s disk-mtime guard, an in-process throttle, and the `GEMITERM_SKIP_ROTATE_COOKIES` opt-out.
+`src/services/cookie-rotation.ts` POSTs `[0,"-0000000000000000000"]` to `https://accounts.google.com/RotateCookies` with the current `.google.com` cookie jar. Google's response carries fresh `Set-Cookie` headers for `__Secure-1PSIDTS`, `__Secure-3PSIDTS`, and `SIDCC`. The new values are merged into storage if different. Three guards protect against abuse: a 600 s in-memory throttle keyed off the last POST time (previously a disk-mtime guard, replaced by `a780788`), a concurrent-call dedup (`inFlightRotations`), and the `GEMITERM_SKIP_ROTATE_COOKIES` opt-out.
 
 ---
 
@@ -137,11 +137,57 @@ This is why the `models()` probe reported "valid" indefinitely while `listChats`
 
 Remaining open work:
 
-1. **Live verification (user-driven).** The harness proves the contract deterministically, but closing the inference loop against real Google needs a headed `gemiterm login` + immediate `gemiterm list` on a degraded profile. Only the user can drive the headed browser.
-2. **Archive `cookie-jar-integrity`** (task 5.1) → syncs the two MODIFIED `auth` CookieMonitor requirements into the main spec. ⚠️ Coordinate with `auth-daemon` (also an `auth` delta).
-3. **`/test-baseline eval`** — promote `docs/testing-baseline.xml` BL-007 (913/1909) → BL-008 (928/1945).
-4. **Ship gate HOLD** — v2.6.2 must not tag until live `list` returns chats post-`login`. The CHANGELOG "list returned 0 chats" headline now attaches to `6bc51f6`; the L2 escalation (`0b91cde`) is reframed as complementary.
-5. Already-degraded on-disk jars are **not** retroactively backfilled by the fix; users run `gemiterm login` / `auth -e <name>` once to repopulate. `status -v` surfaces cookie ages.
+1. **Investigate 401 on fresh login.** The recovery-ladder fixes (`a780788`, `4dfe13c`) correctly surface dead sessions, but live testing (2026-08-06 evening) shows `rotateCookies` → 401 immediately after a fresh headed `gemiterm login` (41 cookies captured, PSID present). The cookies work for `models()` (PSID-only) but the API rejects them. Possible causes: login cookies differ from API-required cookies; L2 silentRefresh overwrites with API-invalid browser cookies; cookie quality issue; RotateCookies endpoint bot-detection. This must be diagnosed before the fix can be judged effective.
+2. **Live-verify the recovery-ladder fix.** After #1 is resolved, confirm `list` returns chats with the full fix in place.
+3. **Archive `cookie-jar-integrity`** (task 5.1) → syncs the two MODIFIED `auth` CookieMonitor requirements into the main spec. ⚠️ Coordinate with `auth-daemon` (also an `auth` delta).
+4. **`/test-baseline eval`** — promote `docs/testing-baseline.xml` from BL-007 (913/1909) → BL-009 (933/1959).
+5. **Ship gate HOLD** — v2.6.2 must not tag until #1 is resolved and #2 confirms live `list` returns chats. The test baseline is at 933/1959 (0 fail, typecheck clean); the code changes are 2 surgical commits on `fix/v2.6.1-bugs`.
+6. Already-degraded on-disk jars are **not** retroactively backfilled by the fix; users run `gemiterm login` / `auth -e <name>` once to repopulate. `status -v` surfaces cookie ages.
+
+---
+
+## The recovery-ladder recurrence (2026-08-06, evening) — two recovery gaps
+
+~30 min after the capture fix was live-verified (`list` returned chats right after a fresh `login`), the **0-chats symptom returned** — but with a **full 39–41 cookie jar**, not the 4-cookie trimmed jar. The capture fix held. The diagnostic at 06:27Z (forcing L1 past the mtime guard) confirmed **Hypothesis B**: the session was genuinely server-side signed out. `rotateCookies` → **401 Unauthorized**; `models()` (PSID-only) still succeeded → probe said "authenticated" → `listChats` empty. No branch threw `AuthenticationError`, so `getGeminiClient`'s headed-reauth path (`cli/index.ts:81-99` → `promptAndReauth`) never fired. This is H1's caveat ("`models()` alone is insufficient") realized exactly.
+
+### The two recovery gaps
+
+**Gap A — throttle defeated by unrelated writes.** `shouldSkipForDiskMtime` read `getFileMtime(getProfilePath(...))` — the jar file's mtime. `GeminiClientService.persistRefreshedCookies` wrote the file on every API call (SDK self-rotation → divergence → save → mtime refreshed), so the 600 s guard was refreshed by unrelated saves and **almost never allowed an explicit rotation**. At 06:04Z the file was 3 min old → throttled → the 401 was never observed → the symptom was silently masked.
+
+**Gap B — no `AuthenticationError` surface path.** `performRotateCookies` classified ALL non-200 (including 401) as `{rotated:false, attempted:false}` — same bucket as "throttled/skipped." `ensureAuthenticated`'s `else` branch debug-logged and returned "authenticated." `escalateAfterServerDecline` (L2 fallback) warned but never threw. Nothing reached the existing headed-reauth prompt.
+
+### The fix (two commits, `fix/v2.6.1-bugs`)
+
+Behind RED tests at the `ProfileAuthManager` and `cookie-rotation` seams (TDD, `gimme(modelsImpl)` pattern from `tests/services/phantom-auth.test.ts`):
+
+**`a780788` — Gap A**: Replace `shouldSkipForDiskMtime` with an in-memory per-process `lastRotatePostAt` Map keyed off the actual RotateCookies POST time. The throttle still guards long-running processes (daemon/REPL); one-shot CLI commands always rotate (exposes the 401). No persisted state, no path-mediation change.
+
+**`4dfe13c` — Gap B**:
+- `RotateCookiesResult` gains `sessionInvalid?: boolean`. `performRotateCookies` sets it on **401/403** responses (400/429/5xx/network → transient, unchanged).
+- `ensureAuthenticated` throws `AuthenticationError` on `sessionInvalid` → `getGeminiClient` catch → `promptAndReauth`.
+- `escalateAfterServerDecline` (200-but-declined phantom case) throws on L2 `silentRefresh` failure **and** on cooldown-skip (previously only warned). L2 still attempted first.
+- Two pre-existing tests updated: cooldown contract (`profile-auth-manager.test.ts:720` → `.rejects.toThrow`) and throttle-isolation (`auth-service.test.ts` → `beforeEach` reset).
+
+**933 pass / 0 fail / 2 skip / 1959 expects**, typecheck clean (baseline was 928/1945).
+
+### Open: 401 on fresh login
+
+Live verification exposed a **new problem**: even after a headed `gemiterm login -p evs-diegohb` (41 cookies captured, PSID present), `rotateCookies` returns **401** immediately on the next command — within minutes of login. The B-fix correctly throws (surfaces the dead session), but *why a fresh login produces API-dead cookies* is not understood.
+
+Evidence:
+- `list -i` at 07:38Z: L1 got 200 "no fresh PSIDTS" → L2 recovered via browser → authenticated. But `listChats` may have still returned empty.
+- `list -p evs-diegohb` at 07:40Z: **401** (session dead again — possibly L2 browser capture overwrote the jar with API-invalid cookies).
+- `models -p evs-diegohb` at 07:41Z: also **401**.
+
+Possible causes (uninvestigated):
+1. The login captures cookies for the Gemini web app — those differ from what the API endpoints require, so the session is dead-at-birth for programmatic use.
+2. L2 `mergeCookies` overwrites the login's cookies with browser-only cookies that lack the API-critical companions.
+3. Cookie quality issue (SIDCC mismatch, PSIDTS stale-envelope) the API rejects.
+4. RotateCookies endpoint behavior changed (rate-limiting, bot-detection for non-browser User-Agent).
+
+### Implication for the B-fix's "401 → immediate throw" decision
+
+The grill decision (Q2/Q3) chose "401 → throw immediately, skip L2" on the assumption L2 can't save a dead session. But the `list -i` evidence shows L2 CAN recover from degraded states. It's possible that 401 should also attempt L2 silentRefresh before throwing — the browser path may produce working API cookies that RotateCookies alone can't. Worth revisiting if the fresh-login 401 investigation doesn't find a simpler cause.
 
 ---
 
