@@ -673,8 +673,8 @@ describe("GeminiClientService", () => {
       expect(setterCalledWith).toEqual(["existing-conv-xyz", "rid-xyz", "rcid-xyz", null, null, null, null, null, null, ""]);
     });
 
-    test.skip("sendMessage falls back to cid-only when no prior metadata exists", async () => {
-      let capturedNewChatMetadata: (string | null)[] | null = null;
+    test("sendMessage seeds metadata from existing chat when no prior metadata exists", async () => {
+      let setterCalledWith: (string | null)[] | null = null;
       let _meta: (string | null)[] = ["", "", "", null, null, null, null, null, null, ""];
 
       const mockSession: RawChatSession = {
@@ -684,6 +684,7 @@ describe("GeminiClientService", () => {
         set metadata(v: (string | null)[]) {
           if (!Array.isArray(v)) return;
           _meta = [...v];
+          setterCalledWith = [...v];
         },
         generateContent: async function(_opts: { prompt: string }) {
           return { text: { toString: () => "model response" }, metadata: [..._meta] };
@@ -694,14 +695,11 @@ describe("GeminiClientService", () => {
         cookies: { "__Secure-1PSID": "sid" },
         init: async () => {},
         chats: async () => [],
-        readChat: async () => null,
-        newChat: (opts?: { metadata?: (string | null)[] }) => {
-          if (opts?.metadata) {
-            capturedNewChatMetadata = [...opts.metadata];
-            _meta = [...opts.metadata];
-          }
-          return mockSession;
-        },
+        readChat: async () => [
+          { role: "user", text: "hello", rid: "", rcid: "" },
+          { role: "model", text: "hi there", rid: "rid-from-server", rcid: "rcid-from-server" },
+        ] as RawChatTurn[],
+        newChat: () => mockSession,
         deleteChat: async () => {},
         models: async () => [],
       };
@@ -728,7 +726,9 @@ describe("GeminiClientService", () => {
 
       await service.sendMessage("existing-conv-xyz", "hello");
 
-      expect(capturedNewChatMetadata).toEqual(["existing-conv-xyz", "", "", null, null, null, null, null, null, ""]);
+      expect(setterCalledWith).toEqual([
+        "existing-conv-xyz", "rid-from-server", "rcid-from-server", null, null, null, null, null, null, "",
+      ]);
     });
 
     test("sendMessage captures new rid/rcid into storage after a successful turn", async () => {

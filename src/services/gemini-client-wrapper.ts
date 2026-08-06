@@ -308,6 +308,26 @@ export class GeminiClientService
     return session;
   }
 
+  private async seedMetadataFromChat(conversationId: string): Promise<boolean> {
+    try {
+      const raw = (await this.client!.readChat(conversationId)) as RawChatTurn[] | null;
+      const turns = raw ?? [];
+      const lastModelTurn = [...turns].reverse().find((t) => t.role === "model");
+      if (lastModelTurn?.rid && this.profileName) {
+        const existing = this.chatMetadata.lookup(this.profileName, conversationId);
+        this.chatMetadata.save(this.profileName, conversationId, {
+          rid: lastModelTurn.rid,
+          rcid: lastModelTurn.rcid ?? "",
+          ctx: existing?.ctx ?? null,
+        });
+        return true;
+      }
+    } catch {
+      this.logger.debug(`seedMetadataFromChat: readChat failed for cid='${conversationId}' on profile='${this.profileName}'`);
+    }
+    return false;
+  }
+
   async sendMessage(conversationId: string, message: string): Promise<string> {
     await this.init();
     try {
@@ -320,10 +340,23 @@ export class GeminiClientService
             stored.ctx ?? "",
           ]);
         } else {
-          this.logger.debug(
-            `sendMessage: no prior metadata for cid='${conversationId}' on profile='${this.profileName}'; falling back to cid-only send.`,
-          );
-          session = this.buildSession(conversationId);
+          const seeded = await this.seedMetadataFromChat(conversationId);
+          if (seeded) {
+            const stored = this.chatMetadata.lookup(this.profileName, conversationId);
+            if (stored) {
+              session = this.buildSession(conversationId, [
+                conversationId, stored.rid, stored.rcid, null, null, null, null, null, null,
+                stored.ctx ?? "",
+              ]);
+            } else {
+              session = this.buildSession(conversationId);
+            }
+          } else {
+            this.logger.debug(
+              `sendMessage: no prior metadata for cid='${conversationId}' on profile='${this.profileName}'; falling back to cid-only send.`,
+            );
+            session = this.buildSession(conversationId);
+          }
         }
       } else {
         session = this.buildSession(conversationId);
