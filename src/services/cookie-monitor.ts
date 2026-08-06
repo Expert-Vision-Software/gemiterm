@@ -1,6 +1,7 @@
 import type { Cookie } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { PlaywrightCliDriver } from "./playwright-cli-driver.ts";
+import { isGoogleDomainCookie } from "./cookie-rotation.ts";
 
 const POLL_INTERVAL_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -10,6 +11,11 @@ const REQUIRED_COOKIES = new Set(["__Secure-1PSID", "__Secure-1PSIDTS"]);
 const LOGIN_PROBE_JS = `document.querySelector('a[href^="https://accounts.google.com/SignOutOptions"]') !== null`;
 
 type CookiesFoundCallback = (cookies: Cookie[]) => void;
+
+export interface RequireRotation {
+  activePsid: string;
+  activePsidts: string | null;
+}
 
 export class CookieMonitorTimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -51,6 +57,7 @@ export class CookieMonitor {
     session: string,
     onCookiesFound: CookiesFoundCallback,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    requireRotation?: RequireRotation,
   ): Promise<void> {
     if (this._started) {
       this.logger.warn("CookieMonitor already started, ignoring duplicate start call");
@@ -69,7 +76,7 @@ export class CookieMonitor {
 
     this.pollingHandle = setInterval(async () => {
       if (this._stopped) return;
-      await this.poll(session, onCookiesFound);
+      await this.poll(session, onCookiesFound, requireRotation);
     }, POLL_INTERVAL_MS);
   }
 
@@ -111,7 +118,7 @@ export class CookieMonitor {
 
       if (authCookies.length === REQUIRED_COOKIES.size) {
         this.logger.info(`Found all required auth cookies: ${authCookies.map((c) => c.name).join(", ")}`);
-        return authCookies;
+        return cookies;
       }
 
       this.logger.debug(
@@ -127,6 +134,7 @@ export class CookieMonitor {
   private async poll(
     session: string,
     onCookiesFound: CookiesFoundCallback,
+    requireRotation?: RequireRotation,
   ): Promise<void> {
     if (this._stopped) return;
 
@@ -153,7 +161,21 @@ export class CookieMonitor {
       return;
     }
 
+    if (requireRotation) {
+      const psid = authCookies.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value
+        ?? authCookies.find((c) => c.name === "__Secure-1PSID")?.value;
+      const psidts = authCookies.find((c) => c.name === "__Secure-1PSIDTS" && isGoogleDomainCookie(c))?.value
+        ?? authCookies.find((c) => c.name === "__Secure-1PSIDTS")?.value
+        ?? null;
+      const psidChanged = psid !== undefined && psid !== requireRotation.activePsid;
+      const psidtsChanged = psidts !== requireRotation.activePsidts;
+      if (!psidChanged && !psidtsChanged) {
+        this.logger.debug("CookieMonitor: requireRotation baseline matched, ignoring poll");
+        return;
+      }
+    }
+
     this.stop();
-    onCookiesFound(authCookies);
+    onCookiesFound(cookies);
   }
 }
