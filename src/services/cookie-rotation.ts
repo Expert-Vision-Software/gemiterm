@@ -1,14 +1,18 @@
 import type { Logger } from "../infrastructure/logger.ts";
 import type { Cookie } from "../core/types.ts";
-import { getFileMtime } from "../infrastructure/io.ts";
-import { getProfilePath } from "../infrastructure/path-utils.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 
 const ROTATE_COOKIES_URL = "https://accounts.google.com/RotateCookies";
 const ROTATE_COOKIES_BODY = JSON.stringify([0, "-0000000000000000000"]);
-const DISK_MTIME_GUARD_MS = 600_000;
+const ROTATE_COOKIES_THROTTLE_MS = 600_000;
 const COOKIE_NAMES_OF_INTEREST = new Set(["__Secure-1PSIDTS", "__Secure-3PSIDTS", "SIDCC"]);
+
+// In-process throttle: the earliest a profile will POST to RotateCookies again. Keyed off
+// the last actual POST time (not the jar file mtime, which persistRefreshedCookies touches
+// on every API call). Per-process: the auth-daemon/REPL are throttled; one-shot CLI commands
+// always rotate (and thus surface 401s on dead sessions).
+const lastRotatePostAt: Map<string, number> = new Map();
 
 export interface RotateCookiesResult {
   rotated: boolean;
@@ -46,10 +50,10 @@ export function isGoogleDomainCookie(cookie: Cookie): boolean {
   return normalized === ".google.com";
 }
 
-function shouldSkipForDiskMtime(profileName: string, now: number): boolean {
-  const mtime = getFileMtime(getProfilePath(profileName));
-  if (mtime === null) return false;
-  return now - mtime.getTime() < DISK_MTIME_GUARD_MS;
+function shouldSkipForThrottle(profileName: string, now: number): boolean {
+  const last = lastRotatePostAt.get(profileName);
+  if (last === undefined) return false;
+  return now - last < ROTATE_COOKIES_THROTTLE_MS;
 }
 
 function parseSetCookieHeader(headers: string[]): Map<string, string> {
@@ -86,8 +90,9 @@ async function performRotateCookies(
     return { rotated: false, attempted: false };
   }
 
-  if (shouldSkipForDiskMtime(profileName, now())) {
-    logger.debug(`rotateCookies: skipped (storage_state.json mtime within ${DISK_MTIME_GUARD_MS}ms) for profile '${profileName}'`);
+  const nowMs = now();
+  if (shouldSkipForThrottle(profileName, nowMs)) {
+    logger.debug(`rotateCookies: skipped (throttled; last POST within ${ROTATE_COOKIES_THROTTLE_MS}ms) for profile '${profileName}'`);
     return { rotated: false, attempted: false };
   }
 
@@ -107,6 +112,7 @@ async function performRotateCookies(
 
   const cookieHeader = buildCookieHeader(googleCookies);
 
+  lastRotatePostAt.set(profileName, nowMs);
   let response: Response;
   try {
     response = await fetcher(ROTATE_COOKIES_URL, {
@@ -163,8 +169,9 @@ async function performRotateCookies(
   return { rotated: true, attempted: true };
 }
 
-export function _resetInFlightRotationsForTests(): void {
+export function _resetRotationStateForTests(): void {
   inFlightRotations.clear();
+  lastRotatePostAt.clear();
 }
 
 export async function rotateCookies(

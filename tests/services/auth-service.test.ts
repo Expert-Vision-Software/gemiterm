@@ -9,6 +9,7 @@ import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
+import { _resetRotationStateForTests } from "../../src/services/cookie-rotation.ts";
 import * as io from "../../src/infrastructure/io.ts";
 import * as elevation from "../../src/infrastructure/elevation.ts";
 
@@ -695,6 +696,7 @@ describe("AuthService", () => {
       delete process.env.GEMITERM_SKIP_ROTATE_COOKIES;
       spyOn(io, "existsFile").mockReturnValue(true);
       spyOn(io, "getFileMtime").mockReturnValue(null);
+      _resetRotationStateForTests();
     });
 
     afterEach(() => {
@@ -704,6 +706,7 @@ describe("AuthService", () => {
       } else {
         process.env.GEMITERM_SKIP_ROTATE_COOKIES = originalSkipRotateCookies;
       }
+      _resetRotationStateForTests();
     });
 
     test("L1 succeeds without launching a browser when PSIDTS rotates", async () => {
