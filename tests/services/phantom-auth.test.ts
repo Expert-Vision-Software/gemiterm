@@ -241,7 +241,7 @@ describe("phantom-auth regression suite", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
-      const rotateCookies = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: true, attempted: true }));
 
       const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
       const mgr = new ProfileAuthManager({
@@ -273,7 +273,7 @@ describe("phantom-auth regression suite", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
-      const rotateCookies = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: true, attempted: true }));
 
       const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
       const mgr = new ProfileAuthManager({

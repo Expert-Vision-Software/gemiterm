@@ -10,7 +10,12 @@ const ROTATE_COOKIES_BODY = JSON.stringify([0, "-0000000000000000000"]);
 const DISK_MTIME_GUARD_MS = 600_000;
 const COOKIE_NAMES_OF_INTEREST = new Set(["__Secure-1PSIDTS", "__Secure-3PSIDTS", "SIDCC"]);
 
-const inFlightRotations: Map<string, Promise<boolean>> = new Map();
+export interface RotateCookiesResult {
+  rotated: boolean;
+  attempted: boolean;
+}
+
+const inFlightRotations: Map<string, Promise<RotateCookiesResult>> = new Map();
 
 interface RotateCookiesOptions {
   cookieStorage: CookieStorage;
@@ -73,17 +78,17 @@ function isCookieRotationDisabled(): boolean {
 async function performRotateCookies(
   profileName: string,
   handle: RotateCookiesHandle,
-): Promise<boolean> {
+): Promise<RotateCookiesResult> {
   const { cookieStorage, cookieStorageService, logger, fetcher, now } = handle;
 
   if (isCookieRotationDisabled()) {
     logger.debug(`rotateCookies: skipped (GEMITERM_SKIP_ROTATE_COOKIES is set) for profile '${profileName}'`);
-    return false;
+    return { rotated: false, attempted: false };
   }
 
   if (shouldSkipForDiskMtime(profileName, now())) {
     logger.debug(`rotateCookies: skipped (storage_state.json mtime within ${DISK_MTIME_GUARD_MS}ms) for profile '${profileName}'`);
-    return false;
+    return { rotated: false, attempted: false };
   }
 
   let stored: Cookie[];
@@ -91,13 +96,13 @@ async function performRotateCookies(
     stored = cookieStorage.load(profileName);
   } catch (err) {
     logger.debug(`rotateCookies: load failed for profile '${profileName}': ${err}`);
-    return false;
+    return { rotated: false, attempted: false };
   }
 
   const googleCookies = stored.filter(isGoogleDomainCookie);
   if (googleCookies.length === 0) {
     logger.debug(`rotateCookies: no .google.com cookies for profile '${profileName}'`);
-    return false;
+    return { rotated: false, attempted: false };
   }
 
   const cookieHeader = buildCookieHeader(googleCookies);
@@ -115,12 +120,12 @@ async function performRotateCookies(
     });
   } catch (err) {
     logger.debug(`rotateCookies: fetch failed for profile '${profileName}': ${err}`);
-    return false;
+    return { rotated: false, attempted: false };
   }
 
   if (response.status !== 200) {
     logger.debug(`rotateCookies: non-200 status ${response.status} for profile '${profileName}'`);
-    return false;
+    return { rotated: false, attempted: false };
   }
 
   const setCookieHeaders = response.headers.getSetCookie();
@@ -130,11 +135,11 @@ async function performRotateCookies(
   const newPsidts = updated.get("__Secure-1PSIDTS");
   if (!newPsidts || !storedPsidts) {
     logger.debug(`rotateCookies: no fresh __Secure-1PSIDTS in response for profile '${profileName}'`);
-    return false;
+    return { rotated: false, attempted: true };
   }
   if (newPsidts === storedPsidts.value) {
     logger.debug(`rotateCookies: __Secure-1PSIDTS unchanged for profile '${profileName}'`);
-    return false;
+    return { rotated: false, attempted: true };
   }
 
   let merged = false;
@@ -146,16 +151,16 @@ async function performRotateCookies(
     return c;
   });
   if (!merged) {
-    return false;
+    return { rotated: false, attempted: true };
   }
 
   try {
     cookieStorageService.saveCookiesForProfile(profileName, next);
   } catch (err) {
     logger.debug(`rotateCookies: save failed for profile '${profileName}': ${err}`);
-    return false;
+    return { rotated: false, attempted: true };
   }
-  return true;
+  return { rotated: true, attempted: true };
 }
 
 export function _resetInFlightRotationsForTests(): void {
@@ -165,7 +170,7 @@ export function _resetInFlightRotationsForTests(): void {
 export async function rotateCookies(
   profileName: string,
   options: RotateCookiesOptions,
-): Promise<boolean> {
+): Promise<RotateCookiesResult> {
   const inFlight = inFlightRotations.get(profileName);
   if (inFlight) return inFlight;
 
@@ -180,7 +185,7 @@ export async function rotateCookies(
   const promise = performRotateCookies(profileName, handle)
     .catch((err) => {
       options.logger.debug(`rotateCookies: unexpected error for profile '${profileName}': ${err}`);
-      return false;
+      return { rotated: false, attempted: false } as RotateCookiesResult;
     })
     .finally(() => {
       inFlightRotations.delete(profileName);

@@ -102,7 +102,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ rotated: true, attempted: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).toHaveBeenCalledTimes(1);
     const saved = saveSpy.mock.calls[0]?.[1] as Cookie[];
@@ -123,7 +123,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -144,7 +144,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -164,7 +164,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -183,7 +183,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).not.toHaveBeenCalled();
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -206,7 +206,7 @@ describe("rotateCookies", () => {
       now: () => nowDate.getTime(),
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).not.toHaveBeenCalled();
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -232,8 +232,8 @@ describe("rotateCookies", () => {
       }),
     ]);
 
-    expect(r1).toBe(true);
-    expect(r2).toBe(true);
+    expect(r1).toEqual({ rotated: true, attempted: true });
+    expect(r2).toEqual({ rotated: true, attempted: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
@@ -251,7 +251,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).not.toHaveBeenCalled();
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -286,7 +286,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ rotated: true, attempted: true });
     const saved = saveSpy.mock.calls[0]?.[1] as Cookie[];
     expect(saved.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("NEW");
     expect(saved.find((c) => c.name === "__Secure-3PSIDTS")?.value).toBe("NEW3P");
@@ -322,7 +322,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ rotated: true, attempted: true });
     const saved = saveSpy.mock.calls[0]?.[1] as Cookie[];
     expect(saved.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("NEW");
     expect(saved.find((c) => c.name === "SIDCC")?.value).toBe("NEWSIDCC");
@@ -364,7 +364,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).not.toHaveBeenCalled();
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -382,7 +382,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ rotated: true, attempted: true });
     expect(serviceSpy).toHaveBeenCalledTimes(1);
     expect(serviceSpy).toHaveBeenCalledWith("p", expect.any(Array));
   });

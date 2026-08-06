@@ -10,7 +10,7 @@ import { validateProfileName } from "../infrastructure/validators.ts";
 import { getProfilePath } from "../infrastructure/path-utils.ts";
 import { existsFile } from "../infrastructure/io.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
-import { rotateCookies, isGoogleDomainCookie } from "./cookie-rotation.ts";
+import { rotateCookies, isGoogleDomainCookie, type RotateCookiesResult } from "./cookie-rotation.ts";
 import { CookieStorageService } from "./cookie-storage-service.ts";
 
 const GEMINI_AUTH_URL = "https://gemini.google.com/app";
@@ -207,12 +207,12 @@ export class AuthService {
     }
   }
 
-  async rotateCookies(profileName: string): Promise<boolean> {
+  async rotateCookies(profileName: string): Promise<RotateCookiesResult> {
     const name = profileName ?? getDefaultProfileName();
     try {
       validateProfileName(name);
     } catch {
-      return false;
+      return { rotated: false, attempted: false };
     }
     try {
       return await rotateCookies(name, {
@@ -222,7 +222,7 @@ export class AuthService {
       });
     } catch (err) {
       this.logger.debug(`rotateCookies failed for profile '${name}': ${err}`);
-      return false;
+      return { rotated: false, attempted: false };
     }
   }
 
@@ -237,12 +237,12 @@ export class AuthService {
     this.logger.debug(`Silent refresh attempt for profile: ${name}`);
 
     try {
-      const rotated = await rotateCookies(name, {
+      const l1 = await rotateCookies(name, {
         cookieStorage: this.cookieStorage,
         cookieStorageService: this.cookieStorageService,
         logger: this.logger,
       });
-      if (rotated) {
+      if (l1.rotated) {
         return true;
       }
     } catch (err) {

@@ -9,6 +9,7 @@ import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { ProfileManager as ProfileManagerType } from "../../src/infrastructure/storage.ts";
 import type { IGeminiClientService } from "../../src/core/command-handlers.ts";
+import type { RotateCookiesResult } from "../../src/services/cookie-rotation.ts";
 
 /*
 The 8 tests in `describe('findProfileForConversation')` previously asserted the BUGGY
@@ -77,7 +78,7 @@ function createManager(
   profileManager: ProfileManagerType,
   geminiClient?: IGeminiClientService,
   silentRefresh: (profileName: string) => Promise<boolean> = async () => false,
-  rotateCookies: (profileName: string) => Promise<boolean> = async () => false,
+  rotateCookies: (profileName: string) => Promise<RotateCookiesResult> = async () => ({ rotated: false, attempted: false }),
 ): ProfileAuthManager {
   const cookieStorage = new CookieStorageService({
     cookieStorage: new CookieStorage(),
@@ -520,7 +521,7 @@ describe("ProfileAuthManager", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
-      const rotateCookies = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: true, attempted: true }));
 
       const infoSpy = mock(() => {});
       const testLogger = new Logger("test");
@@ -602,7 +603,7 @@ describe("ProfileAuthManager", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
-      const rotateCookies = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: true, attempted: true }));
 
       const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh, rotateCookies);
 
@@ -628,7 +629,7 @@ describe("ProfileAuthManager", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
-      const rotateCookies = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: true, attempted: true }));
 
       const mgr1 = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh, rotateCookies);
       const mgr2 = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh, rotateCookies);
@@ -651,7 +652,7 @@ describe("ProfileAuthManager", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
-      const rotateCookies = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: true, attempted: true }));
 
       const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh, rotateCookies);
 
@@ -659,6 +660,122 @@ describe("ProfileAuthManager", () => {
 
       expect(rotateCookies).toHaveBeenCalledWith("default");
       expect(silentRefresh).toHaveBeenCalledTimes(0);
+    });
+
+    test("L1 RotateCookies reached Google but server declined (attempted, not rotated) escalates to L2 silentRefresh", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeValidCookies());
+
+      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
+      const geminiClient = gimme(modelsFn);
+
+      const silentRefresh = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: true }));
+
+      const mgr = new ProfileAuthManager({
+        profileManager: manager,
+        cookieStorageService: new CookieStorageService({ cookieStorage: storage, logger }),
+        logger,
+        geminiClient: geminiClient as unknown as IGeminiClientService,
+        silentRefresh,
+        rotateCookies,
+      });
+
+      await mgr.ensureAuthenticated("default");
+
+      expect(rotateCookies).toHaveBeenCalledTimes(1);
+      expect(silentRefresh).toHaveBeenCalledTimes(1);
+      expect(silentRefresh).toHaveBeenCalledWith("default");
+    });
+
+    test("L1 RotateCookies throttled/skipped (not attempted) does NOT escalate to L2 silentRefresh", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeValidCookies());
+
+      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
+      const geminiClient = gimme(modelsFn);
+
+      const silentRefresh = mock(async (_profileName: string) => true);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: false }));
+
+      const mgr = new ProfileAuthManager({
+        profileManager: manager,
+        cookieStorageService: new CookieStorageService({ cookieStorage: storage, logger }),
+        logger,
+        geminiClient: geminiClient as unknown as IGeminiClientService,
+        silentRefresh,
+        rotateCookies,
+      });
+
+      await mgr.ensureAuthenticated("default");
+
+      expect(rotateCookies).toHaveBeenCalledTimes(1);
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
+    });
+
+    test("escalation cooldown: a failed L2 silentRefresh is not re-launched on the next call within the cooldown", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeValidCookies());
+
+      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
+      const geminiClient = gimme(modelsFn);
+
+      const silentRefresh = mock(async (_profileName: string) => false);
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: true }));
+
+      const mgr = new ProfileAuthManager({
+        profileManager: manager,
+        cookieStorageService: new CookieStorageService({ cookieStorage: storage, logger }),
+        logger,
+        geminiClient: geminiClient as unknown as IGeminiClientService,
+        silentRefresh,
+        rotateCookies,
+      });
+
+      await mgr.ensureAuthenticated("default");
+      await mgr.ensureAuthenticated("default");
+
+      expect(rotateCookies).toHaveBeenCalledTimes(2);
+      expect(silentRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    test("L2 silentRefresh success after L1 server-decline returns refreshed cookies", async () => {
+      const storage = new CookieStorage();
+      const manager = new ProfileManager(storage);
+      manager.create("default");
+      storage.save("default", makeValidCookies());
+
+      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
+      const geminiClient = gimme(modelsFn);
+
+      const silentRefresh = mock(async (profileName: string) => {
+        storage.save(profileName, makeValidCookies().map((c) =>
+          c.name === "__Secure-1PSIDTS" ? { ...c, value: "refreshed-psidts" } : c,
+        ));
+        return true;
+      });
+      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: true }));
+
+      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
+      const mgr = new ProfileAuthManager({
+        profileManager: manager,
+        cookieStorageService: cookieStorage,
+        logger,
+        geminiClient: geminiClient as unknown as IGeminiClientService,
+        silentRefresh,
+        rotateCookies,
+      });
+
+      const cookies = await mgr.ensureAuthenticated("default");
+
+      expect(silentRefresh).toHaveBeenCalledTimes(1);
+      expect(cookies.secure_1psidts).toBe("refreshed-psidts");
     });
   });
 });
