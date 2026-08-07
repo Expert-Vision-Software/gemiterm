@@ -596,7 +596,7 @@ describe("AuthService", () => {
       const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);
       const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
-      const result = await svc.silentRefresh("test-profile", 50);
+      const result = await svc.silentRefresh("test-profile", { timeoutMs: 50 });
 
       expect(result).toBe(false);
       expect(cookieMonitor.start).toHaveBeenCalledTimes(1);
@@ -880,7 +880,7 @@ describe("AuthService", () => {
       cookieMonitor.start.mockImplementationOnce(async () => {});
 
       const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
-      const result = await svc.silentRefresh("test-profile", 50);
+      const result = await svc.silentRefresh("test-profile", { timeoutMs: 50 });
 
       expect(result).toBe(false);
       expect(driver.openHeadless).toHaveBeenCalledTimes(1);

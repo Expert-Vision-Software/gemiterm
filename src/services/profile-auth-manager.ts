@@ -8,8 +8,12 @@ import { AuthenticationError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import type { RotateCookiesResult } from "./cookie-rotation.ts";
+import type { SilentRefreshOptions } from "./auth-service.ts";
 
-export type SilentRefreshFn = (profileName: string) => Promise<boolean>;
+export type SilentRefreshFn = (
+  profileName: string,
+  opts?: SilentRefreshOptions,
+) => Promise<boolean>;
 export type RotateCookiesFn = (profileName: string) => Promise<RotateCookiesResult>;
 
 export interface ProfileAuthManagerDeps {
@@ -124,7 +128,18 @@ export class ProfileAuthManager {
     if (rotation.rotated) {
       // Fresh __Secure-1PSIDTS obtained; session is fully usable.
     } else if (rotation.attempted) {
-      this.logger.debug(`ensureAuthenticated: L1 RotateCookies declined for profile '${name}'; session is valid.`);
+      const isPhantom = await this.detectPhantomAuth(name);
+      if (isPhantom) {
+        this.logger.debug(`Phantom-auth detected for profile '${name}'; attempting targeted L2 silent refresh`);
+        const refreshed = await this.silentRefresh(name, { mode: "targeted" });
+        if (!refreshed) {
+          throw new AuthenticationError(
+            `Session for profile '${name}' is in phantom-auth state; targeted refresh failed. Run 'gemiterm login' to re-authenticate.`,
+          );
+        }
+      } else {
+        this.logger.debug(`ensureAuthenticated: L1 RotateCookies declined for profile '${name}'; session is valid.`);
+      }
     } else {
       // L1 was throttled (600 s disk-mtime guard), disabled, or unavailable before any
       // network attempt. Cookies are likely still fresh; no escalation warranted.
@@ -177,5 +192,16 @@ export class ProfileAuthManager {
 
     this.probeCache.set(name, { ts: now, result: "valid" });
     return "valid";
+  }
+
+  private async detectPhantomAuth(name: string): Promise<boolean> {
+    try {
+      const client = await this.geminiClient.forProfile(name);
+      const chats = await client.listChats({ limit: 1 });
+      return chats.length === 0;
+    } catch (err) {
+      this.logger.debug(`detectPhantomAuth: listChats failed for profile '${name}': ${err}`);
+      return false;
+    }
   }
 }

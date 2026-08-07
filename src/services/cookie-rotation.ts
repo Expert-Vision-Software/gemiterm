@@ -6,7 +6,7 @@ import type { CookieStorageService } from "./cookie-storage-service.ts";
 const ROTATE_COOKIES_URL = "https://accounts.google.com/RotateCookies";
 const ROTATE_COOKIES_BODY = JSON.stringify([0, "-0000000000000000000"]);
 const ROTATE_COOKIES_THROTTLE_MS = 600_000;
-const COOKIE_NAMES_OF_INTEREST = new Set(["__Secure-1PSIDTS", "__Secure-3PSIDTS", "SIDCC"]);
+export const COOKIE_NAMES_OF_INTEREST = new Set(["__Secure-1PSIDTS", "__Secure-3PSIDTS", "SIDCC"]);
 
 // In-process throttle: the earliest a profile will POST to RotateCookies again. Keyed off
 // the last actual POST time (not the jar file mtime, which persistRefreshedCookies touches

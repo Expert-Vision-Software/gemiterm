@@ -74,7 +74,8 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
     cookieStorageService,
     logger,
     geminiClient: factoryClient,
-    silentRefresh: (profileName: string) => authService.silentRefresh(profileName),
+    silentRefresh: (profileName: string, opts?: Parameters<typeof authService.silentRefresh>[1]) =>
+      authService.silentRefresh(profileName, opts),
     rotateCookies: (profileName: string) => authService.rotateCookies(profileName),
   });
 
