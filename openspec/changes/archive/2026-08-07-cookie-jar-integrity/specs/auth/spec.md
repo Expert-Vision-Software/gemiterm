@@ -42,7 +42,7 @@ The `CookieMonitor.checkLoggedIn(session)` method MUST return `true` when the si
 - **WHEN** `driver.evalJs` rejects
 - **THEN** `checkLoggedIn("sess1")` resolves with `false` (does not throw)
 
-#### Scenario: checkCookies returns the full cookie list when both required cookies are present
+#### Scenario: checkCookies returns required cookies when both present
 - **WHEN** `driver.cookieListFromState` returns an array containing both `__Secure-1PSID` and `__Secure-1PSIDTS` alongside companion cookies (e.g. `SID`, `HSID`, `SSID`)
 - **THEN** `checkCookies("sess1")` resolves with the FULL list (same length and entries as the browser state), which includes both required cookie names and the companions — not a length-2 filtered subset
 
