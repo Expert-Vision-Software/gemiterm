@@ -1016,4 +1016,101 @@ describe("AuthService", () => {
       logSpy.mockRestore();
     });
   });
+
+  describe("Phase 0 v2 — 0g L2 cookie corruption", () => {
+    function makeLargeJar(): Cookie[] {
+      const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+      const companions: Cookie[] = [
+        { name: "SID", value: "sid-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: false, sameSite: "Lax" },
+        { name: "HSID", value: "hsid-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: false, sameSite: "Lax" },
+        { name: "SSID", value: "ssid-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: false, sameSite: "Lax" },
+        { name: "APISID", value: "apisid-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: false, sameSite: "Lax" },
+        { name: "SAPISID", value: "sapisid-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "Lax" },
+        { name: "SIDCC", value: "sidcc-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: false, secure: true, sameSite: "Lax" },
+        { name: "__Secure-3PSID", value: "3psid-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "Lax" },
+        { name: "__Secure-3PSIDTS", value: "3psidts-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "Lax" },
+        { name: "NID", value: "nid-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: false, sameSite: "Lax" },
+        { name: "OGPC", value: "ogpc-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: false, secure: false, sameSite: "Lax" },
+      ];
+      const auth: Cookie[] = [
+        { name: "__Secure-1PSID", value: "psid-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "None" },
+        { name: "__Secure-1PSIDTS", value: "psidts-original", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "Lax" },
+      ];
+      const extra: Cookie[] = [];
+      for (let i = 0; i < 28; i++) {
+        extra.push({ name: `EXTRA_${i}`, value: `extra-${i}`, domain: ".google.com", path: "/", expires: farFuture, httpOnly: false, secure: false, sameSite: "Lax" });
+      }
+      return [...companions, ...auth, ...extra];
+    }
+
+    function makeL2BrowserCookies(): Cookie[] {
+      const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+      return [
+        { name: "__Secure-1PSID", value: "psid-rotated", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "None" },
+        { name: "__Secure-1PSIDTS", value: "psidts-rotated", domain: ".google.com", path: "/", expires: farFuture, httpOnly: true, secure: true, sameSite: "Lax" },
+      ];
+    }
+
+    test("silentRefresh preserves original companions (SID, HSID, SSID, APISID, SAPISID) after L2", async () => {
+      const largeJar = makeLargeJar();
+      cookieStorage.load.mockReturnValue(largeJar);
+      globalThis.fetch = mock(async () => {
+        throw new Error("network error");
+      }) as unknown as typeof fetch;
+      spyOn(io, "existsFile").mockReturnValue(true);
+      spyOn(io, "getFileMtime").mockReturnValue(null);
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(makeL2BrowserCookies());
+        },
+      );
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(true);
+      expect(cookieStorage.save).toHaveBeenCalledTimes(1);
+      const saved = cookieStorage.save.mock.calls[0]![1] as Cookie[];
+      const savedNames = new Set(saved.map((c) => c.name));
+      expect(savedNames.has("SID")).toBe(true);
+      expect(savedNames.has("HSID")).toBe(true);
+      expect(savedNames.has("SSID")).toBe(true);
+      expect(savedNames.has("APISID")).toBe(true);
+      expect(savedNames.has("SAPISID")).toBe(true);
+      expect(savedNames.has("SIDCC")).toBe(true);
+      expect(savedNames.has("NID")).toBe(true);
+      expect(savedNames.has("OGPC")).toBe(true);
+    });
+
+    test("silentRefresh only updates PSIDTS-family cookies from browser; companions keep original values", async () => {
+      const largeJar = makeLargeJar();
+      cookieStorage.load.mockReturnValue(largeJar);
+      globalThis.fetch = mock(async () => {
+        throw new Error("network error");
+      }) as unknown as typeof fetch;
+      spyOn(io, "existsFile").mockReturnValue(true);
+      spyOn(io, "getFileMtime").mockReturnValue(null);
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(makeL2BrowserCookies());
+        },
+      );
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      await svc.silentRefresh("test-profile");
+
+      const saved = cookieStorage.save.mock.calls[0]![1] as Cookie[];
+      const sidCookie = saved.find((c) => c.name === "SID");
+      expect(sidCookie?.value).toBe("sid-original");
+      const hsidCookie = saved.find((c) => c.name === "HSID");
+      expect(hsidCookie?.value).toBe("hsid-original");
+      const apisidCookie = saved.find((c) => c.name === "APISID");
+      expect(apisidCookie?.value).toBe("apisid-original");
+
+      const psidCookie = saved.find((c) => c.name === "__Secure-1PSID");
+      expect(psidCookie?.value).toBe("psid-rotated");
+      const psidtsCookie = saved.find((c) => c.name === "__Secure-1PSIDTS");
+      expect(psidtsCookie?.value).toBe("psidts-rotated");
+    });
+  });
 });

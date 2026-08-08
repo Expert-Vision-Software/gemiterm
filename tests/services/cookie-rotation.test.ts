@@ -386,4 +386,62 @@ describe("rotateCookies", () => {
     expect(serviceSpy).toHaveBeenCalledTimes(1);
     expect(serviceSpy).toHaveBeenCalledWith("p", expect.any(Array));
   });
+
+  describe("Phase 0 v2 — 0f throttle defeated by persistRefreshedCookies", () => {
+    test("persistRefreshedCookies save does not defeat the throttle guard (disk-mtime bypass)", async () => {
+      storage.save("p", makeGoogleCookies());
+      const profilePath = getProfilePath("p");
+      const oldTime = new Date(Date.now() - 700_000);
+      utimesSync(profilePath, oldTime, oldTime);
+
+      storage.save("p", makeGoogleCookies());
+
+      const fetcher = mock(async () => successResponse());
+      const saveSpy = spyOn(storage, "save");
+
+      const result = await rotateCookies("p", {
+        cookieStorage: storage,
+        cookieStorageService,
+        logger,
+        fetcher: fetcher as unknown as typeof fetch,
+        now: () => Date.now(),
+      });
+
+      expect(result).toBe(true);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+    });
+
+    test("rotation should succeed after 600s+1ms cooldown on in-memory POST time", async () => {
+      storage.save("p", makeGoogleCookies());
+      const profilePath = getProfilePath("p");
+      const oldTime = new Date(Date.now() - 700_000);
+      utimesSync(profilePath, oldTime, oldTime);
+
+      const nowBase = Date.now();
+
+      const fetcher = mock(async () => successResponse());
+      const saveSpy = spyOn(storage, "save");
+
+      const result1 = await rotateCookies("p", {
+        cookieStorage: storage,
+        cookieStorageService,
+        logger,
+        fetcher: fetcher as unknown as typeof fetch,
+        now: () => nowBase,
+      });
+      expect(result1).toBe(true);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+
+      const fetcher2 = mock(async () => successResponse());
+      const result2 = await rotateCookies("p", {
+        cookieStorage: storage,
+        cookieStorageService,
+        logger,
+        fetcher: fetcher2 as unknown as typeof fetch,
+        now: () => nowBase + 600_001,
+      });
+      expect(result2).toBe(true);
+    });
+  });
 });
