@@ -461,11 +461,38 @@ to:
 ```typescript
 async (profileName?: string) => getGeminiClient(profileName)
 ```
-Uncommitted as of this writing. Test baseline unchanged (954 pass / 1 skip / 0 fail). Typecheck clean.
+Committed `b5dc3de`. Test baseline unchanged (954 pass / 1 skip / 0 fail). Typecheck clean.
 
-**Verified:** typecheck clean, tests 954/1/0 (existing query-handler test already validates handler passes profile; production wiring was the gap). Live verification pending — needs fresh auth + idle + re-test cycle.
+**Verified:** typecheck clean, tests 954/1/0 (existing query-handler test already validates handler passes profile; production wiring was the gap). Live verification completed 2026-08-08 — two interactive test rounds confirm `list -p evs-diegohb` correctly authenticates and lists the named profile's chats. Consecutive commands show no L2 corruption. Targeted L2 recovery ladder verified (targeted → AuthenticationError → re-auth → chats accessible).
 
 **Related ledger entries:**
 - §Session 3 — "Profile-routing bug noticed during session 3 (not fixed)" described this exact symptom (line 285-287) and filed `profile-aware-factory-wiring` in open changes. This is the fix.
 - §"2026-08-08 — dhb-worker session expired after ~2 hours" — the targeted L2 `requireRotation` fix (`c160726`) was verified fast-failing (~6s, no 30s timeout) on the same test run that exposed this lambda bug.
+
+## 2026-08-08 — minimal wait time to reproduce phantom/dead state: ~1h15m idle
+
+**Question:** Diego, planning the next interactive test round on `phase0-v2/regression-net` after the lambda fix (`b5dc3de`) and `requireRotation` fix (`c160726`). Asked: "any evidence to show it is less than 6h? yes or no, if yes, how long? looking for minimal wait time."
+
+**Answer:** Yes, ≤2h. Tightest floor: **~1h15m idle since last verified working command**.
+
+**Evidence:**
+- `docs/phantom-bug-synthesis.md:380` (this ledger, earlier today) — "dhb-worker profile was set up fresh at 5:50 AM, worked through ~6:42 AM (list returned chats, continue/fetch worked). At 7:57 AM (~2 hours later, **~1h15m idle after last verified working command**), the session was dead/phantom." The "~2h" framing in the handoff counts from profile-creation; the floor from last working command is ~1h15m.
+- Independent confirmation at `:437` (same session): profiles left idle ~6h → `status -v` showed both `PROBE: ✗ dead`. Different elapsed-time metric, same dataset.
+
+**Mechanism (what actually drives the boundary):**
+- **Local freshness gate** (`src/services/cookie-storage-service.ts:6`): `COOKIE_EXPIRY_THRESHOLD_MS = 60 * 60 * 1000` = 1 h. Gates *L1 rotation*, not phantom detection.
+- **Probe cache TTL** (`src/services/profile-auth-manager.ts:36`): `DEFAULT_PROBE_CACHE_TTL_MS = 150_000` = 2.5 min. Cache is per-profile, per-process; expires fast.
+- **Server-side drift** (Google): `__Secure-1PSIDTS` is "hours" locally-future-looking but server-side rotated silently. No client clock predicts it.
+
+**Practical reproduction recipe:** wait ~1h15m after last verified working command, then `bun run dev status -v`. First profile to flip is usually `⚠ phantom` (models ✓, listChats 0) before any flips to `✗ dead`. To trigger the targeted-L2 recovery path (not just PROBE display), the next command after idle must trigger `ensureAuthenticated` — e.g., `gemiterm list`, not `status -v`.
+
+**Faster alternatives (no code change):**
+- `GEMITERM_PROBE_TTL_MS=1000 bun run dev status -v` after idle forces cache to expire every second. Doesn't speed the underlying server-side drift.
+- Manual: delete only `__Secure-1PSIDTS` from `%APPDATA%\gemiterm\profiles\<name>\storage_state.json`. Forces server-side 401 on next API call → skips phantom state, hits dead directly. Tests `AuthenticationError` → re-auth flow but bypasses the phantom→targeted-L2 path that exercises the `requireRotation` fix.
+
+**Verified:** documentation-only entry, no code changes. Test baseline 954/1/0 unchanged. To-be-applied: Diego waiting until 5 PM (idle ~5h from ~12 PM Pacific) before re-running the sleep→fail cycle test.
+
+**Related ledger entries:**
+- §"2026-08-08 — dhb-worker session expired after ~2 hours" — the source data point for the ~1h15m floor.
+- §"2026-08-08 — profile-routing lambda drops profile argument" — the lambda fix being re-verified after the next idle cycle.
 

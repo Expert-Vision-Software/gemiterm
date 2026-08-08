@@ -1,8 +1,11 @@
-## [2.7.0] - 2026-08-05
+## [2.7.0] - 2026-08-08
 
 ### Added
 
 - **`gemiterm status --verbose` (`-v`).** Prints per-profile cookie counts and the next `__Secure-1PSIDTS` expiry countdown, followed by the absolute path to each profile storage directory — useful for diagnosing cookie expiry without opening the `%APPDATA%\gemiterm` directory by hand. New `formatDuration(ms)` helper in `infrastructure/formatters.ts` renders compact age strings ("4d 6h" / "2h 30m" / "expired").
+- **`status` PROBE column.** `bun run dev status` now validates every profile against Google's API on every invocation — `models()` and `listChats({ limit: 1 })` run in parallel. Three-state column: `✓ live (N≥1)`, `⚠ phantom (models N)`, or `✗ dead: <error>`. Catches the phantom-auth state that was hiding behind local freshness checks. Always-on, no flag needed.
+- **Targeted L2 recovery for phantom-auth sessions.** When phantom-auth is detected (models works, listChats empty), `ensureAuthenticated` triggers a headless browser refresh that updates only PSIDTS-related cookies (`__Secure-1PSIDTS`, `__Secure-3PSIDTS`, `SIDCC`) instead of replacing the full jar. Preserves the original login's PSID + companion cookies while picking up a fresh PSIDTS from the browser session. Falls through to full headed re-auth when targeted L2 cannot recover.
+- **Phase 0 v2 regression net.** 10 tests (0a–0j) across 8 files lock every known auth bug contract at the cheapest seam: cookie-monitor full-jar capture (0a), auth round-trip (0b), time-passing clock injection (0c), continue-chat metadata (0d), profile routing (0e), recovery ladder (0f), L2 cookie corruption (0g), context roundtrip (0i), status PROBE (0j). Designed to go RED on the exact commit that introduced each historical regression. Documented at `docs/phase-0/phase-0-v2-design.md`.
 
 ### Fixed
 
@@ -14,13 +17,20 @@
 - **`continue` `fetchChat` corrupted `chatMetadata.ctx`.** `GeminiClientService.fetchChat` was overwriting the per-conversation `chatMetadata` record with `{rid, rcid, ctx: null}` on every read; `sendMessage` then treated the empty ctx as authoritative (using `""` instead of the server-issued string). The record is now read-then-merged so an existing ctx is preserved across rid/rcid updates.
 - **Profile-resolution error hint referenced the retired `--renew` flag.** The "no authenticated profile" path now suggests `gemiterm login` instead of the obsolete `--renew <name>`.
 - **L1 rotation failure hint.** When `rotateCookies` fails on a probe-valid session, `ProfileAuthManager.ensureAuthenticated` now emits a hint pointing to re-auth, with the profile name interpolated correctly.
+- **RotateCookies throttle defeated by unrelated jar writes.** The 600 s guard read the jar file's mtime, which `persistRefreshedCookies` refreshed on every API call. Replaced with an in-memory per-process `lastRotatePostAt` Map keyed off actual POST time. One-shot CLI commands always rotate; long-running processes (daemon/REPL) are guarded.
+- **Dead sessions (RotateCookies 401/403) never reached the re-auth prompt.** `performRotateCookies` classified all non-200 responses identically. 401/403 now sets `sessionInvalid: true`; `ensureAuthenticated` throws `AuthenticationError` → `getGeminiClient` catches and fires the headed re-auth prompt.
+- **L2 browser escalation on L1 decline corrupted cookies.** The full-merge L2 `silentRefresh` replaced the logged-in session's cookie envelope with browser-only cookies from a different session, causing 401 on the next command. L2 escalation on L1 decline is removed entirely — phantom-auth sessions are now recovered via targeted L2 (added above) instead.
+- **`continue conversation` started a new chat instead of threading.** `sendMessage` had a cid-only fallback when `chatMetadata.lookup` returned null; the Gemini server requires all three metadata slots (`rid`/`rcid`/`cid`). Added `seedMetadataFromChat()` that reads the existing conversation to backfill `rid`/`rcid` before sending.
+- **Targeted L2 blocked by `requireRotation` on phantom sessions.** The targeted L2 opened a headless browser that auto-signed-in with the same cookies (phantom = frontend-valid), so the `CookieMonitor`'s `requireRotation` check blocked the callback — PSID/PSIDTS hadn't changed from the snapshot. 30 s timeout expired → `silentRefresh` returned false → re-auth prompt fired. The `requireRotation` guard is now skipped when `mode === "targeted"`.
+- **`list -p <name>` authenticated the default profile instead of the named one.** The `ListChatsQueryHandler` factory lambda was `async () => getGeminiClient()` (zero args). The handler correctly extracted and passed the profile name, but JavaScript silently discarded the extra argument. Fixed the lambda to accept `profileName`.
 
 ### Internal
 
 - `createClientServices` extracted from `src/cli/index.ts` into `src/cli/client-services.ts` to expose a testable seam for the `forProfile` wiring.
-- Test suite: 928 pass / 0 fail / 1945 expects (was 913 / 1909 at 2.6.1). Red-then-green regression tests added for each fix at the cheapest seam.
-- `tests/services/cookie-jar-repro.test.ts`: deterministic repro harness for the 4-cookie degradation symptom at the `GeminiClientService`/SDK seam (a cookie-aware fake returns chats iff the on-disk jar carries the companion cookies `listChats` needs); replaces the ~1 h server-degradation wait with an instant local repro.
-- `printLastMessage` (the "Last response:" pre-fetch in the `continue` interactive REPL) remains dropped for this release. It was briefly restored during 2.6.2 development but produced stale-by-one-turn output when Google's backend failed to persist a `SEND_MESSAGE` to chat history while still streaming the model reply in-band; the upstream SDK behaviour is under investigation for a future release.
+- Test suite: **954 pass / 1 skip / 0 fail / 2030 expects** (was 928 / 1945 at 2.6.1). Red-then-green regression tests added for each fix at the cheapest seam.
+- Phase 0 v2 regression net: 10 tests (0a–0j) across 8 files. Documented at `docs/phase-0/phase-0-v2-design.md`. Bug history ledger at `docs/phantom-bug-synthesis.md`.
+- `tests/services/cookie-jar-repro.test.ts`: deterministic repro harness for the 4-cookie degradation symptom at the `GeminiClientService`/SDK seam.
+- Architecture review v3 at `docs/phase-0/architecture-review-auth-2026-08-08-v3.html` identifies two deepening candidates for post-v2.7.0 work (state machine explicitness, cookie jar unification).
 
 ---
 
