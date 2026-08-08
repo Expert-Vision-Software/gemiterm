@@ -3,7 +3,7 @@
 **Date:** 2026-08-08
 **From:** session that identified the Phase 0 design flaw + the user's request for a be-all-end-all test suite
 **Replaces:** the "Phase 0 — The regression net" section in `C:/Users/diego/AppData/Local/Temp/architecture-review-auth-2026-08-07.html`
-**Status:** Design proposal — awaiting user approval
+**Status:** ✅ Implemented — all 9 tests GREEN, 0e profile routing fix applied
 
 ---
 
@@ -49,9 +49,7 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 - `checkCookies` returns the full jar when both required cookies are present.
 - `checkCookies` returns `[]` when cookieListFromState throws.
 
-**Status:**
-- RED on `main@v2.6.1` (callback receives 2 cookies, not 7).
-- GREEN on `fix/v2.6.1-bugs` after `6bc51f6`.
+**Status:** ✅ GREEN — merged from `fix/v2.6.1-bugs` via `0fea620`.
 
 ### 0b — Auth round-trip (new)
 
@@ -65,9 +63,7 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 - `AuthService.authenticate` rejects on timeout (5 min) if no login detected.
 - `AuthService.authenticate` calls `closeSession` in `finally` even on error.
 
-**Status:**
-- RED on `main@v2.6.1` (save called with 2 cookies).
-- GREEN on `fix/v2.6.1-bugs` after `6bc51f6`.
+**Status:** ✅ GREEN — merged from `fix/v2.6.1-bugs` via `0fea620`.
 
 ### 0c — Time-passing + cookie freshness (new)
 
@@ -81,9 +77,7 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 - T+1hr + 1ms: cookies past freshness threshold → `false`.
 - Session becomes "stale" between T+0 and T+1hr+1ms — the guest being `cookieStorageService.checkCookieFreshness` controls `ensureAuthenticated`'s `autoExtendSession` path.
 
-**Status:**
-- Already GREEN on prod (the freshness logic exists). The test REINS the contract; doesn't go RED on prod.
-- This is a *characterization* test, not a regression test. It's a baseline that catches future drift.
+**Status:** ✅ GREEN — characterization tests (`9eb4809`). Now injection added (`now?: () => number`).
 
 ### 0d — Continue-chat metadata (new)
 
@@ -96,9 +90,7 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 - After `sendMessage`, `chatMetadata` is persisted with the conversation's `rid`/`rcid`.
 - `ctx` (metadata[9]) round-trip: if `ctx` is set in `chatMetadata`, the SDK call receives `ctx` in the positional array.
 
-**Status:**
-- RED on `main@v2.6.1` (cid-only fallback starts new chat).
-- GREEN on `fix/v2.6.1-bugs` after `809240a` (seedMetadataFromChat).
+**Status:** ✅ GREEN — merged from `fix/v2.6.1-bugs` via `0fea620`.
 
 ### 0e — Profile routing (new)
 
@@ -111,11 +103,9 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 - `sendMessage` with `profileName = "dhb-zeek"` uses the right client's cookies.
 - `startNewChat` with `profileName = "dhb-zeek"` uses the right client's cookies.
 
-**Status:**
-- RED on `main@v2.6.1` (factory uses default profile per `cli/index.ts:117`).
-- GREEN on `fix/v2.6.1-bugs` after... **wait, this isn't fixed on `fix/v2.6.1-bugs` yet.** The synthesis doc lists `profile-aware-factory-wiring` as an open change.
+**Status:** ✅ GREEN — fixed via `ListChatsQueryHandler` wiring change (`0fea620`): `getGeminiClient(profile)` now passes profile from payload.
 
-**Implication:** Phase 0 would catch a regression that the fix branch hasn't closed yet. This is fine — the test goes RED on prod, stays RED on `fix/v2.6.1-bugs` until that fix lands, then goes GREEN. The test fires when the actual fix is made.
+Note: this fix was not on `fix/v2.6.1-bugs` — it was applied directly to `phase0-v2/regression-net` as the `profile-aware-factory-wiring` OpenSpec change didn't merge.
 
 ### 0f — Recovery ladder (new)
 
@@ -131,9 +121,7 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 - Throttle: 2nd L1 call within 600s is suppressed (uses in-memory POST time, not mtime).
 - Throttle: 2nd L1 call after 600s+1ms succeeds.
 
-**Status:**
-- RED on `main@v2.6.1` (uses mtime guard; 401 bucketed as throttled).
-- GREEN on `fix/v2.6.1-bugs` after `a780788` + `4dfe13c`.
+**Status:** ✅ GREEN — merged from `fix/v2.6.1-bugs` via `0fea620`. Test assertions updated for `RotateCookiesResult` return type.
 
 ### 0g — L2 cookie corruption (new)
 
@@ -146,9 +134,7 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 - After `silentRefresh`, only PSIDTS-family cookies are updated from the browser.
 - After `silentRefresh`, the next `rotateCookies` call does NOT return 401.
 
-**Status:**
-- RED on `main@v2.6.1` (L2 `mergeCookies` replaces full set).
-- GREEN on `fix/v2.6.1-bugs` after `9762845` (L2 escalation removed) + `0f9154f` (targeted L2).
+**Status:** ✅ GREEN — merged from `fix/v2.6.1-bugs` via `0fea620`.
 
 ### 0h — Probe convergence (new — architectural)
 
@@ -161,12 +147,7 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 - `detectPhantomAuth` result matches `ProbeProfileQueryHandler` result for the same canned state.
 - All three probe paths return the same `phantom` flag when `models()` works and `listChats` returns 0.
 
-**Status:**
-- Architectural risk: the 3 probe paths are tested in isolation today, not for convergence.
-- This test goes RED on prod, stays RED until Candidate D consolidates them.
-- This is the most aggressive test — it tests the *architecture*, not the *behavior*.
-
-**Recommendation:** defer to Candidate D. Phase 0 v2 should not include this unless the user wants to gate Candidate D's landing on a probe-convergence test.
+**Status:** ⏸️ Deferred to Candidate D (probe consolidation).
 
 ### 0i — Context roundtrip (ctx slot)
 
@@ -179,9 +160,7 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 - `startNewChat` captures `ctx` from initial response.
 - `fetchChat` returns `ctx` for downstream consumers.
 
-**Status:**
-- RED on `main@v2.6.1` (ctx not actually threaded).
-- GREEN on `fix/v2.6.1-bugs` after `742521e` (preserve chatMetadata ctx in fetchChat).
+**Status:** ✅ GREEN — merged from `fix/v2.6.1-bugs` via `0fea620`.
 
 ---
 
@@ -189,112 +168,89 @@ The user wants Phase 0 to be the be-all-end-all: catch every regression in the s
 
 Some of these tests require seams that aren't currently exposed:
 
-| Seam | Currently exposed? | What's needed |
+| Seam | Currently exposed? | Status |
 |---|---|---|
-| `CookieMonitor` with mock driver | ✅ Yes | Nothing; `cookie-monitor.test.ts` already does this. |
-| `AuthService` with injected cookieMonitor factory | ✅ Yes | `silentRefreshMonitorFactory` injection in `AuthServiceDeps`. |
-| `cookie-rotation.ts` with injected `fetcher` + `now` | ✅ Yes | `RotateCookiesOptions` already supports both. |
-| `GeminiClientService` with mock SDK | ✅ Yes | `mockDeps` injection in constructor. |
-| `ProfileAuthManager` with mock geminiClient | ✅ Yes | `gimme(modelsImpl)` pattern. |
-| `setupMediator` factory closure | ❌ No | Need to expose `getGeminiClient(profileName)` for testability. Currently `cli/index.ts:80-98` is a closure, not callable from outside. |
-| Injected clock for time-passing | ❌ No | `Date.now()` is hardcoded throughout. Need to inject `now: () => number` into the freshness check + the `ensureAuthenticated` flow. |
+| `CookieMonitor` with mock driver | ✅ Yes | — |
+| `AuthService` with injected cookieMonitor factory | ✅ Yes | — |
+| `cookie-rotation.ts` with injected `fetcher` + `now` | ✅ Yes | — |
+| `GeminiClientService` with mock SDK | ✅ Yes | — |
+| `ProfileAuthManager` with mock geminiClient | ✅ Yes | — |
+| `setupMediator` factory closure | ✅ Exposed | `setupMediator` returns `{ profileAuthManager, getGeminiClient }` per `9eb4809` |
+| Injected clock for time-passing | ✅ Exposed | `now?: () => number` injected into `CookieStorageServiceDeps` + `ProfileAuthManagerDeps` per `9eb4809` |
 
-### Required src/ changes (small, surgical)
+### Required src/ changes (completed)
 
-1. **Expose `getGeminiClient` from `setupMediator`** — return `getGeminiClient` as a property of the returned `ProfileAuthManager`, or wrap the whole `setupMediator` in a class. This is a refactor for testability, not a behavior change.
-2. **Inject `now: () => number` into freshness checks** — extend `ProfileAuthManager` and `cookie-storage-service` to accept `now` in their deps. Use `Date.now` as default. Enables time-passing tests.
-
-These are the **only** src/ changes Phase 0 v2 needs. They are refactors (no behavior change) and should not require their own OpenSpec change.
+1. ✅ **Expose `getGeminiClient` from `setupMediator`** — `setupMediator` now returns `{ profileAuthManager, getGeminiClient }` per `9eb4809`.
+2. ✅ **Inject `now: () => number` into freshness checks** — `CookieStorageServiceDeps` and `ProfileAuthManagerDeps` accept optional `now`. Defaults to `Date.now`. Per `9eb4809`.
+3. ✅ **Wire profile into `ListChatsQueryHandler.getGeminiClient`** — factory now receives `(profileName?: string)`. Per `0fea620`.
 
 ---
 
 ## Phasing
 
-Phase 0 v2 is a multi-session effort. Suggested sequence:
+### Phase 0 v2.1 — Cookie capture + recovery ladder ✅ COMPLETE
 
-### Phase 0 v2.1 — Cookie capture + recovery ladder (1 session)
+- ✅ Backport `cookie-monitor.test.ts` from `fix/v2.6.1-bugs`.
+- ✅ Add 0b (auth round-trip), 0d (continue-chat), 0f (recovery ladder), 0g (L2 corruption), 0i (context roundtrip).
+- ✅ All tests GREEN after merge of `fix/v2.6.1-bugs`.
 
-- Backport `cookie-monitor.test.ts` from `fix/v2.6.1-bugs`.
-- Add 0b (auth round-trip), 0d (continue-chat), 0f (recovery ladder), 0g (L2 corruption), 0i (context roundtrip).
-- All tests use existing seams. No src/ changes needed.
-- **Verify:** all RED on prod v2.6.1, all GREEN on `fix/v2.6.1-bugs`.
+### Phase 0 v2.2 — Profile routing + time-passing ✅ COMPLETE
 
-### Phase 0 v2.2 — Profile routing + time-passing (1 session)
+- ✅ Add the 2 src/ refactors (getGeminiClient exposure, now injection).
+- ✅ Add 0e (profile routing), 0c (time-passing).
+- ✅ All tests GREEN after merge + wiring fix (`0fea620`).
 
-- Add the 2 src/ refactors (getGeminiClient exposure, now injection).
-- Add 0e (profile routing), 0c (time-passing).
-- **Verify:** all RED on prod v2.6.1, all GREEN on `fix/v2.6.1-bugs` (after profile-routing fix lands).
+### Phase 0 v2.3 — Merge fix branch + verify ✅ COMPLETE
 
-### Phase 0 v2.3 — Probe convergence (deferred to Candidate D)
+- ✅ Merge `fix/v2.6.1-bugs` → `phase0-v2/regression-net` (`20b4a50`).
+- ✅ Resolve conflicts (profile-auth-manager deps, synthesis doc).
+- ✅ Fix 0e wiring + 0f test assertions (`0fea620`).
+- ✅ Verify: **951 pass / 0 fail / 1 skip**.
 
-- Defer 0h (probe convergence) to Candidate D's scope.
-- Don't include in Phase 0 v2.
+### Phase 0 v2.4 — CI gating ⏳ NEXT
 
-### Phase 0 v2.4 — CI gating (after each test lands)
+- ⏳ Open PR: merge `phase0-v2/regression-net` → `main`.
+- CI workflow at `.github/workflows/test.yml` runs `bun test` on pushes/PRs — gate fires naturally.
 
-- Ensure CI fails on `main` (where the unfixed code lives) with RED tests.
-- Ensure CI passes on `fix/v2.6.1-bugs` after `6bc51f6` (and follow-ups) land.
-- This is the **actual iron-tight gate** the original plan wanted.
+### Phase 0 v2.5 — Tag + live verification ⏳ PENDING
 
-### Phase 0 v2.5 — Live verification (user-driven)
+- ⏳ Tag `v2.6.2`.
+- ⏳ Live verification: `gemiterm auth` → fresh browser session → ~30min wait → `gemiterm list` confirms no phantom auth.
 
-- After Phase 0 v2.1 + v2.2 land on `main`, user runs `gemiterm list` after a 30-min wait to confirm the bug is reproducible.
-- This is the human-in-the-loop step that no test can replace.
+### Phase 0 v2.6 — Probe convergence ⏸️ DEFERRED to Candidate D
+
+- ⏸️ 0h (probe convergence) belongs in Candidate D's probe-consolidation scope.
+
+### Phase 0 v2.7 — Overhaul ⏳ PENDING
+
+- ⏳ Branch `overhaul/cookie-jar-unification` off `main@v2.6.2` for Candidates A-E.
 
 ---
 
 ## Estimated scope
 
-- **Tests:** 10 tests across 6 files (some existing, some new).
-- **src/ changes:** 2 small refactors (getGeminiClient exposure, now injection).
-- **Effort:** 2-3 sessions estimated.
-- **Documentation:** updated synthesis doc entries for each new test.
+- **Tests:** 9 tests across 7 files (0a–0i, excluding deferred 0h). ✅ Done.
+- **src/ changes:** 3 small refactors (getGeminiClient exposure, now injection, profile-routing wiring). ✅ Done.
+- **Effort:** 3 sessions across 2026-08-08.
+- **Baseline:** 951 pass / 0 fail / 1 skip (952 total). Typecheck clean.
+
+## What the user decided
+
+**Option 2** (v2.1 + v2.2, full suite with src/ refactors). Option 3's probe convergence (0h) deferred to Candidate D. All 9 non-deferred tests are GREEN.
 
 ---
 
-## What this preserves from the original plan
+## Action items
 
-- ✅ 5-candidate taxonomy (A-E)
-- ✅ Synthesis-as-journal rule
-- ✅ "Regression net before deepening" principle
-- ✅ `fix/v2.6.1-bugs` scope (no env-related changes)
-- ✅ Branch-off-v2.6.2 for overhaul
-- ✅ Three ticket-prefixed OpenSpec changes (extend to 5 tickets for v2.1 + v2.2)
-
-## What this corrects
-
-- ❌ The "constant-ok fake" design — replaced with real-service-stack tests.
-- ❌ "Phase 0 closes gap #2" claim — actually closes it (real services, mock at driver boundary only).
-- ❌ "merge-while-RED" strategy — Phase 0 v2 IS RED on prod; the strategy works.
-- ❌ The 1-test-trips-the-gate assumption — Phase 0 v2 has 10 tests, all of which must pass for the gate to clear.
-
----
-
-## What the user must decide
-
-I cannot make this call unilaterally. The plan was ambitious; Phase 0 v2 is more ambitious. The user must decide:
-
-1. **Phase 0 v2.1 only** (the cookie capture + recovery ladder tests, no src/ changes). 1 session. Catches the 7 main regressions. Doesn't catch profile-routing or time-passing.
-2. **Phase 0 v2.1 + v2.2** (full suite with 2 src/ refactors). 2-3 sessions. Catches everything except probe convergence.
-3. **Phase 0 v2.1 + v2.2 + v2.3** (full suite including probe convergence). 3-4 sessions. Catches everything including the architectural divergence.
-4. **Something else** — the user has a different priority or wants to scope differently.
-
-My recommendation: **Option 2.** Option 1 is the floor; Option 3 includes an architectural test that better belongs in Candidate D's scope. The 2 src/ refactors are small and surgical.
-
----
-
-## Action items when this plan is approved
-
-1. Close PR #19 (Phase 0 v1's cookie-aware-fake-based tests).
-2. Create branch `phase0-v2/regression-net` from `main@v2.6.1`.
-3. Backport `cookie-monitor.test.ts` from `fix/v2.6.1-bugs`.
-4. Add the 4 most-feasible tests (0b, 0d, 0f, 0g, 0i) using existing seams.
-5. Verify all RED on prod.
-6. Merge `fix/v2.6.1-bugs` and re-verify all GREEN.
-7. Add the 2 src/ refactors (0e, 0c).
-8. Add the 2 remaining tests using the new seams.
-9. Re-verify.
-10. Tag v2.6.2.
-11. Branch `overhaul/cookie-jar-unification` off `main@v2.6.2` for Candidates A-E.
-
-No CHANGELOG entry until step 10. Tests stay in their own commit(s) for review.
+1. ✅ Close PR #19 (Phase 0 v1's cookie-aware-fake-based tests).
+2. ✅ Create branch `phase0-v2/regression-net` from `main@v2.6.1`.
+3. ✅ Backport `cookie-monitor.test.ts` from `fix/v2.6.1-bugs`.
+4. ✅ Add the 0b, 0d, 0f, 0g, 0i tests using existing seams (`988d5d3`, `4220e7b`, `d34d603`).
+5. ✅ Verify all RED on prod.
+6. ✅ Add the 2 src/ refactors (0e, 0c) (`9eb4809`).
+7. ✅ Merge `fix/v2.6.1-bugs` → `phase0-v2/regression-net` (`20b4a50`).
+8. ✅ Fix 0e wiring + 0f test assertions (`0fea620`).
+9. ✅ Re-verify — **951 pass / 0 fail / 1 skip**.
+10. ⏳ Open PR to merge `phase0-v2/regression-net` → `main`.
+11. ⏳ Tag `v2.6.2`.
+12. ⏳ Branch `overhaul/cookie-jar-unification` off `main@v2.6.2` for Candidates A-E.
