@@ -432,3 +432,40 @@ The design assumption was that the browser would produce *different* cookies (ro
 
 **Related ledger entry:** §"The 4-cookie discovery" — same root cause; this entry documents the Phase 0 v1 design flaw (constant-ok fake contradicting RED-on-prod claim) and the Phase 0 v2 corrective plan.
 
+## 2026-08-08 — profile-routing lambda drops profile argument, re-auth targets wrong profile
+
+**Discovered by:** manual e2e testing on `phase0-v2/regression-net` (session after targeted-L2 `requireRotation` fix `c160726`). Two profiles (`dhb-worker`, `evs-diegohb`) freshly authed, then left idle ~6h. On re-test: `status -v` showed both `PROBE: ✗ dead`. Phantom-detection triggered targeted L2 (failed fast, ~6s — `requireRotation` fix working). Full re-auth happened. But `list` returned "No conversations found." Both profiles had many chats in Gemini web. Also: `list -p evs-diegohb` authenticated `dhb-worker` (the default) in its logs.
+
+**Symptom:**
+- `list` after phantom-triggered re-auth → "No conversations found" despite chats present in Gemini web UI.
+- `list -p evs-diegohb` log shows `rotateCookies: ... for profile 'dhb-worker'` — default profile authenticated instead of requested.
+- Unit tests: same run `list -p evs-diegohb` shows the correct `evs-diegohb` chats in the PROFILE column (chats existed in the stale on-disk jar), confirming the problem was in the *auth/refresh* path, not the *query* path.
+
+**Root cause:** `src/cli/index.ts:121` — the `ListChatsQueryHandler` factory lambda is `async () => getGeminiClient()` (zero arguments). The handler at `query-handlers.ts:108` correctly extracts `profile` from the query payload and passes it: `this.getGeminiClient(profile)`. But JavaScript silently discards extra arguments to a zero-arg function. `getGeminiClient()` receives `undefined` for `profileName` and defaults to `getDefaultProfileName()` at `index.ts:92`.
+
+The full corrupted flow:
+1. Handler extracts `profile = "evs-diegohb"` from payload. Calls `getGeminiClient("evs-diegohb")`.
+2. Lambda drops argument. `getGeminiClient()` resolves to `ensureAuthenticated("dhb-worker")`.
+3. Phantom detected on `dhb-worker`, targeted L2 fails, full re-auth fires. Browser opens, user logs in. Fresh cookies saved to disk for `dhb-worker`.
+4. `getGeminiClient` returns a `GeminiClientService` wired with `dhb-worker`'s fresh cookies.
+5. Back in handler: `client.forProfile("evs-diegohb")` loads `evs-diegohb`'s cookies from **disk** (stale, never refreshed). `listChats` returns 0.
+6. Result: "No conversations found" — the actual profile was never re-authenticated.
+
+The existing test at `tests/core/query-handlers.test.ts:253-263` passes because its mock factory `(_profileName?: string) => ...` accepts the parameter. The test validates the handler's behavior (correct), but the production wiring (`index.ts:121`) drops the argument (broken).
+
+**Fix:** Changed `src/cli/index.ts:121` from:
+```typescript
+async () => getGeminiClient()
+```
+to:
+```typescript
+async (profileName?: string) => getGeminiClient(profileName)
+```
+Uncommitted as of this writing. Test baseline unchanged (954 pass / 1 skip / 0 fail). Typecheck clean.
+
+**Verified:** typecheck clean, tests 954/1/0 (existing query-handler test already validates handler passes profile; production wiring was the gap). Live verification pending — needs fresh auth + idle + re-test cycle.
+
+**Related ledger entries:**
+- §Session 3 — "Profile-routing bug noticed during session 3 (not fixed)" described this exact symptom (line 285-287) and filed `profile-aware-factory-wiring` in open changes. This is the fix.
+- §"2026-08-08 — dhb-worker session expired after ~2 hours" — the targeted L2 `requireRotation` fix (`c160726`) was verified fast-failing (~6s, no 30s timeout) on the same test run that exposed this lambda bug.
+
