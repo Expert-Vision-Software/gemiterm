@@ -19,7 +19,10 @@ function createMockDriver() {
     closeSession: mock(async (_session: string) => {}),
     closeAll: mock(async () => {}),
     stateLoad: mock(async (_session: string, _path: string) => {}),
+    stateSave: mock(async (_session: string, _path: string) => {}),
     evalJs: mock(async (_session: string, _expression: string) => ""),
+    cookieList: mock(async (_session: string) => [] as Cookie[]),
+    cookieListFromState: mock(async (_session: string) => [] as Cookie[]),
   };
 }
 
@@ -886,6 +889,131 @@ describe("AuthService", () => {
       const requireRotationArg = monitorCall?.[3] as { activePsid: string; activePsidts: string | null } | undefined;
       expect(requireRotationArg?.activePsid).toBe("spoofed-psid");
       expect(requireRotationArg?.activePsidts).toBe("spoofed-psidts");
+    });
+  });
+
+  describe("Phase 0 v2 — cookie-jar integrity (integration)", () => {
+    function makeFullJar(): Cookie[] {
+      const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+      return [
+        {
+          name: "__Secure-1PSID",
+          value: "test-psid-value",
+          domain: ".google.com",
+          path: "/",
+          expires: farFuture,
+          httpOnly: true,
+          secure: true,
+          sameSite: "None",
+        },
+        {
+          name: "__Secure-1PSIDTS",
+          value: "test-psidts-value",
+          domain: ".google.com",
+          path: "/",
+          expires: farFuture,
+          httpOnly: true,
+          secure: true,
+          sameSite: "Lax",
+        },
+        {
+          name: "SID",
+          value: "sid-value",
+          domain: ".google.com",
+          path: "/",
+          expires: farFuture,
+          httpOnly: true,
+          secure: false,
+          sameSite: "Lax",
+        },
+        {
+          name: "HSID",
+          value: "hsid-value",
+          domain: ".google.com",
+          path: "/",
+          expires: farFuture,
+          httpOnly: true,
+          secure: false,
+          sameSite: "Lax",
+        },
+        {
+          name: "SSID",
+          value: "ssid-value",
+          domain: ".google.com",
+          path: "/",
+          expires: farFuture,
+          httpOnly: true,
+          secure: false,
+          sameSite: "Lax",
+        },
+        {
+          name: "APISID",
+          value: "apisid-value",
+          domain: ".google.com",
+          path: "/",
+          expires: farFuture,
+          httpOnly: true,
+          secure: false,
+          sameSite: "Lax",
+        },
+        {
+          name: "SAPISID",
+          value: "sapisid-value",
+          domain: ".google.com",
+          path: "/",
+          expires: farFuture,
+          httpOnly: true,
+          secure: true,
+          sameSite: "Lax",
+        },
+      ];
+    }
+
+    function buildServiceWithRealMonitor(
+      driver: ReturnType<typeof createMockDriver>,
+      cookieStorage: ReturnType<typeof createMockCookieStorage>,
+      logger: Logger,
+    ) {
+      const realMonitor = new CookieMonitor({ driver: driver as never, logger });
+      return {
+        monitor: realMonitor,
+        svc: new AuthService({
+          driver: driver as never,
+          cookieMonitor: realMonitor as never,
+          cookieStorage: cookieStorage as never,
+          cookieStorageService: new CookieStorageService({ cookieStorage: cookieStorage as never, logger }) as never,
+          logger,
+          silentRefreshMonitorFactory: () => realMonitor as never,
+        }),
+      };
+    }
+
+    test("authenticate saves the full browser jar (7 cookies), not just REQUIRED_COOKIES (2) — RED on prod v2.6.1", async () => {
+      const fullJar = makeFullJar();
+      driver.evalJs.mockResolvedValue("true");
+      driver.cookieListFromState.mockResolvedValue(fullJar);
+
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+      const { svc } = buildServiceWithRealMonitor(driver, cookieStorage, logger);
+
+      const authPromise = svc.authenticate("test-profile");
+
+      await new Promise((r) => setTimeout(r, 2200));
+
+      expect(cookieStorage.save).toHaveBeenCalled();
+      const savedCookies = cookieStorage.save.mock.calls[0]![1] as Cookie[];
+      expect(savedCookies.length).toBe(fullJar.length);
+      const savedNames = new Set(savedCookies.map((c) => c.name));
+      expect(savedNames.has("SID")).toBe(true);
+      expect(savedNames.has("HSID")).toBe(true);
+      expect(savedNames.has("SSID")).toBe(true);
+      expect(savedNames.has("APISID")).toBe(true);
+      expect(savedNames.has("SAPISID")).toBe(true);
+
+      await authPromise.catch(() => {});
+
+      logSpy.mockRestore();
     });
   });
 });
