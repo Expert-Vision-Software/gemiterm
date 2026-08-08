@@ -42,6 +42,61 @@ const authCookies: Cookie[] = [
   },
 ];
 
+const companionCookies: Cookie[] = [
+  {
+    name: "SID",
+    value: "sid-val",
+    domain: ".google.com",
+    path: "/",
+    expires: -1,
+    httpOnly: false,
+    secure: false,
+    sameSite: "Lax",
+  },
+  {
+    name: "HSID",
+    value: "hsid-val",
+    domain: ".google.com",
+    path: "/",
+    expires: -1,
+    httpOnly: false,
+    secure: false,
+    sameSite: "Lax",
+  },
+  {
+    name: "SSID",
+    value: "ssid-val",
+    domain: ".google.com",
+    path: "/",
+    expires: -1,
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+  },
+  {
+    name: "APISID",
+    value: "apisid-val",
+    domain: ".google.com",
+    path: "/",
+    expires: -1,
+    httpOnly: false,
+    secure: false,
+    sameSite: "Lax",
+  },
+  {
+    name: "SAPISID",
+    value: "sapisid-val",
+    domain: ".google.com",
+    path: "/",
+    expires: -1,
+    httpOnly: false,
+    secure: true,
+    sameSite: "Lax",
+  },
+];
+
+const fullJar: Cookie[] = [...authCookies, ...companionCookies];
+
 describe("CookieMonitor", () => {
   let driver: ReturnType<typeof createMockDriver>;
   let logger: Logger;
@@ -304,6 +359,39 @@ describe("CookieMonitor", () => {
       expect(callback).toHaveBeenCalledTimes(1);
       expect(callback.mock.calls[0]![0]).toEqual(authCookies);
       monitor.stop();
+    });
+  });
+
+  describe("cookie-jar integrity (full jar passed through, not trimmed)", () => {
+    test("start passes the full browser jar to onCookiesFound, not just REQUIRED_COOKIES", async () => {
+      driver.evalJs.mockResolvedValue("true");
+      driver.cookieListFromState.mockResolvedValue(fullJar);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const callback = mock((_cookies: Cookie[]) => {});
+
+      await monitor.start("sess1", callback, 10_000);
+      await new Promise((r) => setTimeout(r, 2100));
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      const passed = callback.mock.calls[0]![0];
+      expect(passed).toHaveLength(fullJar.length);
+      expect(passed.map((c) => c.name)).toContain("SID");
+      expect(passed.map((c) => c.name)).toContain("HSID");
+      expect(passed.map((c) => c.name)).toContain("SSID");
+      monitor.stop();
+    });
+
+    test("checkCookies returns the full browser jar, not just REQUIRED_COOKIES", async () => {
+      driver.cookieListFromState.mockResolvedValueOnce(fullJar);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const result = await monitor.checkCookies("sess1");
+
+      expect(result).toHaveLength(fullJar.length);
+      expect(result.map((c) => c.name)).toContain("SID");
+      expect(result.map((c) => c.name)).toContain("HSID");
+      expect(result.map((c) => c.name)).toContain("SSID");
     });
   });
 });

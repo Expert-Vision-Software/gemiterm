@@ -340,3 +340,35 @@ _Entry template:_
 **Verified:** <test count, live>
 **Related ledger entry:** <cross-ref to earlier section>
 ```
+
+## 2026-08-08 — WSL investigation: bug is in code, not environment
+
+**Discovered by:** user-reported finding that DHBGAMING2 (Windows host + WSL Ubuntu) has gemiterm v2.4.0 prod running fine (54 conversations, 3 active profiles, expires 2027), while the local Windows-native install shows phantom-auth (`list` returns 0 chats). Hypothesis raised that the WSL environment might be the difference.
+
+**Symptom (observation):** v2.4.0 WSL on DHBGAMING2 → `gemiterm list --all-profiles` returns 54 conversations; v2.6.1 / dev-branch on Windows-native → `gemiterm list` returns 0 conversations despite locally-valid cookies and "Profile '<name>' is authenticated" log line.
+
+**Root cause:** **No new root cause** — `cookie-monitor.ts:121` and `:179` (the `REQUIRED_COOKIES` filter before `onCookiesFound`/return) is the same root cause as §The 4-cookie discovery. The WSL environment is incidental, not causal.
+
+Evidence:
+- `git show v2.4.0:src/services/cookie-monitor.ts` shows the **same filter** as HEAD: `const authCookies = cookies.filter((c) => REQUIRED_COOKIES.has(c.name)); ... onCookiesFound(authCookies);` (lines 117 and tail of v2.4.0 file; lines 121 and 179 of HEAD).
+- DHBGAMING2's `storage_state.json` files contain full-jar cookies (~40 per profile). The local Windows-native `storage_state.json` files contain 4-cookie trimmed jars.
+- v2.4.0 captures via `CookieMonitor` would produce 4 cookies. So DHBGAMING2's sessions must have been captured via a **non-CookieMonitor mechanism** (most likely: manual Playwright export, browser-direct copy, or a pre-v2.4.0 capture that survived through the `storage_state.json` lifecycle).
+- CI matrix (`.github/workflows/test.yml:14`) runs `ubuntu-latest` only — Windows-native is not exercised in CI. This is a separate concern but doesn't affect this bug; the bug is platform-agnostic.
+
+**Fix (recommended):** none to `cookie-monitor.ts` (already fixed in `6bc51f6` on `fix/v2.6.1-bugs`).
+
+**Process change:**
+- Close PR #19 (Phase 0 regression net) — the 19 tests are GREEN on every branch because `tests/helpers/full-stack-fixture.ts` exercises the symptom (full jar → `listChats` works) without exercising the cause (`CookieMonitor.poll` filters the jar before persisting). The "RED on prod" gate that Phase 0 was designed to provide cannot fire as designed.
+- The regression net that *does* catch the bug already exists at `tests/services/cookie-monitor.test.ts` (committed `7b2d55f` on `fix/v2.6.1-bugs`); it pins the full-jar contract at the `CookieMonitor.poll` callback payload, which is where the bug actually lives. That test goes RED on `main@v2.6.1` and GREEN after `6bc51f6`.
+- `fix/v2.6.1-bugs` scope: no change. All 11 commits are code improvements targeting the auth/chat flow. None are env-specific.
+
+**User recovery path:**
+1. Merge `fix/v2.6.1-bugs` → `main` (or pull the branch into local working copy).
+2. Tag v2.6.2 once merged.
+3. Run `gemiterm auth` per affected profile to re-capture with the fixed `CookieMonitor`.
+4. Existing 4-cookie jars are not retroactively backfilled; one-time re-auth per profile.
+5. `status` command's PROBE column (`b1d0df0`) shows per-profile state: `✓ live (N≥1)`, `⚠ phantom (models N)`, or `✗ dead: <error>`.
+
+**Verified:** no test count change (investigation-only, no code changes). Full investigation report at `docs/phase-0/investigation-report.md`.
+
+**Related ledger entry:** §The 4-cookie discovery — same root cause; this entry documents the WSL/Windows-native investigation that confirmed the root cause is code, not environment.
