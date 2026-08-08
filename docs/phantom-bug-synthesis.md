@@ -373,6 +373,30 @@ Evidence:
 
 **Related ledger entry:** §The 4-cookie discovery — same root cause; this entry documents the WSL/Windows-native investigation that confirmed the root cause is code, not environment.
 
+## 2026-08-08 — dhb-worker session expired after ~2 hours; targeted L2 failed
+
+**Discovered by:** Diego, manual e2e testing transcript at `.gemiterm/a32169f4ec06a340bb61d60d0062983fb9acd88d-e2e-manual.txt` (branch `phase0-v2/regression-net` at `a32169f`, v2.7.0).
+
+**Symptom:** `dhb-worker` profile was set up fresh at 5:50 AM, worked through ~6:42 AM (list returned chats, continue/fetch worked). At 7:57 AM (~2 hours later, ~1h15m idle after last verified working command), the session was dead/phantom. `status -v` triggered a re-auth prompt which the user cancelled. The `evs-diegohb` profile (set up at 6:42 AM, ~1h15m old) was still valid.
+
+**Root cause (two layers):**
+
+**Layer 1 — targeted L2 has zero direct test coverage.** The `auth-service.ts` `silentRefresh` method with `mode: "targeted"` (lines 309-327) is never called in any test. The two tests at `auth-service.test.ts:1057` and `:1088` call `silentRefresh("test-profile")` without `{ mode: "targeted" }` — they exercise the "full" mode's `mergeCookies` path (lines 330-338), not the targeted branch. The test title at :1088 describes targeted behavior but tests the wrong mode.
+
+**Layer 2 — phantom-auth targeted L2 is blocked by `requireRotation`.** When phantom-auth is detected (`detectPhantomAuth` at `profile-auth-manager.ts:200` returns true), `ensureAuthenticated` calls `silentRefresh(name, { mode: "targeted" })` (:137). The targeted L2 opens a headless browser, loads existing cookies via `stateLoad`, and waits for `silentRefreshMonitorFactory()` (`CookieMonitor`) to capture fresh cookies. But in phantom-auth, the session is *frontend-valid*: the browser auto-signs-in with the SAME cookies (same PSID, same PSIDTS). The `requireRotation` check in `CookieMonitor.poll` (:164-176) blocks the callback because neither PSID nor PSIDTS changed from the snapshot. After the 30 s timeout (`SILENT_REFRESH_TIMEOUT_MS`), `silentRefresh` returns false → `ensureAuthenticated` throws `AuthenticationError` → re-auth prompt fires.
+
+The design assumption was that the browser would produce *different* cookies (rotation detected), but in phantom-auth the session is still frontend-valid, so the browser produces the *same* cookies. The targeted L2 is a no-op for the exact phantom state it was designed to recover.
+
+**Fix (recommended):** Two-part:
+1. Add direct test coverage for `silentRefresh` with `mode: "targeted"` (the `auth-service.test.ts:1088` test should pass `{ mode: "targeted" }`). This exercises lines 309-327 for the first time.
+2. The targeted L2 design needs to be re-evaluated: requiring cookie rotation as the gate-keeper for recovery is fundamentally incompatible with phantom-auth (the frontend-session-is-valid case). Possible approaches:
+   - Bypass `requireRotation` when `mode === "targeted"` and phantom-auth is the trigger — capture any browser cookies, update PSIDTS-related ones if they differ, and if they don't differ, attempt a full silent re-sign-in.
+   - Or: when phantom-auth is detected AND targeted L2 fails, fall back to a headed re-auth prompt (current behavior, but with the expectation set that this is the designed recovery path for stable-phantom sessions).
+
+**Verified:** 951 pass / 0 fail / 1 skip, typecheck clean. Tests are GREEN because the targeted code path is never exercised.
+
+**Related ledger entry:** §Session 3 (targeted-L2 design sketch) — the design was implemented but the `requireRotation` incompatibility was not caught during design review.
+
 ## 2026-08-08 — Phase 0 v1 flaw + Phase 0 v2 design
 
 **Discovered by:** user-requested deeper review after the WSL investigation; user feedback: "production has been broken for the past three releases...I was hoping that phase zero can be the be-all-end-all of the full testing suite that gives me red tests in all the scenarios."
