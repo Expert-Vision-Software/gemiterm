@@ -135,3 +135,19 @@ Before proposing new work, list `openspec/changes/` (excluding `archive/`) to se
 - **plannotator** — `submit_plan` is for action plans the user will execute, not for plans that themselves produce more plans.
 - **bash** — PowerShell 7+ (`pwsh`) on Windows. Use the `workdir` parameter instead of `cd`; don't change directories inside a command.
 - **Delegation** — default to orchestrating subagents; batch parallel investigations; chain sequential work when output feeds the next step.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues at `https://github.com/expert-vision-software/gemiterm/issues`. Use `gh` CLI. OpenSpec change dirs use the `tskNN-` prefix to mirror GitHub issue numbers one-to-one. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout. Read `CONTEXT.md` at the repo root before exploring the codebase, and any ADRs in `docs/adr/` that touch the area. The phantom-auth bug history is in `docs/phantom-bug-synthesis.md` (write-once ledger). See `docs/agents/domain.md`.
