@@ -372,3 +372,38 @@ Evidence:
 **Verified:** no test count change (investigation-only, no code changes). Full investigation report at `docs/phase-0/investigation-report.md`.
 
 **Related ledger entry:** §The 4-cookie discovery — same root cause; this entry documents the WSL/Windows-native investigation that confirmed the root cause is code, not environment.
+
+## 2026-08-08 — Phase 0 v1 flaw + Phase 0 v2 design
+
+**Discovered by:** user-requested deeper review after the WSL investigation; user feedback: "production has been broken for the past three releases...I was hoping that phase zero can be the be-all-end-all of the full testing suite that gives me red tests in all the scenarios."
+
+**Symptom (Phase 0 v1, PR #19):**
+- All 19 tests in PR #19 were GREEN on every branch (dev, prod, fix).
+- The cookie-aware fake in `tests/helpers/full-stack-fixture.ts` is "constant-ok" — it always returns OK regardless of jar state.
+- The fixture seeds cookies directly via `cookieStorage.save(profileName, options.seedCookies)`, bypassing the actual `CookieMonitor.poll` capture path.
+- The bug lives at `cookie-monitor.ts:121` and `:179` (the `REQUIRED_COOKIES` filter), which is un-exported from the fixture's reach.
+- The Phase 0 v1 design's premise ("Phase 0 closes gap #2") was contradicted by its own fixture design.
+
+**Root cause (Phase 0 v1 design flaw, not implementation):** the architecture review HTML (line 176-177) explicitly described the fixture as "constant-ok for Phase 0 (Phase 0 tests the CLIENT, not server-side degradation)" while the test list (line 158) claimed Phase 0 would "catch capture-trim, the 4-cookie bug." A constant-ok fake cannot catch the bug. The plan was tested against `fix/v2.6.1-bugs` HEAD (the fixed code), so the inconsistency wasn't caught during design.
+
+**Fix (Phase 0 v2):** see `docs/phase-0/phase-0-v2-design.md`.
+
+- Closed PR #19 (Phase 0 v1) with documentation comment.
+- Created branch `phase0-v2/regression-net` from `main@v2.6.1`.
+- Cherry-picked docs commit (`71d2f0a` → `f60ae20`) for `CONTEXT.md`, `docs/agents/*`, `docs/phase-0/plan.md`, `docs/phantom-bug-synthesis.md`.
+- 0a — backported `tests/services/cookie-monitor.test.ts` from `fix/v2.6.1-bugs` (committed `7b2d55f`). 2 of 22 tests are RED on prod (the cookie-monitor contract); all 22 GREEN after `6bc51f6`.
+- 0b — added `auth-service.test.ts` integration test using real `CookieMonitor` + mock driver returning full jar (7 cookies). RED on prod (Saved 2 cookies; Expected length 7, Received 2); GREEN after `6bc51f6`.
+- 2 commits on `phase0-v2/regression-net`: `988d5d3` (foundation), `4220e7b` (0b).
+
+**Verified:** typecheck clean. `bun test`: 909 pass / 3 fail / 2 skip. The 3 failing tests are 2 from 0a + 1 from 0b — all pin the cookie-monitor filter bug.
+
+**Pending (deferred to follow-up sessions, documented in phase-0-v2-design.md):**
+- 0d — Continue-chat metadata (catches `809240a`)
+- 0f — Recovery ladder (catches `a780788` + `4dfe13c`)
+- 0g — L2 cookie corruption (catches `9762845` + `0f9154f`)
+- 0i — Context roundtrip (catches `742521e`)
+- v2.2: 0c time-passing, 0e profile routing (requires 2 src/ refactors: `getGeminiClient` exposure + `now()` injection)
+- v2.3: CI gating (the actual iron-tight gate)
+- v2.4: live verification (user-driven, **requires manual browser auth** — the only step in the v2 plan that does)
+
+**Related ledger entry:** §"The 4-cookie discovery" — same root cause; this entry documents the Phase 0 v1 design flaw (constant-ok fake contradicting RED-on-prod claim) and the Phase 0 v2 corrective plan.
