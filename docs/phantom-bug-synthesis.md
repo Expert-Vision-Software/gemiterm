@@ -1,7 +1,8 @@
-# Phantom Authentication — Synthesis & Options
+# Phantom Authentication — Write-Once Bug Ledger
 
-**Date:** 2026-08-06
-**Scope:** retrospective of the 4-day, 3-release sprint (v2.6.0 → v2.6.2), the 4-cookie-jar discovery later the same day, and an evaluation of the background-service idea.
+**Convention:** this is a **write-once ledger** of every attempt to deal with the phantom-auth bug. New entries are appended (never rewritten) when a bug, symptom, or finding is reported AFTER a supposed fix was implemented and failed, or when a new attempt (fix or refactor) is made. Past entries are not edited. See `docs/agents/domain.md` for the convention.
+
+**Original title:** Phantom Authentication — Synthesis & Options (2026-08-06). Scope: retrospective of the 4-day, 3-release sprint (v2.6.0 → v2.6.2), the 4-cookie-jar discovery later the same day, and an evaluation of the background-service idea.
 
 > **STATUS (updated later, 2026-08-06):** The original headline of this doc — *"the phantom-auth bug is already fixed at the architectural level in v2.6.2"* — is **wrong**, and was disproven the same afternoon by the **4-cookie-jar discovery**. v2.6.2's fixes (probe + L1 rotation + L2 escalation) were **necessary but insufficient**: they operate on an *already-trimmed* cookie jar. The real root cause of the persistent `list returned 0 chats` symptom is a cookie-**capture** bug in `CookieMonitor`, which was identified, harnessed, specified, and fixed on 2026-08-06 (commits `efab987` → `6bc51f6`). The historical analysis below is retained for context, but read **§The 4-cookie discovery** first; it supersedes the conclusions in §TL;DR (original) and §Recommendation (original).
 
@@ -321,3 +322,21 @@ The original recommendation ("confirm whether v2.6.2 closed the bug") is moot �
 5. **Then** decide on the background service: if the user wants warm-session automation, ship `gemiterm watch` as a small opt-in follow-up. Defer a real OS daemon to a separate proposal *after* confirming `gemiterm watch` is insufficient.
 
 The background service is not wrong; it was just answering the wrong question. The capture fix answers the right one. With session 3's PROBE column, the user can finally see the question clearly: phantom sessions exist, they're stable, and now they need a recovery mechanism that doesn't break what's working.
+
+---
+
+## Appendix · new entries after 2026-08-06
+
+_New entries are appended here in chronological order when a bug, symptom, or finding is reported AFTER a supposed fix was implemented and failed, or when a new attempt (fix or refactor) is made. The doc preserves the full history of attempts — every fix that worked AND every fix that regressed, in order. Past entries are not edited._
+
+_Entry template:_
+
+```
+## YYYY-MM-DD — <one-line summary>
+**Discovered by:** <who/what>
+**Symptom:** <live repro or test output>
+**Root cause:** <with code:line>
+**Fix (if any):** <commit hash>
+**Verified:** <test count, live>
+**Related ledger entry:** <cross-ref to earlier section>
+```
