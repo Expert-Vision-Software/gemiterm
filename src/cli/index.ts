@@ -35,7 +35,7 @@ import { runReauthFlow } from "./utils/reauth.ts";
 
 const pkg = getPackageJson(import.meta.url);
 
-async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
+async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: ProfileAuthManager; getGeminiClient: (profileName?: string) => Promise<GeminiClientService> }> {
   const logger = new Logger("mediator");
   const cookieStorage = new CookieStorage();
   const profileManager = new ProfileManager(cookieStorage);
@@ -170,7 +170,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
   mediator.registerCommandHandler(new SendMessageCommandHandler(commandClientService));
   mediator.registerCommandHandler(new StartNewChatCommandHandler(commandClientService));
 
-  return profileAuthManager;
+  return { profileAuthManager, getGeminiClient };
 }
 
 async function main(): Promise<void> {
@@ -207,7 +207,7 @@ async function main(): Promise<void> {
   }
 
   const mediator = new Mediator();
-  const profileAuthManager = await setupMediator(mediator);
+  const { profileAuthManager } = await setupMediator(mediator);
 
   const handler = registry.getHandler(subcommand);
   if (!handler) {

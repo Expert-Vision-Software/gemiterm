@@ -249,6 +249,18 @@ describe("ListChatsQueryHandler", () => {
 
     expect(mockProfileManager.hasStoredCookies).not.toHaveBeenCalled();
   });
+
+  test("Phase 0 v2 — 0e profile routing: getGeminiClient factory receives profile name from payload", async () => {
+    const factorySpy = mock((_profileName?: string) =>
+      Promise.resolve(mockClient as unknown as IGeminiClientService),
+    );
+
+    const handler = new ListChatsQueryHandler(factorySpy, mockProfileManager, mockLogger);
+    await handler.handle(makeQuery(QUERY_TYPES.LIST_CHATS, { profile: "dhb-zeek" }));
+
+    expect(factorySpy).toHaveBeenCalledTimes(1);
+    expect(factorySpy.mock.calls[0]?.[0]).toBe("dhb-zeek");
+  });
 });
 
 describe("FetchChatQueryHandler", () => {

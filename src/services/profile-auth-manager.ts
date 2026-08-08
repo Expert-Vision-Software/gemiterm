@@ -1,6 +1,6 @@
 import type { Cookie } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
-import { checkCookieFreshness, type ProfileManager } from "../infrastructure/storage.ts";
+import type { ProfileManager } from "../infrastructure/storage.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import type { LoadedCookies } from "./cookie-storage-service.ts";
 import type { IGeminiClientService } from "../core/command-handlers.ts";
@@ -16,6 +16,7 @@ export interface ProfileAuthManagerDeps {
   logger: Logger;
   geminiClient: IGeminiClientService;
   silentRefresh: SilentRefreshFn;
+  now?: () => number;
 }
 
 type ProbeResult = "valid" | "stale";
@@ -41,6 +42,7 @@ export class ProfileAuthManager {
   private readonly logger: Logger;
   private readonly geminiClient: IGeminiClientService;
   private readonly silentRefresh: SilentRefreshFn;
+  private readonly now: () => number;
   private readonly probeCache: Map<string, ProbeCacheEntry> = new Map();
 
   constructor(deps: ProfileAuthManagerDeps) {
@@ -49,6 +51,7 @@ export class ProfileAuthManager {
     this.logger = deps.logger;
     this.geminiClient = deps.geminiClient;
     this.silentRefresh = deps.silentRefresh;
+    this.now = deps.now ?? Date.now;
   }
 
   async autoExtendSession(profileName: string): Promise<boolean> {
@@ -62,7 +65,7 @@ export class ProfileAuthManager {
       return false;
     }
 
-    if (checkCookieFreshness(cookies)) {
+    if (this.cookieStorageService.checkCookieFreshness(cookies)) {
       return true;
     }
 
@@ -124,7 +127,7 @@ export class ProfileAuthManager {
   }
 
   private async probeServerSession(name: string, opts: { skipCache?: boolean } = {}): Promise<ProbeResult> {
-    const now = Date.now();
+    const now = this.now();
     if (!opts.skipCache) {
       const cached = this.probeCache.get(name);
       if (cached && now - cached.ts < getProbeCacheTtlMs()) {

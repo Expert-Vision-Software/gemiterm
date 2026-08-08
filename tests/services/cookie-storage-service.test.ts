@@ -256,3 +256,65 @@ describe("CookieStorageService persistence seams", () => {
     expect(storage.load).toHaveBeenCalledWith("default");
   });
 });
+
+describe("Phase 0 v2 — 0c time-passing characterization", () => {
+  const BASE_TIME = 1750000000000;
+  const ONE_HR_MS = 60 * 60 * 1000;
+
+  function makeCookiesWithExpiry(expiryUnix: number): Cookie[] {
+    return [
+      {
+        name: "__Secure-1PSID",
+        value: "psid-val",
+        domain: ".google.com",
+        path: "/",
+        expires: expiryUnix,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__Secure-1PSIDTS",
+        value: "psidts-val",
+        domain: ".google.com",
+        path: "/",
+        expires: expiryUnix,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ];
+  }
+
+  test("T+0: cookies expiring in 90 minutes are fresh", () => {
+    const expiry = Math.floor((BASE_TIME + 90 * 60 * 1000) / 1000);
+    const service = new CookieStorageService({
+      cookieStorage: createMockCookieStorage(),
+      logger: new Logger("test"),
+      now: () => BASE_TIME,
+    });
+    expect(service.checkCookieFreshness(makeCookiesWithExpiry(expiry))).toBe(true);
+  });
+
+  test("T+30min: cookies with 60 min remaining are fresh (equal to threshold)", () => {
+    const expiry = Math.floor((BASE_TIME + 90 * 60 * 1000) / 1000);
+    const t30min = BASE_TIME + 30 * 60 * 1000;
+    const service = new CookieStorageService({
+      cookieStorage: createMockCookieStorage(),
+      logger: new Logger("test"),
+      now: () => t30min,
+    });
+    expect(service.checkCookieFreshness(makeCookiesWithExpiry(expiry))).toBe(true);
+  });
+
+  test("T+61min: cookies with 29 min remaining are stale (past 1hr threshold)", () => {
+    const expiry = Math.floor((BASE_TIME + 90 * 60 * 1000) / 1000);
+    const t61min = BASE_TIME + 61 * 60 * 1000;
+    const service = new CookieStorageService({
+      cookieStorage: createMockCookieStorage(),
+      logger: new Logger("test"),
+      now: () => t61min,
+    });
+    expect(service.checkCookieFreshness(makeCookiesWithExpiry(expiry))).toBe(false);
+  });
+});

@@ -19,15 +19,18 @@ export interface LoadedCookies {
 export interface CookieStorageServiceDeps {
   cookieStorage: CookieStorage;
   logger: Logger;
+  now?: () => number;
 }
 
 export class CookieStorageService {
   private readonly cookieStorage: CookieStorage;
   private readonly logger: Logger;
+  private readonly now: () => number;
 
   constructor(deps: CookieStorageServiceDeps) {
     this.cookieStorage = deps.cookieStorage;
     this.logger = deps.logger;
+    this.now = deps.now ?? Date.now;
   }
 
   loadCookiesForProfile(profileName: string): LoadedCookies {
@@ -63,7 +66,7 @@ export class CookieStorageService {
   checkCookieFreshness(cookies: Cookie[]): boolean {
     for (const cookie of cookies) {
       if (cookie.name === "__Secure-1PSIDTS" && cookie.expires > 0) {
-        const threshold = Date.now() + COOKIE_EXPIRY_THRESHOLD_MS;
+        const threshold = this.now() + COOKIE_EXPIRY_THRESHOLD_MS;
         if (cookie.expires * 1000 < threshold) return false;
       }
     }
