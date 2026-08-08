@@ -294,7 +294,8 @@ export class AuthService {
         return false;
       }
 
-      const cookies = await this.waitForSilentLogin(name, timeoutMs, snapshot ?? undefined);
+      const requireRotation = mode === "targeted" ? undefined : (snapshot ?? undefined);
+      const cookies = await this.waitForSilentLogin(name, timeoutMs, requireRotation);
       if (!cookies) {
         return false;
       }
