@@ -486,7 +486,8 @@ describe("rotateCookies", () => {
         now: () => Date.now(),
       });
 
-      expect(result).toBe(true);
+      expect(result.rotated).toBe(true);
+      expect(result.attempted).toBe(true);
       expect(fetcher).toHaveBeenCalledTimes(1);
       expect(saveSpy).toHaveBeenCalledTimes(1);
     });
@@ -509,7 +510,8 @@ describe("rotateCookies", () => {
         fetcher: fetcher as unknown as typeof fetch,
         now: () => nowBase,
       });
-      expect(result1).toBe(true);
+      expect(result1.rotated).toBe(true);
+      expect(result1.attempted).toBe(true);
       expect(fetcher).toHaveBeenCalledTimes(1);
 
       const fetcher2 = mock(async () => successResponse());
@@ -520,7 +522,8 @@ describe("rotateCookies", () => {
         fetcher: fetcher2 as unknown as typeof fetch,
         now: () => nowBase + 600_001,
       });
-      expect(result2).toBe(true);
+      expect(result2.attempted).toBe(true);
+      expect(fetcher2).toHaveBeenCalledTimes(1);
     });
   });
 });
