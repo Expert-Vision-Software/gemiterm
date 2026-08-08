@@ -407,3 +407,4 @@ Evidence:
 - v2.4: live verification (user-driven, **requires manual browser auth** — the only step in the v2 plan that does)
 
 **Related ledger entry:** §"The 4-cookie discovery" — same root cause; this entry documents the Phase 0 v1 design flaw (constant-ok fake contradicting RED-on-prod claim) and the Phase 0 v2 corrective plan.
+

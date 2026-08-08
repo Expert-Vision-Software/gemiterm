@@ -203,7 +203,7 @@ export class GeminiClientService
     return new GeminiAPIError("Unexpected error: " + String(e));
   }
 
-  forProfile(profileName: string): GeminiClientService {
+  async forProfile(profileName: string): Promise<GeminiClientService> {
     if (!this.cookieStorageService) {
       throw new Error("CookieStorageService is required for forProfile");
     }
@@ -219,8 +219,8 @@ export class GeminiClientService
   }
 
   async profileHasConversation(profileName: string, conversationId: string): Promise<boolean> {
-    const profileClient = this.forProfile(profileName);
-    const chats = await profileClient.listChats({ limit: 1 });
+    const profileClient = await this.forProfile(profileName);
+    const chats = await profileClient.listChats();
     return chats.some((chat) => chat.id === conversationId);
   }
 
@@ -268,10 +268,11 @@ export class GeminiClientService
       if (turns.length > 0) {
         const lastModelTurn = [...turns].reverse().find((t) => t.role === "model");
         if (lastModelTurn?.rid && this.profileName) {
+          const existing = this.chatMetadata.lookup(this.profileName, conversationId);
           this.chatMetadata.save(this.profileName, conversationId, {
             rid: lastModelTurn.rid,
             rcid: lastModelTurn.rcid ?? "",
-            ctx: null,
+            ctx: existing?.ctx ?? null,
           });
         }
       }
@@ -307,6 +308,26 @@ export class GeminiClientService
     return session;
   }
 
+  private async seedMetadataFromChat(conversationId: string): Promise<boolean> {
+    try {
+      const raw = (await this.client!.readChat(conversationId)) as RawChatTurn[] | null;
+      const turns = raw ?? [];
+      const lastModelTurn = [...turns].reverse().find((t) => t.role === "model");
+      if (lastModelTurn?.rid && this.profileName) {
+        const existing = this.chatMetadata.lookup(this.profileName, conversationId);
+        this.chatMetadata.save(this.profileName, conversationId, {
+          rid: lastModelTurn.rid,
+          rcid: lastModelTurn.rcid ?? "",
+          ctx: existing?.ctx ?? null,
+        });
+        return true;
+      }
+    } catch {
+      this.logger.debug(`seedMetadataFromChat: readChat failed for cid='${conversationId}' on profile='${this.profileName}'`);
+    }
+    return false;
+  }
+
   async sendMessage(conversationId: string, message: string): Promise<string> {
     await this.init();
     try {
@@ -319,10 +340,23 @@ export class GeminiClientService
             stored.ctx ?? "",
           ]);
         } else {
-          this.logger.debug(
-            `sendMessage: no prior metadata for cid='${conversationId}' on profile='${this.profileName}'; falling back to cid-only send.`,
-          );
-          session = this.buildSession(conversationId);
+          const seeded = await this.seedMetadataFromChat(conversationId);
+          if (seeded) {
+            const stored = this.chatMetadata.lookup(this.profileName, conversationId);
+            if (stored) {
+              session = this.buildSession(conversationId, [
+                conversationId, stored.rid, stored.rcid, null, null, null, null, null, null,
+                stored.ctx ?? "",
+              ]);
+            } else {
+              session = this.buildSession(conversationId);
+            }
+          } else {
+            this.logger.debug(
+              `sendMessage: no prior metadata for cid='${conversationId}' on profile='${this.profileName}'; falling back to cid-only send.`,
+            );
+            session = this.buildSession(conversationId);
+          }
         }
       } else {
         session = this.buildSession(conversationId);

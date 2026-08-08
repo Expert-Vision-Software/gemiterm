@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { CookieStorage, ProfileManager } from "../../src/infrastructure/storage.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
-import { rotateCookies, _resetInFlightRotationsForTests } from "../../src/services/cookie-rotation.ts";
+import { rotateCookies, _resetRotationStateForTests } from "../../src/services/cookie-rotation.ts";
 import { getProfilePath } from "../../src/infrastructure/path-utils.ts";
 import type { Cookie } from "../../src/core/types.ts";
 
@@ -78,7 +78,7 @@ describe("rotateCookies", () => {
     rmSync(TEST_DIR, { recursive: true, force: true });
     delete process.env.GEMITERM_CONFIG_DIR;
     delete process.env.GEMITERM_SKIP_ROTATE_COOKIES;
-    _resetInFlightRotationsForTests();
+    _resetRotationStateForTests();
     mock.restore();
   });
 
@@ -102,7 +102,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ rotated: true, attempted: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).toHaveBeenCalledTimes(1);
     const saved = saveSpy.mock.calls[0]?.[1] as Cookie[];
@@ -110,7 +110,7 @@ describe("rotateCookies", () => {
     expect(savedTs?.value).toBe("NEW-ts");
   });
 
-  test("401 response returns false and does not save", async () => {
+  test("401 response marks session invalid and does not save", async () => {
     prepareProfile(makeGoogleCookies());
 
     const fetcher = mock(async () => new Response("unauthorized", { status: 401 }));
@@ -123,9 +123,42 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false, sessionInvalid: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  test("403 response marks session invalid and does not save", async () => {
+    prepareProfile(makeGoogleCookies());
+
+    const fetcher = mock(async () => new Response("forbidden", { status: 403 }));
+    const saveSpy = spyOn(storage, "save");
+
+    const result = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(result).toEqual({ rotated: false, attempted: false, sessionInvalid: true });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  test("500 response is transient: no sessionInvalid flag", async () => {
+    prepareProfile(makeGoogleCookies());
+
+    const fetcher = mock(async () => new Response("server error", { status: 500 }));
+
+    const result = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+    });
+
+    expect(result).toEqual({ rotated: false, attempted: false });
   });
 
   test("same PSIDTS in response returns false and does not save", async () => {
@@ -144,7 +177,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -164,7 +197,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -183,20 +216,23 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).not.toHaveBeenCalled();
     expect(saveSpy).not.toHaveBeenCalled();
   });
 
-  test("disk-mtime guard fires when storage_state.json mtime is within 600s", async () => {
+  test("throttle ignores jar file mtime: a fresh jar write does not suppress rotation", async () => {
     storage.save("p", makeGoogleCookies());
 
+    // Fresh mtime — under the OLD disk-mtime guard this would throttle. The in-memory
+    // throttle keys off the last RotateCookies POST, so this must still POST. This pins
+    // the fix for the persistRefreshedCookies feedback loop (SDK self-rotation saved the
+    // jar, refreshed the mtime, and wrongly suppressed the next explicit rotation).
     const profilePath = getProfilePath("p");
     const nowDate = new Date();
     utimesSync(profilePath, nowDate, nowDate);
 
     const fetcher = mock(async () => successResponse());
-    const saveSpy = spyOn(storage, "save");
 
     const result = await rotateCookies("p", {
       cookieStorage: storage,
@@ -206,9 +242,52 @@ describe("rotateCookies", () => {
       now: () => nowDate.getTime(),
     });
 
-    expect(result).toBe(false);
-    expect(fetcher).not.toHaveBeenCalled();
-    expect(saveSpy).not.toHaveBeenCalled();
+    expect(result).toEqual({ rotated: true, attempted: true });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  test("in-memory throttle: holds 600s after a POST regardless of file mtime, then releases", async () => {
+    prepareProfile(makeGoogleCookies());
+
+    const fetcher = mock(async () => successResponse());
+    const base = Date.now();
+    const past = new Date(base - 700_000);
+
+    await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+      now: () => base,
+    });
+
+    // Age the file old to prove the throttle is NOT mtime-based.
+    utimesSync(getProfilePath("p"), past, past);
+
+    const r2 = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+      now: () => base + 1_000,
+    });
+    expect(r2).toEqual({ rotated: false, attempted: false });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    // Reset stored PSIDTS to baseline and re-age the file so the releasing POST is a
+    // detectable change and current (mtime-based) code would still attempt it.
+    storage.save("p", makeGoogleCookies());
+    utimesSync(getProfilePath("p"), past, past);
+
+    const r3 = await rotateCookies("p", {
+      cookieStorage: storage,
+      cookieStorageService,
+      logger,
+      fetcher: fetcher as unknown as typeof fetch,
+      now: () => base + 600_000 + 1,
+    });
+    expect(r3).toEqual({ rotated: true, attempted: true });
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   test("in-process throttle: two concurrent calls trigger only one HTTP request", async () => {
@@ -232,8 +311,8 @@ describe("rotateCookies", () => {
       }),
     ]);
 
-    expect(r1).toBe(true);
-    expect(r2).toBe(true);
+    expect(r1).toEqual({ rotated: true, attempted: true });
+    expect(r2).toEqual({ rotated: true, attempted: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(saveSpy).toHaveBeenCalledTimes(1);
   });
@@ -251,7 +330,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).not.toHaveBeenCalled();
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -286,7 +365,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ rotated: true, attempted: true });
     const saved = saveSpy.mock.calls[0]?.[1] as Cookie[];
     expect(saved.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("NEW");
     expect(saved.find((c) => c.name === "__Secure-3PSIDTS")?.value).toBe("NEW3P");
@@ -322,7 +401,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ rotated: true, attempted: true });
     const saved = saveSpy.mock.calls[0]?.[1] as Cookie[];
     expect(saved.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("NEW");
     expect(saved.find((c) => c.name === "SIDCC")?.value).toBe("NEWSIDCC");
@@ -364,7 +443,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ rotated: false, attempted: false });
     expect(fetcher).not.toHaveBeenCalled();
     expect(saveSpy).not.toHaveBeenCalled();
   });
@@ -382,7 +461,7 @@ describe("rotateCookies", () => {
       fetcher: fetcher as unknown as typeof fetch,
     });
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ rotated: true, attempted: true });
     expect(serviceSpy).toHaveBeenCalledTimes(1);
     expect(serviceSpy).toHaveBeenCalledWith("p", expect.any(Array));
   });

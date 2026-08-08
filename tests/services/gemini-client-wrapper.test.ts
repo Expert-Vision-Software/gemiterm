@@ -361,7 +361,7 @@ describe("GeminiClientService", () => {
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
-      const profileService = service.forProfile("work");
+      const profileService = await service.forProfile("work");
 
       const chats = await profileService.listChats();
 
@@ -457,6 +457,47 @@ describe("GeminiClientService", () => {
 
       const saved = chatMetadata.lookup("testprofile", "conv-abc");
       expect(saved).toEqual({ rid: "r_model1", rcid: "rc_model1", ctx: null });
+    });
+
+    test("preserves existing ctx when updating rid/rcid", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        testprofile: { secure_1psid: "sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const chatMetadata = new ChatMetadataStorage(logger);
+      chatMetadata.save("testprofile", "conv-abc", { rid: "old-rid", rcid: "old-rcid", ctx: "preserved-ctx-value" });
+
+      const d: GeminiClientDeps = {
+        Gemini: function() {
+          return {
+            cookies: { "__Secure-1PSID": "sid" },
+            init: async () => {},
+            chats: async () => [],
+            readChat: async (_cid: string) => [
+              createMockChatTurn("user", "Hello", "r_user1"),
+              createMockChatTurn("model", "Hi there!", "new-rid", "new-rcid"),
+            ],
+            newChat: () => createMockSession(),
+            deleteChat: async () => {},
+            models: async () => [],
+          };
+        },
+        AuthError: MockAuthError,
+        GeminiError: MockGeminiError,
+        UsageLimitExceeded: MockUsageLimitExceeded,
+        TemporarilyBlocked: MockTemporarilyBlocked,
+        ModelInvalid: MockModelInvalid,
+        APIError: MockAPIError,
+      };
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "sid" }, logger, css, "testprofile", d, chatMetadata);
+
+      await service.fetchChat("conv-abc");
+
+      const saved = chatMetadata.lookup("testprofile", "conv-abc");
+      expect(saved).toEqual({ rid: "new-rid", rcid: "new-rcid", ctx: "preserved-ctx-value" });
     });
 
     test("does not save metadata when readChat returns empty array", async () => {
@@ -632,8 +673,8 @@ describe("GeminiClientService", () => {
       expect(setterCalledWith).toEqual(["existing-conv-xyz", "rid-xyz", "rcid-xyz", null, null, null, null, null, null, ""]);
     });
 
-    test.skip("sendMessage falls back to cid-only when no prior metadata exists", async () => {
-      let capturedNewChatMetadata: (string | null)[] | null = null;
+    test("sendMessage seeds metadata from existing chat when no prior metadata exists", async () => {
+      let setterCalledWith: (string | null)[] | null = null;
       let _meta: (string | null)[] = ["", "", "", null, null, null, null, null, null, ""];
 
       const mockSession: RawChatSession = {
@@ -643,6 +684,7 @@ describe("GeminiClientService", () => {
         set metadata(v: (string | null)[]) {
           if (!Array.isArray(v)) return;
           _meta = [...v];
+          setterCalledWith = [...v];
         },
         generateContent: async function(_opts: { prompt: string }) {
           return { text: { toString: () => "model response" }, metadata: [..._meta] };
@@ -653,14 +695,11 @@ describe("GeminiClientService", () => {
         cookies: { "__Secure-1PSID": "sid" },
         init: async () => {},
         chats: async () => [],
-        readChat: async () => null,
-        newChat: (opts?: { metadata?: (string | null)[] }) => {
-          if (opts?.metadata) {
-            capturedNewChatMetadata = [...opts.metadata];
-            _meta = [...opts.metadata];
-          }
-          return mockSession;
-        },
+        readChat: async () => [
+          { role: "user", text: "hello", rid: "", rcid: "" },
+          { role: "model", text: "hi there", rid: "rid-from-server", rcid: "rcid-from-server" },
+        ] as RawChatTurn[],
+        newChat: () => mockSession,
         deleteChat: async () => {},
         models: async () => [],
       };
@@ -687,7 +726,9 @@ describe("GeminiClientService", () => {
 
       await service.sendMessage("existing-conv-xyz", "hello");
 
-      expect(capturedNewChatMetadata).toEqual(["existing-conv-xyz", "", "", null, null, null, null, null, null, ""]);
+      expect(setterCalledWith).toEqual([
+        "existing-conv-xyz", "rid-from-server", "rcid-from-server", null, null, null, null, null, null, "",
+      ]);
     });
 
     test("sendMessage captures new rid/rcid into storage after a successful turn", async () => {
@@ -1141,7 +1182,7 @@ describe("GeminiClientService", () => {
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
 
-      const profileService = service.forProfile("work");
+      const profileService = await service.forProfile("work");
       await profileService.listChats();
 
       expect(receivedSid).toBe("work-sid");
@@ -1206,7 +1247,7 @@ describe("GeminiClientService", () => {
       await expect(service.profileHasConversation("work", "abc-123")).rejects.toThrow("Session expired or invalid");
     });
 
-    test("passes limit:1 to listChats for targeted lookup", async () => {
+    test("scans the full chat list for membership (no truncating limit)", async () => {
       const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
         work: { secure_1psid: "work-sid", secure_1psidts: null },
       };
@@ -1230,7 +1271,7 @@ describe("GeminiClientService", () => {
       await service.profileHasConversation("work", "abc-123");
 
       GeminiClientService.prototype.listChats = originalListChats;
-      expect(capturedOptions?.limit).toBe(1);
+      expect(capturedOptions?.limit).toBeUndefined();
     });
 
     test("does not mutate the calling instance's cookie config", async () => {
@@ -1252,6 +1293,28 @@ describe("GeminiClientService", () => {
 
       const authAfter = service.isAuthenticated();
       expect(authBefore).toBe(authAfter);
+    });
+
+    test("returns true for a non-newest conversation when profile has multiple chats (limit:1 bug)", async () => {
+      const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+        work: { secure_1psid: "work-sid", secure_1psidts: null },
+      };
+      const storage = createMockCookieStorage(profileCookies);
+      const css = new CookieStorageService({ cookieStorage: storage, logger });
+
+      const d = installGeminiReverseMock({
+        chats: [
+          createMockChatRow({ cid: "newest", title: "Newest", timestamp: 2000000000 }),
+          createMockChatRow({ cid: "older-target", title: "Older Target", timestamp: 1000000000 }),
+        ],
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
+
+      const result = await service.profileHasConversation("work", "older-target");
+
+      expect(result).toBe(true);
     });
   });
 
@@ -1373,7 +1436,7 @@ describe("persistRefreshedCookies", () => {
 
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
     const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
-    const profileService = service.forProfile("work");
+    const profileService = await service.forProfile("work");
 
     await profileService.listChats();
 
@@ -1409,7 +1472,7 @@ describe("persistRefreshedCookies", () => {
     const d = installGeminiReverseMock({ chats: [createMockChatRow()] });
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
     const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
-    const profileService = service.forProfile("work");
+    const profileService = await service.forProfile("work");
 
     await profileService.listChats();
 
@@ -1457,7 +1520,7 @@ describe("persistRefreshedCookies", () => {
 
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
     const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
-    const profileService = service.forProfile("work");
+    const profileService = await service.forProfile("work");
 
     const chats = await profileService.listChats();
 

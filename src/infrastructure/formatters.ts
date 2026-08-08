@@ -24,6 +24,18 @@ function formatTimestamp(ts: number): string {
   });
 }
 
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms)) return "unknown";
+  if (ms <= 0) return "expired";
+  const totalMinutes = Math.floor(ms / (60 * 1000));
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
 export function formatChatAsMarkdown(
   messages: Message[],
   title: string,
@@ -59,8 +71,12 @@ export function formatChatAsJson(messages: Message[], conversationId: string): s
   return JSON.stringify({ conversationId, messages }, null, 2);
 }
 
-export function formatProfileTable(statuses: ProfileStatus[]): string {
-  const columns: ColumnDef<ProfileStatus>[] = [
+export interface ProfileStatusWithProbe extends ProfileStatus {
+  probe?: { result: "live" | "phantom" | "dead"; chatsCount: number; modelsCount: number; error?: string };
+}
+
+export function formatProfileTable(statuses: ProfileStatusWithProbe[]): string {
+  const columns: ColumnDef<ProfileStatusWithProbe>[] = [
     {
       header: "NAME",
       width: 18,
@@ -75,6 +91,17 @@ export function formatProfileTable(statuses: ProfileStatus[]): string {
           : s.exists
             ? chalk.red("\u2717 No")
             : chalk.dim("\u2014"),
+    },
+    {
+      header: "PROBE",
+      width: 18,
+      cell: (s) => {
+        if (!s.probe) return chalk.dim("\u2014");
+        if (s.probe.result === "live") return chalk.green(`\u2713 live (${s.probe.chatsCount}\u22651)`);
+        if (s.probe.result === "phantom") return chalk.yellow(`\u26A0 phantom (models ${s.probe.modelsCount})`);
+        const err = s.probe.error ? `: ${s.probe.error.slice(0, 24)}` : "";
+        return chalk.red(`\u2717 dead${err}`);
+      },
     },
     {
       header: "EXPIRES",
@@ -97,7 +124,7 @@ export function formatProfileTable(statuses: ProfileStatus[]): string {
     },
   ];
 
-  return renderTable<ProfileStatus>({
+  return renderTable<ProfileStatusWithProbe>({
     columns,
     rows: statuses,
     emptyMessage: "No profiles found. Run 'gemiterm login' to create one.",

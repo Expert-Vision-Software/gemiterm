@@ -9,6 +9,7 @@ import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
+import { _resetRotationStateForTests } from "../../src/services/cookie-rotation.ts";
 import * as io from "../../src/infrastructure/io.ts";
 import * as elevation from "../../src/infrastructure/elevation.ts";
 
@@ -598,7 +599,7 @@ describe("AuthService", () => {
       const existsSpy = spyOn(io, "existsFile").mockReturnValue(true);
       const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
 
-      const result = await svc.silentRefresh("test-profile", 50);
+      const result = await svc.silentRefresh("test-profile", { timeoutMs: 50 });
 
       expect(result).toBe(false);
       expect(cookieMonitor.start).toHaveBeenCalledTimes(1);
@@ -698,6 +699,7 @@ describe("AuthService", () => {
       delete process.env.GEMITERM_SKIP_ROTATE_COOKIES;
       spyOn(io, "existsFile").mockReturnValue(true);
       spyOn(io, "getFileMtime").mockReturnValue(null);
+      _resetRotationStateForTests();
     });
 
     afterEach(() => {
@@ -707,6 +709,7 @@ describe("AuthService", () => {
       } else {
         process.env.GEMITERM_SKIP_ROTATE_COOKIES = originalSkipRotateCookies;
       }
+      _resetRotationStateForTests();
     });
 
     test("L1 succeeds without launching a browser when PSIDTS rotates", async () => {
@@ -880,7 +883,7 @@ describe("AuthService", () => {
       cookieMonitor.start.mockImplementationOnce(async () => {});
 
       const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
-      const result = await svc.silentRefresh("test-profile", 50);
+      const result = await svc.silentRefresh("test-profile", { timeoutMs: 50 });
 
       expect(result).toBe(false);
       expect(driver.openHeadless).toHaveBeenCalledTimes(1);

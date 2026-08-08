@@ -52,11 +52,11 @@ The `AuthService.confirmAuthSuccess(cookieCount, expiresAt, cookies)` method MUS
 - **THEN** the combined output contains `__Secure-1PSID` and the `❌` marker
 
 ### Requirement: CookieMonitor polls every 2 seconds using a sign-out-link JS probe
-The `CookieMonitor.start(session, onCookiesFound, timeoutMs?)` method MUST begin polling the browser session identified by `session` for the presence of the auth cookies. The poll cadence MUST be a 2-second interval (`POLL_INTERVAL_MS = 2000`). On each tick the monitor MUST run a JavaScript probe that detects a logged-in state by checking for the presence of `a[href^="https://accounts.google.com/SignOutOptions"]`; the probe expression MUST be exactly `document.querySelector('a[href^="https://accounts.google.com/SignOutOptions"]') !== null`. Only when the probe returns `true` (matched as a trimmed string `"true"`) MUST the monitor then read the cookie list and require BOTH `__Secure-1PSID` and `__Secure-1PSIDTS` to be present before invoking the `onCookiesFound` callback. The monitor MUST also accept a `timeoutMs` parameter (default 300000 ms / 5 minutes) and MUST apply `.unref()` to the timeout handle so it does not block CLI process exit.
+The `CookieMonitor.start(session, onCookiesFound, timeoutMs?)` method MUST begin polling the browser session identified by `session` for the presence of the auth cookies. The poll cadence MUST be a 2-second interval (`POLL_INTERVAL_MS = 2000`). On each tick the monitor MUST run a JavaScript probe that detects a logged-in state by checking for the presence of `a[href^="https://accounts.google.com/SignOutOptions"]`; the probe expression MUST be exactly `document.querySelector('a[href^="https://accounts.google.com/SignOutOptions"]') !== null`. Only when the probe returns `true` (matched as a trimmed string `"true"`) MUST the monitor then read the cookie list and require BOTH `__Secure-1PSID` and `__Secure-1PSIDTS` to be present — this is the login GATE. Once the gate is satisfied, the monitor MUST invoke `onCookiesFound` with the FULL cookie list returned by `driver.cookieListFromState(session)`, not a subset filtered to the required names; the full auth cookie set the browser holds (e.g. `SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `__Secure-3PSID`, etc.) MUST be passed through so the downstream persistence path stores the complete jar. The monitor MUST also accept a `timeoutMs` parameter (default 300000 ms / 5 minutes) and MUST apply `.unref()` to the timeout handle so it does not block CLI process exit.
 
 #### Scenario: Monitor fires callback on first tick where probe and cookies are both ready
 - **WHEN** `start("sess1", cb, 10000)` is called and every 2-second tick returns `true` from the probe and returns both required cookies from `cookieList`
-- **THEN** `cb` is invoked exactly once with the auth cookies, `isRunning` is `false`, and the interval has been cleared
+- **THEN** `cb` is invoked exactly once with the FULL cookie list that `driver.cookieListFromState` returned for that tick (which MUST include both `__Secure-1PSID` and `__Secure-1PSIDTS` plus any other cookies the browser holds), `isRunning` is `false`, and the interval has been cleared
 
 #### Scenario: Monitor does not call driver immediately on start
 - **WHEN** `start("sess1", cb, 10000)` is called
@@ -74,8 +74,12 @@ The `CookieMonitor.start(session, onCookiesFound, timeoutMs?)` method MUST begin
 - **WHEN** `start("sess1", cb, 10000)` is called
 - **THEN** the `setTimeout` handle used for the hard timeout has `unref()` called on it (the monitor must not keep the event loop alive past the timeout)
 
+#### Scenario: Monitor does not fire when required cookies are absent even if companions are present
+- **WHEN** `start("sess1", cb, 10000)` is called and a tick returns `true` from the probe and a cookie list that contains companion cookies (`SID`, `HSID`, …) but is missing at least one of `__Secure-1PSID` / `__Secure-1PSIDTS`
+- **THEN** `cb` is NOT invoked on that tick (the login gate is the presence of both required cookies, regardless of companions)
+
 ### Requirement: CookieMonitor exposes checkLoggedIn and checkCookies helpers
-The `CookieMonitor.checkLoggedIn(session)` method MUST return `true` when the sign-out-link probe evaluates to the string `"true"` (with surrounding whitespace allowed) and MUST return `false` for any other return value, including probe errors. The `CookieMonitor.checkCookies(session)` method MUST call `driver.cookieList(session)`, filter the result to entries whose `name` is `__Secure-1PSID` or `__Secure-1PSIDTS`, and return the filtered list when both required cookies are present; otherwise it MUST return an empty array. Both helpers MUST swallow driver errors and return `false` / `[]` respectively.
+The `CookieMonitor.checkLoggedIn(session)` method MUST return `true` when the sign-out-link probe evaluates to the string `"true"` (with surrounding whitespace allowed) and MUST return `false` for any other return value, including probe errors. The `CookieMonitor.checkCookies(session)` method MUST call `driver.cookieListFromState(session)`, and MUST use the presence of BOTH `__Secure-1PSID` and `__Secure-1PSIDTS` as a gate: when both are present in the returned list, the method MUST return the FULL list (all cookies the browser holds, not a subset filtered to the required names); when either required cookie is absent, the method MUST return an empty array. Both helpers MUST swallow driver errors and return `false` / `[]` respectively.
 
 #### Scenario: checkLoggedIn returns true on probe success
 - **WHEN** `driver.evalJs` returns the string `"true"`
@@ -90,11 +94,11 @@ The `CookieMonitor.checkLoggedIn(session)` method MUST return `true` when the si
 - **THEN** `checkLoggedIn("sess1")` resolves with `false` (does not throw)
 
 #### Scenario: checkCookies returns required cookies when both present
-- **WHEN** `driver.cookieList` returns an array containing both `__Secure-1PSID` and `__Secure-1PSIDTS`
-- **THEN** `checkCookies("sess1")` resolves with a length-2 array containing both required cookie names
+- **WHEN** `driver.cookieListFromState` returns an array containing both `__Secure-1PSID` and `__Secure-1PSIDTS` alongside companion cookies (e.g. `SID`, `HSID`, `SSID`)
+- **THEN** `checkCookies("sess1")` resolves with the FULL list (same length and entries as the browser state), which includes both required cookie names and the companions — not a length-2 filtered subset
 
 #### Scenario: checkCookies returns empty when only one required cookie present
-- **WHEN** `driver.cookieList` returns only `__Secure-1PSID`
+- **WHEN** `driver.cookieListFromState` returns only `__Secure-1PSID` (even if companion cookies are also present)
 - **THEN** `checkCookies("sess1")` resolves with `[]`
 
 ### Requirement: CookieMonitor.stop is idempotent and clears the interval
@@ -621,4 +625,24 @@ The method MUST log a brief `"Session auto-refreshed for profile '<name>'"` mess
 #### Scenario: ensureAuthenticated skips auto-extend when cookies are valid
 - **WHEN** `ensureAuthenticated("default")` is called and `hasValidCookies` returns `true`
 - **THEN** `autoExtendSession` is NOT called and the method returns `LoadedCookies` directly
+
+### Requirement: CLI client-service forProfile lazily initializes the profile client
+
+The `forProfile(name)` methods on the CLI's `clientService` (`IGeminiClientQueryService`) and `commandClientService` (`IGeminiClientService`), built by `createClientServices` in `src/cli/client-services.ts`, MUST be async and MUST obtain the profile client via the `getGeminiClient(name)` factory rather than reading a cached singleton. They MUST return a `Promise` that resolves to the profile-scoped client. They MUST NOT throw an authentication error solely because no prior call has populated a cached client — the first `forProfile(name)` call in a process MUST succeed (subject to the normal `ensureAuthenticated` / reauth flow inside `getGeminiClient`). The `forProfile` members of `IGeminiClientService` and `IGeminiClientQueryService`, and the concrete `GeminiClientService.forProfile` in `src/services/gemini-client-wrapper.ts`, MUST return `Promise<Self>`.
+
+#### Scenario: forProfile succeeds as the first operation in a process
+- **WHEN** `await clientService.forProfile("work")` is called and no prior data call has cached a client in this process
+- **THEN** the method resolves to a profile-scoped client for `"work"` (it does NOT throw "Not authenticated. Please run 'gemiterm login' first.")
+
+#### Scenario: forProfile routes through getGeminiClient
+- **WHEN** `await clientService.forProfile("work")` is called
+- **THEN** `getGeminiClient` is invoked with `"work"`, so `ensureAuthenticated("work")` and the reauth prompt path apply to the profile-scoped operation
+
+#### Scenario: commandClientService forProfile succeeds on first call
+- **WHEN** `await commandClientService.forProfile("work")` is called as the first data operation in a process
+- **THEN** the method resolves to a profile-scoped client and does NOT throw
+
+#### Scenario: forProfile is awaitable on the typed interfaces
+- **WHEN** a handler typed against `IGeminiClientQueryService` or `IGeminiClientService` calls `forProfile(name)`
+- **THEN** the call returns a `Promise` that must be awaited (the interface signature is `forProfile(name: string): Promise<Self>`)
 

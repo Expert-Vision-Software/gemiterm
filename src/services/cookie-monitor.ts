@@ -118,7 +118,7 @@ export class CookieMonitor {
 
       if (authCookies.length === REQUIRED_COOKIES.size) {
         this.logger.info(`Found all required auth cookies: ${authCookies.map((c) => c.name).join(", ")}`);
-        return authCookies;
+        return cookies;
       }
 
       this.logger.debug(
@@ -176,6 +176,6 @@ export class CookieMonitor {
     }
 
     this.stop();
-    onCookiesFound(authCookies);
+    onCookiesFound(cookies);
   }
 }

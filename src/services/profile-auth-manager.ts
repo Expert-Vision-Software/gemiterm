@@ -7,8 +7,14 @@ import type { IGeminiClientService } from "../core/command-handlers.ts";
 import { AuthenticationError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
+import type { RotateCookiesResult } from "./cookie-rotation.ts";
+import type { SilentRefreshOptions } from "./auth-service.ts";
 
-export type SilentRefreshFn = (profileName: string) => Promise<boolean>;
+export type SilentRefreshFn = (
+  profileName: string,
+  opts?: SilentRefreshOptions,
+) => Promise<boolean>;
+export type RotateCookiesFn = (profileName: string) => Promise<RotateCookiesResult>;
 
 export interface ProfileAuthManagerDeps {
   profileManager: ProfileManager;
@@ -17,6 +23,7 @@ export interface ProfileAuthManagerDeps {
   geminiClient: IGeminiClientService;
   silentRefresh: SilentRefreshFn;
   now?: () => number;
+  rotateCookies: RotateCookiesFn;
 }
 
 type ProbeResult = "valid" | "stale";
@@ -43,7 +50,9 @@ export class ProfileAuthManager {
   private readonly geminiClient: IGeminiClientService;
   private readonly silentRefresh: SilentRefreshFn;
   private readonly now: () => number;
+  private readonly rotateCookies: RotateCookiesFn;
   private readonly probeCache: Map<string, ProbeCacheEntry> = new Map();
+
 
   constructor(deps: ProfileAuthManagerDeps) {
     this.profileManager = deps.profileManager;
@@ -52,6 +61,7 @@ export class ProfileAuthManager {
     this.geminiClient = deps.geminiClient;
     this.silentRefresh = deps.silentRefresh;
     this.now = deps.now ?? Date.now;
+    this.rotateCookies = deps.rotateCookies;
   }
 
   async autoExtendSession(profileName: string): Promise<boolean> {
@@ -101,6 +111,44 @@ export class ProfileAuthManager {
       );
     }
 
+    let rotation: RotateCookiesResult = { rotated: false, attempted: false };
+    try {
+      rotation = await this.rotateCookies(name);
+    } catch (e) {
+      this.logger.debug(`ensureAuthenticated: best-effort rotation failed for profile '${name}': ${e}`);
+    }
+
+    if (rotation.sessionInvalid) {
+      // RotateCookies returned 401/403: the server rejected the session outright.
+      // models() (PSID-only) can still succeed in this state, so the stale-probe path
+      // never fires — but the session is dead for PSIDTS-requiring RPCs (listChats).
+      // Only a headed reauth recovers this; throw so the CLI's reauth prompt fires.
+      throw new AuthenticationError(
+        `Session for profile '${name}' is no longer valid (server rejected RotateCookies). Run 'gemiterm login' to re-authenticate.`,
+      );
+    }
+
+    if (rotation.rotated) {
+      // Fresh __Secure-1PSIDTS obtained; session is fully usable.
+    } else if (rotation.attempted) {
+      const isPhantom = await this.detectPhantomAuth(name);
+      if (isPhantom) {
+        this.logger.debug(`Phantom-auth detected for profile '${name}'; attempting targeted L2 silent refresh`);
+        const refreshed = await this.silentRefresh(name, { mode: "targeted" });
+        if (!refreshed) {
+          throw new AuthenticationError(
+            `Session for profile '${name}' is in phantom-auth state; targeted refresh failed. Run 'gemiterm login' to re-authenticate.`,
+          );
+        }
+      } else {
+        this.logger.debug(`ensureAuthenticated: L1 RotateCookies declined for profile '${name}'; session is valid.`);
+      }
+    } else {
+      // L1 was throttled (600 s disk-mtime guard), disabled, or unavailable before any
+      // network attempt. Cookies are likely still fresh; no escalation warranted.
+      this.logger.debug(`ensureAuthenticated: best-effort rotation skipped for profile '${name}'.`);
+    }
+
     this.logger.info(`Profile '${name}' is authenticated`);
     return this.cookieStorageService.loadCookiesForProfile(name);
   }
@@ -136,7 +184,8 @@ export class ProfileAuthManager {
     }
 
     try {
-      await this.geminiClient.forProfile(name).models();
+      const probed = await this.geminiClient.forProfile(name);
+      await probed.models();
     } catch (err) {
       this.logger.warn(`Server-side session for profile '${name}' appears stale; forcing refresh`);
       this.logger.debug(`probeServerSession: models failed for profile '${name}': ${err}`);
@@ -146,5 +195,16 @@ export class ProfileAuthManager {
 
     this.probeCache.set(name, { ts: now, result: "valid" });
     return "valid";
+  }
+
+  private async detectPhantomAuth(name: string): Promise<boolean> {
+    try {
+      const client = await this.geminiClient.forProfile(name);
+      const chats = await client.listChats({ limit: 1 });
+      return chats.length === 0;
+    } catch (err) {
+      this.logger.debug(`detectPhantomAuth: listChats failed for profile '${name}': ${err}`);
+      return false;
+    }
   }
 }

@@ -11,7 +11,7 @@ export async function resolveProfile(
   if (explicitProfile) {
     if (!activeProfiles.includes(explicitProfile)) {
       throw new AuthenticationError(
-        `Profile '${explicitProfile}' has no valid session. Run 'gemiterm auth --renew ${explicitProfile}' to refresh it.`,
+        `Profile '${explicitProfile}' has no valid session. Run 'gemiterm login' to authenticate.`,
       );
     }
     return explicitProfile;

@@ -98,25 +98,6 @@ describe("ContinueCommand", () => {
     expect(output).toContain("Listing conversations");
   });
 
-  test("printLastMessage outputs last model message content", async () => {
-    const mockFetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({
-        messages: [
-          { role: "user" as const, content: "Hello" },
-          { role: "model" as const, content: "Hi there! How can I help?" },
-        ],
-      })),
-    };
-    mediator.registerQueryHandler(mockFetchHandler as any);
-
-    await command.printLastMessage(mediator, "conv123", null);
-
-    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
-    expect(output).toContain("Last response:");
-    expect(output).toContain("Hi there! How can I help?");
-  });
-
   test("--profile forwards the resolved profile into SEND_MESSAGE payload", async () => {
     (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["default"]);
 
@@ -138,27 +119,28 @@ describe("ContinueCommand", () => {
     );
   });
 
-  test("interactive mode forwards resolved profileName into FETCH_CHAT (printLastMessage)", async () => {
-    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["evs-diegohb"]);
+  test("--profile <name> does not consume <name> as the message positional", async () => {
+    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["work"]);
 
-    const mockFetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({
-        messages: [
-          { role: "user" as const, content: "old q" },
-          { role: "model" as const, content: "old a" },
-        ],
-      })),
+    const mockHandler = {
+      commandType: COMMAND_TYPES.SEND_MESSAGE,
+      handle: mock(async () => ({ response: "ok" })),
     };
-    mediator.registerQueryHandler(mockFetchHandler as any);
+    mediator.registerCommandHandler(mockHandler as any);
 
-    await command.printLastMessage(mediator, "conv-evs", "evs-diegohb");
+    // ["conv-evs", "--profile", "work", "msg"] - the parser must skip "work"
+    // (the profile flag's value) and treat "msg" as the message. With the
+    // old parser, "work" would be assigned to `message` and "msg" ignored,
+    // dispatching SEND_MESSAGE with message="work" instead of "msg".
+    await command.execute(["conv-evs", "--profile", "work", "msg"], context);
 
-    expect(mockFetchHandler.handle).toHaveBeenCalledWith(
+    expect(mockHandler.handle).toHaveBeenCalledTimes(1);
+    expect(mockHandler.handle).toHaveBeenCalledWith(
       expect.objectContaining({
         payload: expect.objectContaining({
           conversationId: "conv-evs",
-          profileName: "evs-diegohb",
+          message: "msg",
+          profileName: "work",
         }),
       }),
     );

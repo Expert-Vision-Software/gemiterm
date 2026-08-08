@@ -10,12 +10,18 @@ import { validateProfileName } from "../infrastructure/validators.ts";
 import { getProfilePath } from "../infrastructure/path-utils.ts";
 import { existsFile } from "../infrastructure/io.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
-import { rotateCookies, isGoogleDomainCookie } from "./cookie-rotation.ts";
+import { rotateCookies, isGoogleDomainCookie, COOKIE_NAMES_OF_INTEREST, type RotateCookiesResult } from "./cookie-rotation.ts";
 import { CookieStorageService } from "./cookie-storage-service.ts";
 
 const GEMINI_AUTH_URL = "https://gemini.google.com/app";
 const DEFAULT_AUTH_TIMEOUT_MS = 300_000;
 const SILENT_REFRESH_TIMEOUT_MS = 30_000;
+
+export type SilentRefreshMode = "full" | "targeted";
+export interface SilentRefreshOptions {
+  mode?: SilentRefreshMode;
+  timeoutMs?: number;
+}
 
 export function mergeCookies(existing: Cookie[], polled: Cookie[]): Cookie[] {
   const key = (c: Cookie) => `${c.name}|${c.domain}|${c.path}`;
@@ -207,7 +213,29 @@ export class AuthService {
     }
   }
 
-  async silentRefresh(profileName: string, timeoutMs: number = SILENT_REFRESH_TIMEOUT_MS): Promise<boolean> {
+  async rotateCookies(profileName: string): Promise<RotateCookiesResult> {
+    const name = profileName ?? getDefaultProfileName();
+    try {
+      validateProfileName(name);
+    } catch {
+      return { rotated: false, attempted: false };
+    }
+    try {
+      return await rotateCookies(name, {
+        cookieStorage: this.cookieStorage,
+        cookieStorageService: this.cookieStorageService,
+        logger: this.logger,
+      });
+    } catch (err) {
+      this.logger.debug(`rotateCookies failed for profile '${name}': ${err}`);
+      return { rotated: false, attempted: false };
+    }
+  }
+
+  async silentRefresh(
+    profileName: string,
+    opts: SilentRefreshOptions = {},
+  ): Promise<boolean> {
     const name = profileName ?? getDefaultProfileName();
     try {
       validateProfileName(name);
@@ -215,19 +243,23 @@ export class AuthService {
       return false;
     }
 
-    this.logger.debug(`Silent refresh attempt for profile: ${name}`);
+    const mode = opts.mode ?? "full";
+    const timeoutMs = opts.timeoutMs ?? SILENT_REFRESH_TIMEOUT_MS;
+    this.logger.debug(`Silent refresh attempt (mode=${mode}) for profile: ${name}`);
 
-    try {
-      const rotated = await rotateCookies(name, {
-        cookieStorage: this.cookieStorage,
-        cookieStorageService: this.cookieStorageService,
-        logger: this.logger,
-      });
-      if (rotated) {
-        return true;
+    if (mode === "full") {
+      try {
+        const l1 = await rotateCookies(name, {
+          cookieStorage: this.cookieStorage,
+          cookieStorageService: this.cookieStorageService,
+          logger: this.logger,
+        });
+        if (l1.rotated) {
+          return true;
+        }
+      } catch (err) {
+        this.logger.debug(`silentRefresh: L1 rotateCookies failed: ${err}`);
       }
-    } catch (err) {
-      this.logger.debug(`silentRefresh: L1 rotateCookies failed: ${err}`);
     }
 
     let snapshot: { activePsid: string; activePsidts: string | null } | null = null;
@@ -270,15 +302,37 @@ export class AuthService {
         this.logger.debug(`silentRefresh: no cookie baseline for profile '${name}'; cannot verify rotation`);
         return false;
       }
-      const polledPsid = cookies.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value;
       const polledPsidts = cookies.find((c) => c.name === "__Secure-1PSIDTS" && isGoogleDomainCookie(c))?.value ?? null;
-      const psidChanged = polledPsid !== undefined && polledPsid !== snapshot.activePsid;
       const psidtsChanged = polledPsidts !== snapshot.activePsidts;
+      const existing = this.cookieStorageService.loadAllCookiesForProfile(name);
+
+      if (mode === "targeted") {
+        let updated = false;
+        const next = existing.map((c) => {
+          if (!COOKIE_NAMES_OF_INTEREST.has(c.name)) return c;
+          const browser = cookies.find((bc) =>
+            bc.name === c.name && bc.domain === c.domain && bc.path === c.path,
+          );
+          if (browser && browser.value !== c.value) {
+            updated = true;
+            return { ...c, value: browser.value };
+          }
+          return c;
+        });
+        if (!updated && !psidtsChanged) {
+          this.logger.debug(`silentRefresh (targeted): no PSIDTS-related cookie changed vs baseline`);
+          return false;
+        }
+        this.cookieStorageService.saveCookiesForProfile(name, next);
+        return true;
+      }
+
+      const polledPsid = cookies.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value;
+      const psidChanged = polledPsid !== undefined && polledPsid !== snapshot.activePsid;
       if (!psidChanged && !psidtsChanged) {
         this.logger.debug(`silentRefresh: cookies unchanged vs baseline, treating as no rotation`);
         return false;
       }
-      const existing = this.cookieStorageService.loadAllCookiesForProfile(name);
       const merged = mergeCookies(existing, cookies);
       this.cookieStorageService.saveCookiesForProfile(name, merged);
       return true;

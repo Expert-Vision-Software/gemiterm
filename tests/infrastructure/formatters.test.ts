@@ -4,6 +4,7 @@ import {
   formatChatAsJson,
   formatProfileTable,
   formatChatList,
+  formatDuration,
 } from "../../src/infrastructure/formatters.ts";
 import type { Message, ChatInfo, ProfileStatus } from "../../src/core/types.ts";
 
@@ -184,6 +185,28 @@ describe("formatProfileTable", () => {
     const result = formatProfileTable(statuses);
     expect(result).toContain("LAST USED");
     expect(result).not.toContain("N/A");
+  });
+});
+
+describe("formatDuration", () => {
+  test("renders days and hours for multi-day durations", () => {
+    const fourDaysSixHours = 4 * 24 * 3600 * 1000 + 6 * 3600 * 1000;
+    expect(formatDuration(fourDaysSixHours)).toBe("4d 6h");
+  });
+
+  test("renders hours and minutes for sub-day durations", () => {
+    const twoHoursThirty = 2 * 3600 * 1000 + 30 * 60 * 1000;
+    expect(formatDuration(twoHoursThirty)).toBe("2h 30m");
+  });
+
+  test("renders minutes-only for sub-hour durations", () => {
+    const fifteenMinutes = 15 * 60 * 1000;
+    expect(formatDuration(fifteenMinutes)).toBe("15m");
+  });
+
+  test("returns 'expired' for non-positive inputs", () => {
+    expect(formatDuration(0)).toBe("expired");
+    expect(formatDuration(-1000)).toBe("expired");
   });
 });
 
