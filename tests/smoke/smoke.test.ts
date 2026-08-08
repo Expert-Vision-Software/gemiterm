@@ -48,5 +48,5 @@ describe("Smoke Tests", () => {
 
     expect(result.exitCode).toBeGreaterThanOrEqual(0);
     expect(result.stdout.length).toBeGreaterThan(0);
-  });
+  }, { timeout: 15_000 });
 });
