@@ -10,10 +10,13 @@
 - [ ] 2.3 `src/services/auth-service.ts`: replace inline `"__Secure-1PSID"` / `"__Secure-1PSIDTS"` literals with imports. Replace the anonymous `{ activePsid; activePsidts }` snapshot type with `CookieBaseline`. Replace the snapshot extraction and post-monitor comparison with `cookiesRotatedFrom`.
 - [ ] 2.4 `src/services/cookie-rotation.ts`: replace inline `"__Secure-1PSIDTS"` literals with import.
 - [ ] 2.5 `src/services/gemini-client-wrapper.ts`: replace inline `"__Secure-1PSID"` / `"__Secure-1PSIDTS"` literals in `persistRefreshedCookies` with imports.
-- [ ] 2.6 `src/services/profile-auth-manager.ts`: no inline cookie-name literals to replace (verify; the probe uses `listChats` not cookie names directly). Skip if none found.
-- [ ] 2.7 Run `bun run typecheck` and confirm clean.
-- [ ] 2.8 Run `bun test` and confirm 899 pass, 0 fail, 2 skip, 901 total.
-- [ ] 2.9 Commit changes in git.
+- [ ] 2.6 `src/services/cookie-jar.ts`: no inline cookie-name literals — verify and skip.
+- [ ] 2.7 `src/services/session-state.ts`: no inline cookie-name literals — verify and skip.
+- [ ] 2.8 `src/services/conversation-threading.ts`: no inline cookie-name literals — verify and skip.
+- [ ] 2.9 `src/services/profile-auth-manager.ts`: no inline cookie-name literals to replace (verify; the probe uses `listChats` not cookie names directly). Skip if none found.
+- [ ] 2.10 Run `bun run typecheck` and confirm clean.
+- [ ] 2.11 Run `bun test` and confirm 990 pass, 0 fail, 1 skip, 991 total.
+- [ ] 2.12 Commit changes in git.
 
 ## 3. Lift the `gimme` test helper
 
@@ -28,13 +31,13 @@
 - [ ] 4.1 In `tests/services/profile-auth-manager.test.ts`, replace `existsSync(markerPath)` assertions with `readProfileHasChats("default")` from `src/infrastructure/io.ts`. Replace `writeFileSync(join(markerDir, "profile-has-chats"), "")` setup with `writeProfileHasChats("default")`.
 - [ ] 4.2 Remove the now-unused `existsSync`, `writeFileSync` imports from `node:fs` in `profile-auth-manager.test.ts` if no other call sites remain.
 - [ ] 4.3 Run `bun test tests/services/profile-auth-manager.test.ts` and confirm all pass.
-- [ ] 4.4 Run `bun test` (full suite) and confirm 899 pass, 0 fail, 2 skip, 901 total.
+- [ ] 4.4 Run `bun test` (full suite) and confirm 990 pass, 0 fail, 1 skip, 991 total.
 - [ ] 4.5 Commit changes in git.
 
 ## 5. Final verification
 
 - [ ] 5.1 Run `bun run typecheck` and confirm clean.
-- [ ] 5.2 Run `bun test` and confirm 899 pass, 0 fail, 2 skip, 901 total — no regressions.
+- [ ] 5.2 Run `bun test` and confirm 990 pass, 0 fail, 1 skip, 991 total — no regressions.
 - [ ] 5.3 Verify no `"__Secure-1PSID"` or `"__Secure-1PSIDTS"` string literals remain in `src/services/` (use `grep -r` / `rg`). All should reference the constants from `cookie-constants.ts`.
 - [ ] 5.4 Verify `writeProfileHasChats` / `readProfileHasChats` / `getProfileHasChatsPath` each have at least 2 call sites across `src/` + `tests/`.
 - [ ] 5.5 Load and run skill `code-review` and confirm the five original findings are resolved.
@@ -42,8 +45,8 @@
 ## 6. Code review follow-ups (non-urgent)
 
 - [ ] 6.1 Fix spec typo in `openspec/specs/silent-refresh-tightening/spec.md`: POST body `[000,"-0000000000000000000"]` should be `[0,"-0000000000000000000"]` (000 is invalid JSON; the code correctly uses `[0,...]`).
-- [ ] 6.2 In `src/services/cookie-rotation.ts`, replace `CookieStorage.save(profileName, next)` direct call with `CookieStorageService.saveCookiesForProfile(profileName, next)` to match the spec contract. Verify no bookkeeping is lost.
-- [ ] 6.3 Evaluate the post-refresh re-probe in `profile-auth-manager.ts:80-82` (`this.probeCache.delete(name); await this.probeServerSession(name)`) — decide whether to keep (adds correctness: re-validates after rotation) or remove (spec doesn't require it). Document decision.
+- [ ] 6.2 `src/services/cookie-rotation.ts` now uses `cookieJar.upsert` (from `overhaul/auth-architecture`). The old `CookieStorage.save` direct call is in the `!cookieJar` fallback path. Verify no bookkeeping is lost.
+- [ ] 6.3 The post-refresh re-probe is now in `tryRestoreStaleProbe` (extracted from `ensureAuthenticated` in `overhaul/auth-architecture`). The dormancy behavior is locked by `DO NOT THROW` regression tests. No further evaluation needed.
 - [ ] 6.4 Add test for `GEMITERM_PROBE_TTL_MS` env var override (set to `"60000"` and assert TTL is 60_000 ms).
 - [ ] 6.5 Add test for `GEMITERM_SKIP_ROTATE_COOKIES=0` and `=false` (should NOT skip).
 - [ ] 6.6 Add disk-mtime guard boundary test (mtime exactly 600s ago should NOT skip).

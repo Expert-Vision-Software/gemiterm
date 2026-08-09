@@ -2,7 +2,7 @@
 
 The `phantom-auth-ultimate-fix` code review (two-axis Standards + Spec)
 surfaced one hard standards violation and four baseline code smells. None
-are blockers — the fix shipped and all 901 tests pass — but they create
+are blockers — the fix shipped and all 991 tests pass — but they create
 maintenance risk: duplicated comparison logic that must move in lockstep,
 typo-prone cookie-name string literals scattered across five files, a
 test helper re-declared verbatim in two files, and single-call-site
@@ -88,4 +88,4 @@ change.)
 - **Multi-profile** — unaffected; the refactoring is profile-agnostic.
 - **TTY** — unaffected.
 - **Conformance** — `gemiterm list` non-interactive output is unchanged.
-  The full test suite (901 tests) must remain green at every commit.
+  The full test suite (991 tests) must remain green at every commit.

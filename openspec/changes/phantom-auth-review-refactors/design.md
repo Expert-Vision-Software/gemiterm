@@ -151,7 +151,7 @@ imports it too.
   helper's JSDoc.
 - **[Risk] Test-count regression.** The refactoring must not change any
   test count. **Mitigation:** Every commit runs `bun test` and confirms
-  899 pass / 2 skip / 901 total.
+  990 pass / 1 skip / 991 total.
 
 ## Migration Plan
 
