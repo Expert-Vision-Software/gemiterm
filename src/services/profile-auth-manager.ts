@@ -116,7 +116,7 @@ export class ProfileAuthManager {
     const probe = await this.probeServerSession(name);
     if (probe === "valid") return { state: "valid", cookies: null };
 
-    const refreshed = await this.silentRefresh(name);
+    const refreshed = await this.silentRefresh(name, { mode: "targeted" });
     if (refreshed) {
       this.probeCache.delete(name);
       await this.probeServerSession(name);

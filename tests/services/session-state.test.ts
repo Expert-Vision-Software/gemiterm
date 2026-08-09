@@ -74,8 +74,8 @@ describe("getRecoveryAction", () => {
     expect(getRecoveryAction(SessionState.Phantom)).toBe(RecoveryAction.TargetedRefresh);
   });
 
-  test("Dead → FullRefresh", () => {
-    expect(getRecoveryAction(SessionState.Dead)).toBe(RecoveryAction.FullRefresh);
+  test("Dead → None (full L2 removed — corrupted cookies, see phantom-bug-synthesis.md Session 3a)", () => {
+    expect(getRecoveryAction(SessionState.Dead)).toBe(RecoveryAction.None);
   });
 
   test("Stale → AutoExtend", () => {

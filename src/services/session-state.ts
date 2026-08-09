@@ -59,7 +59,7 @@ export function getRecoveryAction(state: SessionState): RecoveryAction {
     case SessionState.Phantom:
       return RecoveryAction.TargetedRefresh;
     case SessionState.Dead:
-      return RecoveryAction.FullRefresh;
+      return RecoveryAction.None;
     case SessionState.Stale:
       return RecoveryAction.AutoExtend;
     case SessionState.Declined:
