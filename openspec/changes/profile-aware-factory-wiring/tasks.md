@@ -1,6 +1,6 @@
 ## 1. Handler refactor
 
-- [ ] 1.1 Change `ListChatsQueryHandler` constructor (`src/core/query-handlers.ts:85-89`) to accept `clientService: IGeminiClientQueryService` instead of `getGeminiClient: () => Promise<IGeminiClientService>`. Store it on a new private field.
+- [ ] 1.1 Change `ListChatsQueryHandler` constructor (`src/core/query-handlers.ts:85-89`) to accept `clientService: IGeminiClientQueryService` instead of `getGeminiClient: () => Promise<IGeminiClientService>`. Store it on a new private field. (Note: line numbers may shift slightly after `overhaul/auth-architecture` merges.)
 - [ ] 1.2 Update `ListChatsQueryHandler.handle()` (`src/core/query-handlers.ts:91-133`) to route all three branches through `clientService`:
   - `profile` set → `await this.clientService.forProfile(profile).listChats(options)` (one call).
   - `allProfiles` set → iterate `profileManager.list()` filtered by `hasStoredCookies`; for each active profile, `await this.clientService.forProfile(name).listChats(options)` via `Promise.allSettled`. Preserve the existing `Promise.allSettled` aggregation and per-profile warning log on failure (`Failed to list chats for profile '<name>': <err>`).
@@ -9,7 +9,7 @@
 
 ## 2. Factory wiring
 
-- [ ] 2.1 Update `src/cli/index.ts:119` to pass `clientService` instead of the raw `getGeminiClient` factory: `new ListChatsQueryHandler(clientService, profileManager, logger)`. Use the `clientService` returned by the existing `createClientServices(getGeminiClient)` call at `src/cli/index.ts:121`. (Reordering may be required so the `ListChatsQueryHandler` registration sees the same `clientService` instance.)
+- [ ] 2.1 Update `src/cli/index.ts:127` to pass `clientService` instead of the raw `getGeminiClient` factory: `new ListChatsQueryHandler(clientService, profileManager, logger)`. Use the `clientService` returned by the existing `createClientServices(getGeminiClient)` call. (Reordering may be required so the `ListChatsQueryHandler` registration sees the same `clientService` instance.)
 - [ ] 2.2 Confirm no other call sites reference the removed handler constructor signature (`grep` for `new ListChatsQueryHandler`).
 
 ## 3. Tests
@@ -23,7 +23,7 @@
 ## 4. Validation
 
 - [ ] 4.1 `bun run typecheck` → clean (no diagnostics).
-- [ ] 4.2 `bun test` → **913 pass / 0 fail / 1909 expects / 56 files** baseline intact (or higher if the new regression tests added expects; record the new baseline in `openspec/changes/profile-aware-factory-wiring/proposal.md`'s commit message).
+- [ ] 4.2 `bun test` → **990 pass / 0 fail / 1 skip / 991 total** baseline intact (or higher if the new regression tests added expects; record the new baseline in `openspec/changes/profile-aware-factory-wiring/proposal.md`'s commit message).
 - [ ] 4.3 Manual: against a chat-bearing `GEMITERM_CONFIG_DIR` (machine `%APPDATA%\gemiterm`), run `bun run dev list -p <name>` for each active profile; confirm the rotation/auth log lines name the requested profile, not the default. Run `bun run dev list -i -p <name>` to confirm the TUI path is also routed correctly (same handler).
 - [ ] 4.4 Manual: confirm `bun run dev list` (no `--profile`, no `--all-profiles`) is byte-equivalent to the pre-change baseline output (4-column text table).
 
