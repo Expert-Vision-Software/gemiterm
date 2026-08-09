@@ -9,6 +9,7 @@ import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import type { RotateCookiesResult } from "./cookie-rotation.ts";
 import type { SilentRefreshOptions } from "./auth-service.ts";
+import { classifySession, getRecoveryAction, RecoveryAction } from "./session-state.ts";
 
 export type SilentRefreshFn = (
   profileName: string,
@@ -118,25 +119,27 @@ export class ProfileAuthManager {
       this.logger.debug(`ensureAuthenticated: best-effort rotation failed for profile '${name}': ${e}`);
     }
 
-    if (rotation.rotated) {
-      // Fresh __Secure-1PSIDTS obtained; session is fully usable.
-    } else if (rotation.attempted || rotation.sessionInvalid) {
-      const isPhantom = await this.detectPhantomAuth(name);
-      if (isPhantom) {
-        this.logger.debug(`Phantom-auth detected for profile '${name}'; attempting targeted L2 silent refresh`);
-        const refreshed = await this.silentRefresh(name, { mode: "targeted" });
-        if (!refreshed) {
-          throw new AuthenticationError(
-            `Session for profile '${name}' is in phantom-auth state; targeted refresh failed. Run 'gemiterm login' to re-authenticate.`,
-          );
-        }
-      } else {
-        this.logger.debug(`ensureAuthenticated: L1 RotateCookies did not produce a fresh session for profile '${name}'; session may still be usable via Gemini API directly.`);
+    let isPhantom = false;
+    if (rotation.attempted || rotation.sessionInvalid) {
+      isPhantom = await this.detectPhantomAuth(name);
+    }
+
+    const state = classifySession({
+      hasValidCookies: this.profileManager.hasValidCookies(name),
+      serverProbe: probe,
+      rotation,
+      isPhantom,
+    });
+
+    const action = getRecoveryAction(state);
+
+    if (action === RecoveryAction.TargetedRefresh) {
+      const refreshed = await this.silentRefresh(name, { mode: "targeted" });
+      if (!refreshed) {
+        throw new AuthenticationError(
+          `Session for profile '${name}' is in phantom-auth state; targeted refresh failed. Run 'gemiterm login' to re-authenticate.`,
+        );
       }
-    } else {
-      // L1 was throttled (600 s disk-mtime guard), disabled, or unavailable before any
-      // network attempt. Cookies are likely still fresh; no escalation warranted.
-      this.logger.debug(`ensureAuthenticated: best-effort rotation skipped for profile '${name}'.`);
     }
 
     this.logger.info(`Profile '${name}' is authenticated`);
