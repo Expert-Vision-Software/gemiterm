@@ -16,7 +16,7 @@ function farFuture(): number {
   return Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
 }
 
-function c(name: string, value: string, domain = ".google.com", path = "/"): Cookie {
+function makeCookie(name: string, value: string, domain = ".google.com", path = "/"): Cookie {
   return {
     name,
     value,
@@ -47,9 +47,9 @@ describe("CookieJar", () => {
       const jar = new CookieJar({ cookieStorageService, logger });
 
       jar.replace(PROFILE, [
-        c("__Secure-1PSID", "psid1"),
-        c("__Secure-1PSIDTS", "psidts1"),
-        c("SID", "sid1"),
+        makeCookie("__Secure-1PSID", "psid1"),
+        makeCookie("__Secure-1PSIDTS", "psidts1"),
+        makeCookie("SID", "sid1"),
       ]);
 
       const loaded = storage.load(PROFILE);
@@ -63,15 +63,15 @@ describe("CookieJar", () => {
       const jar = new CookieJar({ cookieStorageService, logger });
 
       jar.replace(PROFILE, [
-        c("__Secure-1PSID", "psid1"),
-        c("__Secure-1PSIDTS", "psidts1"),
-        c("SID", "sid1"),
-        c("HSID", "hsid1"),
+        makeCookie("__Secure-1PSID", "psid1"),
+        makeCookie("__Secure-1PSIDTS", "psidts1"),
+        makeCookie("SID", "sid1"),
+        makeCookie("HSID", "hsid1"),
       ]);
 
       jar.replace(PROFILE, [
-        c("__Secure-1PSID", "psid2"),
-        c("__Secure-1PSIDTS", "psidts2"),
+        makeCookie("__Secure-1PSID", "psid2"),
+        makeCookie("__Secure-1PSIDTS", "psidts2"),
       ]);
 
       const loaded = storage.load(PROFILE);
@@ -88,14 +88,14 @@ describe("CookieJar", () => {
       const jar = new CookieJar({ cookieStorageService, logger });
 
       jar.replace(PROFILE, [
-        c("__Secure-1PSID", "psid1"),
-        c("__Secure-1PSIDTS", "psidts1"),
-        c("SID", "sid1"),
+        makeCookie("__Secure-1PSID", "psid1"),
+        makeCookie("__Secure-1PSIDTS", "psidts1"),
+        makeCookie("SID", "sid1"),
       ]);
 
       jar.upsert(PROFILE, [
-        c("__Secure-1PSID", "psid-new", ".google.com", "/"),
-        c("HSID", "hsid-new"),
+        makeCookie("__Secure-1PSID", "psid-new", ".google.com", "/"),
+        makeCookie("HSID", "hsid-new"),
       ]);
 
       const loaded = storage.load(PROFILE);
@@ -111,12 +111,12 @@ describe("CookieJar", () => {
       const jar = new CookieJar({ cookieStorageService, logger });
 
       jar.replace(PROFILE, [
-        c("__Secure-1PSID", "psid1"),
-        c("__Secure-1PSIDTS", "psidts1"),
+        makeCookie("__Secure-1PSID", "psid1"),
+        makeCookie("__Secure-1PSIDTS", "psidts1"),
       ]);
 
       jar.upsert(PROFILE, [
-        c("__Secure-1PSIDTS", "psidts-new", ".google.com", "/"),
+        makeCookie("__Secure-1PSIDTS", "psidts-new", ".google.com", "/"),
       ]);
 
       const loaded = storage.load(PROFILE);
@@ -131,12 +131,12 @@ describe("CookieJar", () => {
       const jar = new CookieJar({ cookieStorageService, logger });
 
       jar.replace(PROFILE, [
-        c("__Secure-1PSID", "g-psid", ".google.com"),
-        c("__Secure-1PSID", "yt-psid", ".youtube.com"),
+        makeCookie("__Secure-1PSID", "g-psid", ".google.com"),
+        makeCookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
       ]);
 
       jar.upsert(PROFILE, [
-        c("__Secure-1PSID", "g-psid-new", ".google.com"),
+        makeCookie("__Secure-1PSID", "g-psid-new", ".google.com"),
       ]);
 
       const loaded = storage.load(PROFILE);
@@ -151,12 +151,12 @@ describe("CookieJar", () => {
       const jar = new CookieJar({ cookieStorageService, logger });
 
       jar.replace(PROFILE, [
-        c("AUTH", "v1", ".google.com", "/"),
-        c("AUTH", "v2", ".google.com", "/admin"),
+        makeCookie("AUTH", "v1", ".google.com", "/"),
+        makeCookie("AUTH", "v2", ".google.com", "/admin"),
       ]);
 
       jar.upsert(PROFILE, [
-        c("AUTH", "v1-new", ".google.com", "/"),
+        makeCookie("AUTH", "v1-new", ".google.com", "/"),
       ]);
 
       const loaded = storage.load(PROFILE);

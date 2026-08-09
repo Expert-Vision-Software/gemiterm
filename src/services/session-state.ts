@@ -15,7 +15,6 @@ export const RecoveryAction = {
   FullRefresh: "FullRefresh",
   TargetedRefresh: "TargetedRefresh",
   AutoExtend: "AutoExtend",
-  ReauthRequired: "ReauthRequired",
 } as const;
 
 export type RecoveryAction = (typeof RecoveryAction)[keyof typeof RecoveryAction];
