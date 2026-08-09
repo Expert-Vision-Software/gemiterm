@@ -532,3 +532,43 @@ The change is in `profile-auth-manager.ts:121-129` — replace the existing `ses
 - §"The 3-release arc" — traces how RotateCookies detection was added across v2.6.0–v2.6.2.
 - §"2026-08-06 — Session 3" (L2 removal) — the earlier removal of the L2 cookie-corruption path; this is the companion fix for RotateCookies 401.
 
+## 2026-08-09 — Definitive fix: full L2 silent refresh removed (targeted-only, no mergeCookies)
+
+**Discovered by:** Diego, live dormancy verification (~1h40m idle → `gemiterm list` still returns chats). Code review of `fix/remove-full-l2-mergecookies` branch.
+
+**Symptom (chain, three layers):** After ~1h15m idle, `list` returned 0 chats. The chain:
+
+1. Server-side PSIDTS rotation during idle → `probeServerSession` (`models()`) detects stale state
+2. `ensureAuthenticated` calls `rotateCookies` (L1) → server declines or returns 401
+3. Phantom detection triggered → `silentRefresh` (L2) launches headless browser
+4. **Full-mode L2**: `mergeCookies(existing, browserCookies)` replaces ALL stored cookies — companion cookies (SID/HSID/SSID/APISID/SAPISID) from the original login are replaced with browser session cookies from a different session → jar is corrupted
+5. Next command: corrupted jar → RotateCookies 401 OR `listChats` returns 0 → user forced to re-auth
+
+**Three fixes, each necessary, together sufficient:**
+
+| Layer | Fix | Commit | What it closes |
+|-------|-----|--------|---------------|
+| Capture | CookieMonitor passes full jar, not just PSID/PSIDTS | `6bc51f6` | Companions captured at login time (definitive root cause) |
+| Detection | RotateCookies 401 treated as "declined", not session-death | `85f3e7f` (on `main`) | Valid sessions no longer killed by secondary endpoint |
+| Recovery | Full L2 `mergeCookies` removed; targeted-only preserves companions | `f681c66` (this branch) | Silent refresh no longer corrupts companion cookies |
+
+The capture fix (`6bc51f6`) was necessary but insufficient: companions were captured at login, but the *recovery* path (triggered after idle) overwrote them with browser session cookies. The targeted-only fix closes the recovery corruption gap — after idle recovery, the jar retains original companion cookies with updated PSIDTS-family cookies. `listChats` works because companions are intact.
+
+**Regression tests (all RED on full-mode re-introduction):**
+
+| Test | File:Line | What it guards |
+|------|-----------|---------------|
+| `silentRefresh preserves original companions after L2` | `auth-service.test.ts:945` | 8 companion cookie names (SID/HSID/SSID/APISID/SAPISID/SIDCC/NID/OGPC) present after silentRefresh |
+| `targeted mode updates only PSIDTS-family; companions keep original values` | `auth-service.test.ts:976` | SID/HSID/APISID values unchanged; `__Secure-1PSID` NOT rotated |
+| `targeted silentRefresh returns false when PSIDTS unchanged` | `auth-service.test.ts:1008` | No save when no rotation (prevents spurious writes) |
+| `start passes full browser jar to onCookiesFound` | `cookie-monitor.test.ts:366` | Full jar (7 cookies) flows through monitor (capture integrity) |
+
+If someone re-adds full-mode `mergeCookies` to `silentRefresh`, `:945` goes RED because companion names disappear from the saved jar, and `:976` goes RED because `sidCookie.value` is no longer `"sid-original"`.
+
+**Live verified:** `list -i` at `2026-08-09T21:44:57Z`, then again at `2026-08-09T23:23:54Z` (~1h40m idle). Still returns chats. Browser did not open. No cookie corruption.
+
+**Related ledger entries:**
+- §"The 4-cookie discovery" — the capture fix (layer 1)
+- §"2026-08-09 — RotateCookies 401 pre-emptively kills sessions" — the detection fix (layer 2)
+- §"2026-08-06 — Session 3" — predicted targeted L2 as the recovery design; implemented here
+
