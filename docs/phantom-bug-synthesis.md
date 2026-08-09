@@ -532,3 +532,90 @@ The change is in `profile-auth-manager.ts:121-129` — replace the existing `ses
 - §"The 3-release arc" — traces how RotateCookies detection was added across v2.6.0–v2.6.2.
 - §"2026-08-06 — Session 3" (L2 removal) — the earlier removal of the L2 cookie-corruption path; this is the companion fix for RotateCookies 401.
 
+---
+
+## 2026-08-09 — Auth Architecture Overhaul (CookieJar + State Machine + Threading + Dormancy Resilience) — FINAL ENTRY
+
+**Branch:** `overhaul/auth-architecture` (12 commits, PR #21, merged to main). Closes issue #20.
+
+**What this entry closes:** every prior bug, recurrence, and recovery-gap entry in this ledger. The auth overhaul is the architectural answer to the 4-day, 3-release sprint of phantom-auth fixes. It is not a fix — it is a refactor that eliminates the class of bugs that produced every entry after §The 4-cookie discovery.
+
+### What was built
+
+**Candidate A — CookieJar (`src/services/cookie-jar.ts`)**
+Replaced 5 uncoordinated jar-writers (auth capture, SDK `persistRefreshedCookies`, L1 `rotateCookies`, targeted L2 `silentRefresh`, full L2 `silentRefresh`) with a single module offering two operations:
+- `replace(profile, cookies)` — overwrite (login capture)
+- `upsert(profile, cookies)` — merge by `(name, domain, path)` key
+
+This eliminates the capture-trim class of bugs (§The 4-cookie discovery) at the persistence layer — every writer routes through the same upsert logic.
+
+**Candidate C — State machine (`src/services/session-state.ts`)**
+`classifySession()` returns 1 of 5 states from `(hasValidCookies, serverProbe, rotation, isPhantom)`:
+- `Fresh` — no action needed
+- `Phantom` — requires targeted L2 refresh
+- `Dead` — requires full L2 refresh  
+- `Stale` — needs auto-extension
+- `Declined` — RotateCookies 401 but phantom-negative; no action (the dormancy breakthrough)
+
+`getRecoveryAction()` maps state → recovery policy. Replaces 10+ branches of implicit state in the old `ensureAuthenticated`.
+
+**Candidate B — Conversation threading (`src/services/conversation-threading.ts`)**
+All magic indices (`cid`/`rid`/`rcid` at `_meta[0]`/`_meta[1]`/`_meta[2]`) centralized in one module. Simplifies `sendMessage` threading from 20+ lines to 10. Eliminates the §"2026-08-06 — Session 3b" `continue` conversation regression class.
+
+**Candidate E — Post-call seam (folded into A)**
+`persistRefreshedCookies` delegates to `cookieJar.upsert()`. No more scattered disk writes.
+
+### Dormancy resilience — the three non-fatal gates
+
+This is the architectural answer to every "session was killed prematurely" entry in this ledger. Two fatal gates in `ensureAuthenticated` were made non-fatal; a third was already fixed by the state machine:
+
+1. **Cookie freshness** (`tryRestoreStaleCookies`, `profile-auth-manager.ts:99-113`): expired-but-present cookies no longer throw. The old code threw immediately if `hasValidCookies` returned false. Now: try `autoExtendSession` → if success, continue with refreshed cookies; if the extend fails but cookies exist on disk, fall through (return `null`) to the next recovery layer. Only throws if literally no cookies exist at all (no profile). **Gate closed: §"2026-08-06 — The recovery-ladder recurrence" (Gap A — throttle defeated by unrelated writes).**
+
+2. **Server probe** (`tryRestoreStaleProbe`, `profile-auth-manager.ts:115-127`): stale probe + failed `silentRefresh` no longer throws. The old code threw `AuthenticationError` immediately when the server probe said "stale" and silent refresh failed. Now: return `{ state: "valid", cookies: null }` — the session falls through to `finishAuthentication` which runs rotation and phantom detection before deciding. **Gate closed: the 401-on-fresh-login regression (§"2026-08-06 — Session 3a") and every probe-stale-then-throw recurrence.**
+
+3. **RotateCookies 401** (`classifySession` + `getRecoveryAction`, `session-state.ts:44-46, 65-66`): RotateCookies 401 no longer pre-emptively kills sessions. The old code (from `4dfe13c`, the Gap B fix) threw `AuthenticationError` immediately on `rotation.sessionInvalid`. The state machine now routes `sessionInvalid && !isPhantom` → `Declined` → `RecoveryAction.None` — rotation simply didn't happen, carry on. And `sessionInvalid && isPhantom` → `Phantom` → `RecoveryAction.TargetedRefresh` — try targeted L2 before throwing. **Gate closed: §"2026-08-09 — RotateCookies 401 pre-emptively kills sessions."**
+
+The principle: the Gemini API (not `accounts.google.com/RotateCookies`, not the local `expires` field, not `models()` alone) is the ultimate arbiter of session validity. If the session is truly dead, the Gemini API's 401 triggers the reauth prompt — exactly one path to the user, no false positives.
+
+### What NOT to do (regression prevention — read before modifying any of the four sensitive files)
+
+These rules prevent reintroducing the bugs this ledger documents. Violating any of them reopens one or more closed gates:
+
+**DO NOT make any gate in `ensureAuthenticated` throw immediately on a non-terminal condition.** The three helpers (`tryRestoreStaleCookies`, `tryRestoreStaleProbe`, `finishAuthentication`) must always return or fall through — never throw — for non-terminal states. The only `throw` sites are:
+- `tryRestoreStaleCookies:107-110` — no cookies at all on disk (profile never authed)
+- `finishAuthentication:152-155` — targeted refresh failed after phantom detection (exhausted recovery)
+- `finishAuthentication` (via `getRecoveryAction(Dead)` → full refresh starts) — full L2 fails
+
+**DO NOT add a `throw` on `rotation.sessionInvalid`.** RotateCookies is an `accounts.google.com` endpoint, not a Gemini API endpoint. Its 401 means "won't rotate PSIDTS" — it does NOT mean the Gemini API will reject the PSID cookie. Let the session reach the Gemini API call; if truly dead, the 401 from Gemini triggers the reauth prompt. The `Declined` state exists for this reason.
+
+**DO NOT add a `throw` on probe-stale without attempting silent refresh first.** `tryRestoreStaleProbe` must try silent refresh before falling through. Removing the `silentRefresh` call reopens Gate 2.
+
+**DO NOT bypass `CookieJar` for any cookie persistence.** All new cookie-writer code must route through `cookieJar.upsert()` or `cookieJar.replace()`. Raw `cookieStorageService.saveCookiesForProfile` calls outside `CookieJar` reintroduce the capture-trim class of bugs.
+
+**DO NOT make `classifySession` throw.** The function is pure classification — it consumes four inputs and returns a state label. Never add side effects (throws, I/O, rotation calls) to it.
+
+**DO NOT add a new state to `classifySession` without a corresponding `getRecoveryAction` case.** The switch in `getRecoveryAction` must be exhaustive. An unmatched state is a silent "do nothing" which means a dead/phantom session will reach the API without recovery.
+
+**DO NOT re-add the old `escalateAfterServerDecline` L2 path.** It was removed in `9762845` (Session 3a) because it corrupted cookies. The L2 cookie-corruption regression is fully documented. If a new L2 path is designed, it must only update PSIDTS-related cookies (from `COOKIE_NAMES_OF_INTEREST`), not replace the full jar via `mergeCookies`.
+
+### Test baseline
+
+**990 pass / 1 skip / 0 fail / 2089 expects.** Typecheck clean. 11 files changed (~627 insertions, ~80 deletions). Three new service files, three new test files.
+
+### What is NOT in this branch
+
+The following OpenSpec changes were intentionally deferred (separate branches/issues):
+- `phantom-auth-review-refactors` — naming-only refactor (extract `cookie-constants.ts`, lift `gimme` helper)
+- `profile-aware-factory-wiring` — fix `list -p <name>` routing (the lambda-drop bug from 2026-08-08)
+- `interactive-non-interactive-divergence` — mediator dispatch parity for interactive paths
+- `chat-list-bulk-actions` — multi-select + summarize command
+- `list-interactive-action-profile-coverage` — test-only coverage
+
+### This is the last entry
+
+Every bug documented in this ledger is architecturally closed by the auth overhaul. The capture-trim bug (§The 4-cookie discovery), the recovery-ladder gaps (A + B), the L2 cookie-corruption regression, the `continue` conversation regression, the premature-session-death from RotateCookies 401 — all have their root cause eliminated by the architecture in this branch.
+
+Future phantom-auth bugs, if they occur, should be documented in a new ledger or as GitHub issues. This file is now a closed historical record.
+
+**Verified:** `bun run typecheck` clean · `bun test` 990 pass / 1 skip / 0 fail / 2089 expects. Live `status --verbose` confirmed docking to main with no concurrency issues or leaked listeners (commit `d2f00a2`).
+
