@@ -84,7 +84,7 @@ async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: 
 
   let geminiClient: GeminiClientService | null = null;
 
-  async function getGeminiClient(profileName?: string): Promise<GeminiClientService> {
+  async function getGeminiClient(profileName?: string, opts?: { nonInteractive?: boolean }): Promise<GeminiClientService> {
     if (geminiClient && (!profileName || profileName === geminiClient.profileName)) {
       return geminiClient;
     }
@@ -98,6 +98,7 @@ async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: 
       return buildClient(targetProfile, cookies);
     } catch (originalError) {
       if (!(originalError instanceof AuthenticationError)) throw originalError;
+      if (opts?.nonInteractive) throw originalError;
       await promptAndReauth(targetProfile, originalError);
       const cookies = await profileAuthManager.ensureAuthenticated(targetProfile);
       return buildClient(targetProfile, cookies);

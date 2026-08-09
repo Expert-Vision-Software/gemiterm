@@ -217,9 +217,9 @@ export class ProbeProfileQueryHandler
   implements QueryHandler<ProbeProfileQueryPayload, ProbeProfileQueryResult>
 {
   readonly queryType = QUERY_TYPES.PROBE_PROFILE;
-  private readonly getGeminiClient: (profileName?: string) => Promise<IGeminiClientQueryService>;
+  private readonly getGeminiClient: (profileName?: string, opts?: { nonInteractive?: boolean }) => Promise<IGeminiClientQueryService>;
 
-  constructor(getGeminiClient: (profileName?: string) => Promise<IGeminiClientQueryService>) {
+  constructor(getGeminiClient: (profileName?: string, opts?: { nonInteractive?: boolean }) => Promise<IGeminiClientQueryService>) {
     this.getGeminiClient = getGeminiClient;
   }
 
@@ -256,13 +256,13 @@ export class ProbeProfileQueryHandler
   }
 
   private async probeModels(profileName: string): Promise<number> {
-    const client = await this.getGeminiClient(profileName);
+    const client = await this.getGeminiClient(profileName, { nonInteractive: true });
     const models = await client.listModels();
     return models.length;
   }
 
   private async probeChats(profileName: string): Promise<number> {
-    const client = await this.getGeminiClient(profileName);
+    const client = await this.getGeminiClient(profileName, { nonInteractive: true });
     const chats = await client.listChats({ limit: 1 });
     return chats.length;
   }
