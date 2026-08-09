@@ -1,3 +1,14 @@
+## [2.7.1] - 2026-08-09
+
+### Removed
+
+- **Full L2 silent refresh (`mergeCookies` path).** Full-mode silent refresh in `auth-service.ts` replaced companion cookies (SID/HSID/SSID/…) with browser session cookies, causing 401 on the next command. `silentRefresh` is now targeted-only — it updates only PSIDTS-family cookies (`__Secure-1PSIDTS`/`__Secure-3PSIDTS`/`SIDCC`) via `cookieJar.upsert`. The `SilentRefreshMode` type, `RecoveryAction.FullRefresh` enum, and the `mergeCookies` call from `silentRefresh` are removed.
+
+### Fixed
+
+- **Test config dir leak in `gemini-client-wrapper.test.ts`.** `teardownTestConfig` unset `GEMITERM_CONFIG_DIR` between tests, causing `ChatMetadataStorage` writes to land in `%APPDATA%\gemiterm\profiles`. Added file-level `beforeAll`/`afterAll` temp-dir guard that persists across per-test setup/teardown.
+- **Smoke tests leaked real config directories.** `GEMITERM_CONFIG_DIR: ""` resolved to the real config dir, probing live system profiles. Switched to per-test `mkdtempSync` temp directories.
+
 ## [2.7.0] - 2026-08-09
 
 ### Added
