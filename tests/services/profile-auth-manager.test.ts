@@ -136,7 +136,7 @@ describe("ProfileAuthManager", () => {
       await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
     });
 
-    test("throws AuthenticationError with expired cookies", async () => {
+    test("continues (dormancy-resilient) with expired-but-present cookies", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -144,7 +144,8 @@ describe("ProfileAuthManager", () => {
 
       const mgr = createManager(manager);
 
-      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
+      const cookies = await mgr.ensureAuthenticated("default");
+      expect(cookies.secure_1psid).toBeTruthy();
     });
 
     test("auto-extends session before throwing when silentRefresh succeeds", async () => {
@@ -191,7 +192,7 @@ describe("ProfileAuthManager", () => {
       );
     });
 
-    test("throws AuthenticationError when auto-extend fails", async () => {
+    test("auto-extend failure continues (dormancy-resilient) when cookies exist", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -201,7 +202,8 @@ describe("ProfileAuthManager", () => {
 
       const mgr = createManager(manager, undefined, silentRefresh);
 
-      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
+      const cookies = await mgr.ensureAuthenticated("default");
+      expect(cookies.secure_1psid).toBeTruthy();
       expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
@@ -572,7 +574,7 @@ describe("ProfileAuthManager", () => {
       expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
-    test("models() throws + silent refresh fails surfaces AuthenticationError", async () => {
+    test("models() throws + silent refresh fails continues (dormancy-resilient)", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -587,7 +589,8 @@ describe("ProfileAuthManager", () => {
 
       const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
 
-      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
+      const cookies = await mgr.ensureAuthenticated("default");
+      expect(cookies.secure_1psid).toBe("test-psid-value");
       expect(modelsFn).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledWith("default");

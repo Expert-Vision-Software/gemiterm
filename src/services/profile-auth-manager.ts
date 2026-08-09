@@ -93,12 +93,14 @@ export class ProfileAuthManager {
         this.logger.info(`Session auto-refreshed for profile '${name}'`);
         return this.cookieStorageService.loadCookiesForProfile(name);
       }
-      throw new AuthenticationError(
-        `No valid session for profile '${name}'. Run 'gemiterm login' to authenticate.`,
-      );
+      if (!this.profileManager.hasStoredCookies(name)) {
+        throw new AuthenticationError(
+          `No valid session for profile '${name}'. Run 'gemiterm login' to authenticate.`,
+        );
+      }
     }
 
-    const probe = await this.probeServerSession(name);
+    let probe = await this.probeServerSession(name);
     if (probe === "stale") {
       const refreshed = await this.silentRefresh(name);
       if (refreshed) {
@@ -107,9 +109,7 @@ export class ProfileAuthManager {
         this.logger.info(`Profile '${name}' is authenticated`);
         return this.cookieStorageService.loadCookiesForProfile(name);
       }
-      throw new AuthenticationError(
-        `No valid session for profile '${name}'. Run 'gemiterm login' to re-authenticate.`,
-      );
+      probe = "valid";
     }
 
     let rotation: RotateCookiesResult = { rotated: false, attempted: false };
