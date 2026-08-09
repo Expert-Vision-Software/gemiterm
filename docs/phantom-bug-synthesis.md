@@ -496,3 +496,39 @@ Committed `b5dc3de`. Test baseline unchanged (954 pass / 1 skip / 0 fail). Typec
 - §"2026-08-08 — dhb-worker session expired after ~2 hours" — the source data point for the ~1h15m floor.
 - §"2026-08-08 — profile-routing lambda drops profile argument" — the lambda fix being re-verified after the next idle cycle.
 
+## 2026-08-09 — RotateCookies 401 pre-emptively kills sessions that the Gemini API still accepts
+
+**Discovered by:** Diego, cross-version comparison. v2.4.0 on Linux (DHBGAMING2, sessions from July 29, 12 days old) still lists chats fine. v2.7.0 on Windows kills sessions after ~5h idle with `AuthenticationError("Session for profile 'dhb-worker' is no longer valid (server rejected RotateCookies)")`.
+
+**Symptom:**
+- `gemiterm list` on v2.7.0 after ~5h idle: first call targeted-L2 recovers but returns "No conversations found"; second call gets `AuthenticationError` because RotateCookies returns 401.
+- `gemiterm list` on v2.4.0 after 12 days idle: returns 14 conversations, no errors.
+- The core PSID cookie expires Sep 2027 on both machines. It is still valid. Google's Gemini API accepts it. RotateCookies rejects it.
+
+**Root cause:** `profile-auth-manager.ts:121-129` treats RotateCookies 401 as definitive proof of Gemini API session death:
+
+```typescript
+if (rotation.sessionInvalid) {
+  throw new AuthenticationError(
+    `Session for profile '${name}' is no longer valid (server rejected RotateCookies). Run 'gemiterm login'...`,
+  );
+}
+```
+
+In v2.4.0, `ensureAuthenticated` had none of this — it checked `hasValidCookies()` (7-day local freshness) and returned cookies immediately. No RotateCookies call, no probe, no phantom detection. The gemini-web-sdk used the cookies directly, and Google's Gemini API accepted them.
+
+The design flaw: **RotateCookies is an `accounts.google.com` endpoint, not a Gemini API endpoint.** Its session validation behavior differs from the Gemini API endpoints (`models`, `listChats`, `readChat`). A 401 from RotateCookies means Google Accounts won't rotate the PSIDTS token — it does NOT mean the Gemini API will reject the PSID cookie. These are separate services with separate session policies.
+
+The second call in the test session got a 401 because the targeted L2 refresh on the first call partially updated the jar (PSIDTS-family cookies refreshed) while companion cookies (SID/HSID/SSID/etc.) from the expired session remained — creating an inconsistent cookie envelope that RotateCookies rejected. But the Gemini API may have still accepted that envelope for `listChats`/`models`.
+
+**Fix:** Remove the `sessionInvalid` throw. Treat RotateCookies 401/403 the same as "declined" — rotation simply didn't happen, carry on. Run phantom detection (as we do for "declined" already) to attempt targeted L2 recovery. Only throw if targeted L2 also fails. This defers session-validity judgment to the actual Gemini API endpoints rather than a secondary Google Accounts endpoint.
+
+The change is in `profile-auth-manager.ts:121-129` — replace the existing `sessionInvalid` throw block with a fallthrough that mirrors the `rotation.attempted` path (phantom detection → targeted L2 → throw on failure).
+
+**Verified:** TBD after implementation. Test baseline expected unchanged (954/1/0).
+
+**Related ledger entries:**
+- §"2026-08-06 — The recovery-ladder recurrence" (Gap B: `sessionInvalid` surface path) — the original design that added the `sessionInvalid` flag. This entry argues the 401 throw was the wrong fix for Gap B.
+- §"The 3-release arc" — traces how RotateCookies detection was added across v2.6.0–v2.6.2.
+- §"2026-08-06 — Session 3" (L2 removal) — the earlier removal of the L2 cookie-corruption path; this is the companion fix for RotateCookies 401.
+
