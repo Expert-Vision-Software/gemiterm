@@ -2,6 +2,7 @@ import type { Logger } from "../infrastructure/logger.ts";
 import type { Cookie } from "../core/types.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
+import type { CookieJar } from "./cookie-jar.ts";
 
 const ROTATE_COOKIES_URL = "https://accounts.google.com/RotateCookies";
 const ROTATE_COOKIES_BODY = JSON.stringify([0, "-0000000000000000000"]);
@@ -28,6 +29,7 @@ interface RotateCookiesOptions {
   logger: Logger;
   fetcher?: typeof fetch;
   now?: () => number;
+  cookieJar?: CookieJar;
 }
 
 interface RotateCookiesHandle {
@@ -36,6 +38,7 @@ interface RotateCookiesHandle {
   logger: Logger;
   fetcher: typeof fetch;
   now: () => number;
+  cookieJar?: CookieJar;
 }
 
 function buildCookieHeader(cookies: Cookie[]): string {
@@ -165,9 +168,16 @@ async function performRotateCookies(
   }
 
   try {
-    cookieStorageService.saveCookiesForProfile(profileName, next);
+    if (handle.cookieJar) {
+      const filteredCookies = stored
+        .filter((c) => COOKIE_NAMES_OF_INTEREST.has(c.name) && updated.has(c.name) && updated.get(c.name) !== c.value)
+        .map((c) => ({ ...c, value: updated.get(c.name)! }));
+      handle.cookieJar.upsert(profileName, filteredCookies);
+    } else {
+      cookieStorageService.saveCookiesForProfile(profileName, next);
+    }
   } catch (err) {
-    logger.debug(`rotateCookies: save failed for profile '${profileName}': ${err}`);
+    handle.logger.debug(`rotateCookies: save failed for profile '${profileName}': ${err}`);
     return { rotated: false, attempted: true };
   }
   return { rotated: true, attempted: true };
@@ -191,6 +201,7 @@ export async function rotateCookies(
     logger: options.logger,
     fetcher: options.fetcher ?? fetch,
     now: options.now ?? Date.now,
+    cookieJar: options.cookieJar,
   };
 
   const promise = performRotateCookies(profileName, handle)

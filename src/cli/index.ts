@@ -6,6 +6,7 @@ import { Mediator } from "../core/mediator.ts";
 import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import { CookieStorageService } from "../services/cookie-storage-service.ts";
 import { ProfileAuthManager } from "../services/profile-auth-manager.ts";
+import { CookieJar } from "../services/cookie-jar.ts";
 import { CookieStorage, ProfileManager } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts";
 import { getPackageJson } from "../infrastructure/path-utils.ts";
@@ -44,12 +45,14 @@ async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: 
   const driver = new PlaywrightCliDriver();
   const cookieMonitor = new CookieMonitor({ driver, logger });
   const cookieStorageService = new CookieStorageService({ cookieStorage, logger });
+  const cookieJar = new CookieJar({ cookieStorageService, logger });
   const authService = new AuthService({
     driver,
     cookieMonitor,
     cookieStorage,
     cookieStorageService,
     logger,
+    cookieJar,
   });
 
   const profileQueryService = {
@@ -67,7 +70,7 @@ async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: 
     },
   };
 
-  const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, cookieStorageService);
+  const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, cookieStorageService, undefined, undefined, undefined, cookieJar);
   try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
   const profileAuthManager = new ProfileAuthManager({
     profileManager,
@@ -107,6 +110,9 @@ async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: 
       logger,
       cookieStorageService,
       profileName,
+      undefined,
+      undefined,
+      cookieJar,
     );
     geminiClient = client;
     return client;
