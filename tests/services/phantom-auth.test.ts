@@ -268,7 +268,7 @@ describe("phantom-auth regression suite", () => {
       expect(modelsFn).toHaveBeenCalledTimes(1);
     });
 
-    test("rotateCookies reports session-invalid (401/403) => throws AuthenticationError, no L2 attempt", async () => {
+    test("rotateCookies reports session-invalid (401/403) => phantom detection + targeted L2 recovers", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -277,7 +277,7 @@ describe("phantom-auth regression suite", () => {
       const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
       const geminiClient = gimme(modelsFn);
 
-      const silentRefresh = mock(async (_profileName: string) => true);
+      const silentRefresh = mock(async (_profileName: string, _opts?: unknown) => true);
       const rotateCookies = mock(async (_profileName: string) => ({
         rotated: false,
         attempted: false,
@@ -294,9 +294,11 @@ describe("phantom-auth regression suite", () => {
         rotateCookies,
       });
 
-      const err = await mgr.ensureAuthenticated("default").catch((e) => e);
-      expect(err).toBeInstanceOf(AuthenticationError);
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
+      const cookies = await mgr.ensureAuthenticated("default");
+
+      expect(cookies.secure_1psid).toBe("active-psid");
+      expect(silentRefresh).toHaveBeenCalledTimes(1);
+      expect(silentRefresh).toHaveBeenCalledWith("default", { mode: "targeted" });
     });
 
     test("rotateCookies declined (200, no fresh PSIDTS) does NOT escalate to L2 silentRefresh", async () => {
