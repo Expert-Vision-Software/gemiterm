@@ -130,15 +130,17 @@ describe("ProfileAuthManager", () => {
       expect(() => mgr.ensureAuthenticated("default")).toThrow("No valid session");
     });
 
-    test("throws AuthenticationError with expired cookies", () => {
+    test("returns cookies when expires is in the past (trusts cookies; 401 is the only recovery trigger)", () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeExpiredCookies());
 
       const mgr = createManager(manager);
+      const cookies = mgr.ensureAuthenticated("default");
 
-      expect(() => mgr.ensureAuthenticated("default")).toThrow("No valid session");
+      expect(cookies.secure_1psid).toBe("expired-psid-value");
+      expect(cookies.secure_1psidts).toBe("expired-psidts-value");
     });
 
     test("throws on invalid profile name", () => {
@@ -167,7 +169,7 @@ describe("ProfileAuthManager", () => {
   });
 
   describe("getActiveProfiles", () => {
-    test("returns profiles with valid cookies", () => {
+    test("returns profiles with the required cookies present (trusts cookies, ignores expires)", () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("active");
@@ -179,10 +181,10 @@ describe("ProfileAuthManager", () => {
       const active = mgr.getActiveProfiles();
 
       expect(active).toContain("active");
-      expect(active).not.toContain("expired");
+      expect(active).toContain("expired");
     });
 
-    test("returns empty array when no profiles have valid cookies", () => {
+    test("returns empty array when no profiles have the required cookies", () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("p1");
@@ -191,7 +193,7 @@ describe("ProfileAuthManager", () => {
       const mgr = createManager(manager);
       const active = mgr.getActiveProfiles();
 
-      expect(active).toEqual([]);
+      expect(active).toEqual(["p1"]);
     });
 
     test("returns empty array when no profiles exist", () => {
@@ -331,7 +333,7 @@ describe("ProfileAuthManager", () => {
       expect(calls).toContainEqual(["work", "abc-123"]);
     });
 
-    test("does not probe profiles whose cookies are expired", async () => {
+    test("probes all profiles whose required cookies are present (trusts cookies; expired cookies are still probed)", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("alive");
@@ -355,7 +357,7 @@ describe("ProfileAuthManager", () => {
       await mgr.findProfileForConversation("conv-xyz");
 
       expect(probedNames).toContain("alive");
-      expect(probedNames).not.toContain("dead");
+      expect(probedNames).toContain("dead");
     });
   });
 });

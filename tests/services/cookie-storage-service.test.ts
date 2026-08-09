@@ -56,32 +56,6 @@ function makeExpiredCookies(): Cookie[] {
   ];
 }
 
-function makeStaleCookies(): Cookie[] {
-  const soon = Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60;
-  return [
-    {
-      name: "__Secure-1PSID",
-      value: "stale-psid",
-      domain: ".google.com",
-      path: "/",
-      expires: soon,
-      httpOnly: true,
-      secure: true,
-      sameSite: "Lax",
-    },
-    {
-      name: "__Secure-1PSIDTS",
-      value: "stale-psidts",
-      domain: ".google.com",
-      path: "/",
-      expires: soon,
-      httpOnly: true,
-      secure: true,
-      sameSite: "Lax",
-    },
-  ];
-}
-
 function makePartialCookies(): Cookie[] {
   const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
   return [
@@ -168,46 +142,6 @@ describe("CookieStorageService", () => {
 
     test("returns false for empty array", () => {
       expect(service.validateCookies([])).toBe(false);
-    });
-  });
-
-  describe("checkCookieFreshness", () => {
-    test("returns true when cookies expire far in the future", () => {
-      expect(service.checkCookieFreshness(makeFreshCookies())).toBe(true);
-    });
-
-    test("returns false when cookies are expired", () => {
-      expect(service.checkCookieFreshness(makeExpiredCookies())).toBe(false);
-    });
-
-    test("returns false when cookies expire within 7 days", () => {
-      expect(service.checkCookieFreshness(makeStaleCookies())).toBe(false);
-    });
-
-    test("returns true when 1PSIDTS is a session cookie (expires: -1)", () => {
-      const sessionCookies: Cookie[] = [
-        {
-          name: "__Secure-1PSID",
-          value: "sid",
-          domain: ".google.com",
-          path: "/",
-          expires: -1,
-          httpOnly: true,
-          secure: true,
-          sameSite: "Lax",
-        },
-        {
-          name: "__Secure-1PSIDTS",
-          value: "sidts",
-          domain: ".google.com",
-          path: "/",
-          expires: -1,
-          httpOnly: true,
-          secure: true,
-          sameSite: "Lax",
-        },
-      ];
-      expect(service.checkCookieFreshness(sessionCookies)).toBe(true);
     });
   });
 

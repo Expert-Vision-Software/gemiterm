@@ -292,24 +292,43 @@ describe("ProfileManager", () => {
     expect(expired.isActive).toBe(false);
   });
 
-  test("hasValidCookies returns true for fresh cookies", () => {
+  test("hasRequiredCookies returns true for fresh cookies", () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
     storage.save("fresh", makeValidCookies());
 
-    expect(mgr.hasValidCookies("fresh")).toBe(true);
+    expect(mgr.hasRequiredCookies("fresh")).toBe(true);
   });
 
-  test("hasValidCookies returns false for expired cookies", () => {
+  test("hasRequiredCookies returns true when required cookies are present (trusts cookies, ignores expires)", () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
     storage.save("stale", makeExpiredCookies());
 
-    expect(mgr.hasValidCookies("stale")).toBe(false);
+    expect(mgr.hasRequiredCookies("stale")).toBe(true);
   });
 
-  test("hasValidCookies returns false for missing profile", () => {
-    expect(manager.hasValidCookies("nope")).toBe(false);
+  test("hasRequiredCookies returns false for missing profile", () => {
+    expect(manager.hasRequiredCookies("nope")).toBe(false);
+  });
+
+  test("hasRequiredCookies returns false when required cookies are missing", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    storage.save("incomplete", [
+      {
+        name: "__Secure-1PSID",
+        value: "psid-only",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ]);
+
+    expect(mgr.hasRequiredCookies("incomplete")).toBe(false);
   });
 
   test("loadCookiesForApi returns cookie values", () => {
@@ -322,12 +341,33 @@ describe("ProfileManager", () => {
     expect(result.secure1psidts).toBe("test-psidts-value");
   });
 
-  test("loadCookiesForApi throws for expired cookies", () => {
+  test("loadCookiesForApi returns values for expired cookies (no freshness gate; 401 is the only recovery trigger)", () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
     storage.save("expired-api", makeExpiredCookies());
 
-    expect(() => mgr.loadCookiesForApi("expired-api")).toThrow("expired");
+    const result = mgr.loadCookiesForApi("expired-api");
+    expect(result.secure1psid).toBe("expired-psid");
+    expect(result.secure1psidts).toBe("expired-psidts");
+  });
+
+  test("loadCookiesForApi throws when PSID is missing", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    storage.save("no-psid", [
+      {
+        name: "__Secure-1PSIDTS",
+        value: "ts-only",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ]);
+
+    expect(() => mgr.loadCookiesForApi("no-psid")).toThrow("Missing required cookie");
   });
 
   test("loadCookiesForApi throws for missing profile", () => {

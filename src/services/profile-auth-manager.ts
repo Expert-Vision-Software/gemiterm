@@ -32,7 +32,7 @@ export class ProfileAuthManager {
     const name = profileName ?? getDefaultProfileName();
     validateProfileName(name);
 
-    if (!this.profileManager.hasValidCookies(name)) {
+    if (!this.profileManager.hasRequiredCookies(name)) {
       throw new AuthenticationError(
         `No valid session for profile '${name}'. Run 'gemiterm login' to authenticate.`,
       );
@@ -44,7 +44,7 @@ export class ProfileAuthManager {
 
   getActiveProfiles(): string[] {
     const profiles = this.profileManager.list();
-    return profiles.filter((name) => this.profileManager.hasValidCookies(name));
+    return profiles.filter((name) => this.profileManager.hasRequiredCookies(name));
   }
 
   async findProfileForConversation(conversationId: string): Promise<string | null> {

@@ -45,7 +45,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
         return { authenticated: false, profileName: null };
       }
       const defaultName = getDefaultProfileName();
-      const isValid = profileManager.hasValidCookies(defaultName);
+      const isValid = profileManager.hasRequiredCookies(defaultName);
       return { authenticated: isValid, profileName: defaultName };
     },
   };

@@ -26,7 +26,7 @@ export class ProfileService {
       this.logger.info(`Created new profile: ${name}`);
     }
 
-    if (!this.profileManager.hasValidCookies(name)) {
+    if (!this.profileManager.hasRequiredCookies(name)) {
       throw new AuthenticationError(
         `No valid session for profile '${name}'. Run 'gemiterm login' to authenticate.`,
       );
@@ -52,7 +52,7 @@ export class ProfileService {
     if (!defaultName) {
       return { authenticated: false, profileName: null };
     }
-    const isValid = this.profileManager.hasValidCookies(defaultName);
+    const isValid = this.profileManager.hasRequiredCookies(defaultName);
     return { authenticated: isValid, profileName: isValid ? defaultName : null };
   }
 

@@ -2,7 +2,6 @@ import type { Cookie } from "../core/types.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 
-const COOKIE_EXPIRY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 const REQUIRED_COOKIE_NAMES = new Set(["__Secure-1PSID", "__Secure-1PSIDTS"]);
 
 export interface LoadedCookies {
@@ -51,16 +50,6 @@ export class CookieStorageService {
     const names = new Set(cookies.map((c) => c.name));
     for (const required of REQUIRED_COOKIE_NAMES) {
       if (!names.has(required)) return false;
-    }
-    return true;
-  }
-
-  checkCookieFreshness(cookies: Cookie[]): boolean {
-    for (const cookie of cookies) {
-      if (cookie.name === "__Secure-1PSIDTS" && cookie.expires > 0) {
-        const threshold = Date.now() + COOKIE_EXPIRY_THRESHOLD_MS;
-        if (cookie.expires * 1000 < threshold) return false;
-      }
     }
     return true;
   }
