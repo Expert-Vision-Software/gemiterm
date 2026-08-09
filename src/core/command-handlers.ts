@@ -1,5 +1,5 @@
 import type { Command, CommandHandler } from "./mediator.ts";
-import type { AuthResult, ChatInfo } from "./types.ts";
+import type { AuthResult, ChatInfo, ProfileStatus } from "./types.ts";
 import { AuthenticationError } from "./errors.ts";
 
 function extractPayload<T>(command: Command<T>): T {
@@ -7,7 +7,9 @@ function extractPayload<T>(command: Command<T>): T {
 }
 
 export interface AuthenticateCommandPayload {
-  profileName?: string;
+  profileName: string;
+  renew?: boolean;
+  create?: boolean;
 }
 
 export interface AuthenticateCommandResult {
@@ -83,10 +85,12 @@ export const COMMAND_TYPES = {
 export type CommandType = (typeof COMMAND_TYPES)[keyof typeof COMMAND_TYPES];
 
 export interface IProfileService {
-  authenticate(profileName?: string): Promise<AuthResult>;
-  deleteProfile(name: string): Promise<void>;
+  authenticate(profileName: string, options?: { renew?: boolean; create?: boolean }): Promise<AuthResult>;
+  deleteProfile(profileName: string): Promise<void>;
   renameProfile(oldName: string, newName: string): Promise<void>;
-  setDefaultProfile(name: string): Promise<void>;
+  setDefaultProfile(profileName: string): Promise<void>;
+  listProfileStatuses(): ProfileStatus[];
+  listProfiles(): string[];
 }
 
 export interface IGeminiClientService {
@@ -110,9 +114,9 @@ export class AuthenticateCommandHandler
   }
 
   async handle(command: Command<AuthenticateCommandPayload>): Promise<AuthenticateCommandResult> {
-    const { profileName } = extractPayload(command);
+    const { profileName, renew, create } = extractPayload(command);
     try {
-      const result = await this.profileService.authenticate(profileName);
+      const result = await this.profileService.authenticate(profileName, { renew, create });
       return {
         success: true,
         cookieCount: result.cookies.length,

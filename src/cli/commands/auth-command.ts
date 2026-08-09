@@ -1,20 +1,23 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
+import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { CookieStorage, ProfileManager } from "../../infrastructure/storage.ts";
-import { PlaywrightCliDriver } from "../../services/playwright-cli-driver.ts";
-import { CookieMonitor } from "../../services/cookie-monitor.ts";
-import { AuthService } from "../../services/auth-service.ts";
-import { CookieStorageService } from "../../services/cookie-storage-service.ts";
 import {
   listProfiles,
   getDefaultProfileName,
-  setDefaultProfileName,
 } from "../../infrastructure/config.ts";
 import { GemitermError } from "../../core/errors.ts";
 import { validateProfileName } from "../../infrastructure/validators.ts";
 import { formatProfileTable } from "../../infrastructure/formatters.ts";
 import { text } from "../utils/prompts.ts";
+import {
+  COMMAND_TYPES,
+  type AuthenticateCommandPayload,
+  type DeleteProfileCommandPayload,
+  type RenameProfileCommandPayload,
+  type SetDefaultProfileCommandPayload,
+} from "../../core/command-handlers.ts";
 
 interface ParsedFlags {
   list: boolean;
@@ -41,18 +44,10 @@ export class AuthCommand implements CliCommand {
     logger.debug("Executing auth command", args);
 
     const flags = this.parseFlags(args);
+    const mediator: Mediator = context.mediator;
 
     const cookieStorage = new CookieStorage();
     const profileManager = new ProfileManager(cookieStorage);
-    const driver = new PlaywrightCliDriver();
-    const cookieMonitor = new CookieMonitor({ driver, logger });
-    const authService = new AuthService({
-      driver,
-      cookieMonitor,
-      cookieStorage,
-      cookieStorageService: new CookieStorageService({ cookieStorage, logger }),
-      logger,
-    });
 
     if (flags.list) {
       await this.listProfiles(profileManager, logger);
@@ -60,32 +55,88 @@ export class AuthCommand implements CliCommand {
     }
 
     if (flags.add !== null) {
-      await this.addProfile(flags.add, profileManager, authService, logger);
+      validateProfileName(flags.add);
+      if (listProfiles().includes(flags.add)) {
+        throw new GemitermError(`Profile '${flags.add}' already exists.`);
+      }
+      await mediator.send({
+        type: COMMAND_TYPES.AUTHENTICATE,
+        payload: { profileName: flags.add, create: true },
+      } satisfies Command<AuthenticateCommandPayload>);
       return;
     }
 
     if (flags.delete !== null) {
-      await this.deleteProfile(flags.delete, flags.yes, profileManager, logger);
+      const profiles = listProfiles();
+      if (!profiles.includes(flags.delete)) {
+        throw new GemitermError(`Profile '${flags.delete}' does not exist.`);
+      }
+      if (!flags.yes) {
+        const confirmAnswer = await this.promptInput(`Delete profile '${flags.delete}'? [y/N]`);
+        if (!confirmAnswer.toLowerCase().startsWith("y")) {
+          console.log(chalk.dim("Cancelled."));
+          return;
+        }
+      }
+      await mediator.send({
+        type: COMMAND_TYPES.DELETE_PROFILE,
+        payload: { profileName: flags.delete },
+      } satisfies Command<DeleteProfileCommandPayload>);
+      console.log(chalk.green(`Profile '${flags.delete}' deleted.`));
       return;
     }
 
     if (flags.rename !== null) {
-      await this.renameProfile(flags.rename.old, flags.rename.new, profileManager, logger);
+      const profiles = listProfiles();
+      if (!profiles.includes(flags.rename.old)) {
+        throw new GemitermError(`Profile '${flags.rename.old}' does not exist.`);
+      }
+      validateProfileName(flags.rename.new);
+      if (profiles.includes(flags.rename.new)) {
+        throw new GemitermError(`Profile '${flags.rename.new}' already exists.`);
+      }
+      await mediator.send({
+        type: COMMAND_TYPES.RENAME_PROFILE,
+        payload: { oldName: flags.rename.old, newName: flags.rename.new },
+      } satisfies Command<RenameProfileCommandPayload>);
+      console.log(chalk.green(`Profile renamed: ${flags.rename.old} → ${flags.rename.new}`));
       return;
     }
 
     if (flags.default !== null) {
-      await this.setDefaultProfile(flags.default, profileManager, logger);
+      const profiles = listProfiles();
+      if (!profiles.includes(flags.default)) {
+        throw new GemitermError(`Profile '${flags.default}' does not exist.`);
+      }
+      await mediator.send({
+        type: COMMAND_TYPES.SET_DEFAULT_PROFILE,
+        payload: { profileName: flags.default },
+      } satisfies Command<SetDefaultProfileCommandPayload>);
+      console.log(chalk.green(`Default profile set to '${flags.default}'.`));
       return;
     }
 
     if (flags.renew !== null) {
-      await this.renewProfile(flags.renew, authService, logger);
+      const profiles = listProfiles();
+      if (!profiles.includes(flags.renew)) {
+        throw new GemitermError(`Profile '${flags.renew}' does not exist.`);
+      }
+      await mediator.send({
+        type: COMMAND_TYPES.AUTHENTICATE,
+        payload: { profileName: flags.renew, renew: true },
+      } satisfies Command<AuthenticateCommandPayload>);
       return;
     }
 
     if (flags.profileName !== null) {
-      await this.authenticateToProfile(flags.profileName, profileManager, authService, logger);
+      const profiles = listProfiles();
+      if (!profiles.includes(flags.profileName)) {
+        throw new GemitermError(`Profile '${flags.profileName}' does not exist.`);
+      }
+      await mediator.send({
+        type: COMMAND_TYPES.AUTHENTICATE,
+        payload: { profileName: flags.profileName },
+      } satisfies Command<AuthenticateCommandPayload>);
       return;
     }
 
@@ -94,28 +145,140 @@ export class AuthCommand implements CliCommand {
 
     if (profiles.length === 0) {
       logger.debug("No profiles exist, creating first profile and authenticating");
-      await this.authenticateWithProfile(authService, getDefaultProfileName(), profileManager, true);
+      await mediator.send({
+        type: COMMAND_TYPES.AUTHENTICATE,
+        payload: { profileName: getDefaultProfileName(), create: true },
+      } satisfies Command<AuthenticateCommandPayload>);
       return;
     }
 
     if (profiles.length === 1) {
       logger.debug("Single profile found, authenticating with", profiles[0]);
-      await this.authenticateWithProfile(authService, profiles[0], profileManager, false);
+      await mediator.send({
+        type: COMMAND_TYPES.AUTHENTICATE,
+        payload: { profileName: profiles[0] },
+      } satisfies Command<AuthenticateCommandPayload>);
       return;
     }
 
-    const selected = await this.showProfileMenu(profiles, profileManager);
+    const selected = await this.showProfileMenu(profiles, profileManager, mediator);
     if (selected === null) {
       console.log(chalk.dim("Continuing with current default profile."));
       return;
     }
+  }
 
-    if (selected.type === "auth") {
-      logger.debug("Authenticating with profile", selected.profileName);
-      await this.authenticateWithProfile(authService, selected.profileName, profileManager, false);
-    } else if (selected.type === "renew") {
-      logger.debug("Renewing profile", selected.profileName);
-      await authService.renew(selected.profileName);
+  private async showProfileMenu(
+    profiles: string[],
+    profileManager: ProfileManager,
+    mediator: Mediator,
+  ): Promise<{ type: "auth"; profileName: string } | { type: "renew"; profileName: string } | null> {
+    console.log(chalk.bold("\nProfile Management"));
+    console.log("");
+
+    const statuses = profiles.map((name) => profileManager.getStatus(name));
+    console.log(formatProfileTable(statuses));
+
+    const options = [
+      { key: "A", label: "Add new profile" },
+      { key: "D", label: "Delete profile" },
+      { key: "S", label: "Set default" },
+      { key: "R", label: "Rename profile" },
+      { key: "E", label: "Renew session (extend/refresh cookies)" },
+      { key: "X", label: "Exit and continue with current default" },
+    ];
+
+    for (const opt of options) {
+      console.log(`  ${chalk.cyan(`[${opt.key}]`)} ${opt.label}`);
+    }
+    console.log("");
+
+    const answer = await this.promptInput("Select an option");
+    const choice = answer.toUpperCase().trim();
+
+    switch (choice) {
+      case "A": {
+        const name = await this.promptInput("Enter profile name", {
+          validate: (v) => /^[a-zA-Z0-9_-]+$/.test(v) || "Invalid profile name",
+        });
+        validateProfileName(name.trim());
+        if (listProfiles().includes(name.trim())) {
+          throw new GemitermError(`Profile '${name.trim()}' already exists.`);
+        }
+        await mediator.send({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: { profileName: name.trim(), create: true },
+        } satisfies Command<AuthenticateCommandPayload>);
+        return { type: "auth", profileName: name.trim() };
+      }
+      case "D": {
+        const name = await this.promptInput("Enter profile name to delete");
+        const trimmed = name.trim();
+        if (!profiles.includes(trimmed)) {
+          throw new GemitermError(`Profile '${trimmed}' does not exist.`);
+        }
+        const confirmAnswer = await this.promptInput(`Delete profile '${trimmed}'? [y/N]`);
+        if (confirmAnswer.toLowerCase().startsWith("y")) {
+          await mediator.send({
+            type: COMMAND_TYPES.DELETE_PROFILE,
+            payload: { profileName: trimmed },
+          } satisfies Command<DeleteProfileCommandPayload>);
+          console.log(chalk.green(`Profile '${trimmed}' deleted.`));
+        } else {
+          console.log(chalk.dim("Cancelled."));
+        }
+        return null;
+      }
+      case "S": {
+        const name = await this.promptInput("Enter profile name to set as default");
+        const trimmed = name.trim();
+        if (!profiles.includes(trimmed)) {
+          throw new GemitermError(`Profile '${trimmed}' does not exist.`);
+        }
+        await mediator.send({
+          type: COMMAND_TYPES.SET_DEFAULT_PROFILE,
+          payload: { profileName: trimmed },
+        } satisfies Command<SetDefaultProfileCommandPayload>);
+        console.log(chalk.green(`Default profile set to '${trimmed}'.`));
+        return null;
+      }
+      case "R": {
+        const oldName = await this.promptInput("Enter current profile name");
+        const oldTrimmed = oldName.trim();
+        if (!profiles.includes(oldTrimmed)) {
+          throw new GemitermError(`Profile '${oldTrimmed}' does not exist.`);
+        }
+        const newName = await this.promptInput("Enter new profile name", {
+          validate: (v) => /^[a-zA-Z0-9_-]+$/.test(v) || "Invalid profile name",
+        });
+        const newTrimmed = newName.trim();
+        validateProfileName(newTrimmed);
+        await mediator.send({
+          type: COMMAND_TYPES.RENAME_PROFILE,
+          payload: { oldName: oldTrimmed, newName: newTrimmed },
+        } satisfies Command<RenameProfileCommandPayload>);
+        console.log(chalk.green(`Profile renamed: ${oldTrimmed} → ${newTrimmed}`));
+        await mediator.send({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: { profileName: newTrimmed },
+        } satisfies Command<AuthenticateCommandPayload>);
+        return null;
+      }
+      case "E": {
+        const name = await this.promptInput("Enter profile name to renew");
+        const trimmed = name.trim();
+        if (!profiles.includes(trimmed)) {
+          throw new GemitermError(`Profile '${trimmed}' does not exist.`);
+        }
+        await mediator.send({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: { profileName: trimmed, renew: true },
+        } satisfies Command<AuthenticateCommandPayload>);
+        return { type: "renew", profileName: trimmed };
+      }
+      case "X":
+      default:
+        return null;
     }
   }
 
@@ -191,230 +354,6 @@ export class AuthCommand implements CliCommand {
 
     const active = statuses.filter((s) => s.isActive);
     logger.info(`${active.length} of ${statuses.length} profile(s) active`);
-  }
-
-  private async addProfile(
-    profileName: string,
-    profileManager: ProfileManager,
-    authService: AuthService,
-    logger: Logger,
-  ): Promise<void> {
-    validateProfileName(profileName);
-    logger.debug("Adding profile:", profileName);
-
-    if (listProfiles().includes(profileName)) {
-      throw new GemitermError(`Profile '${profileName}' already exists.`);
-    }
-
-    profileManager.create(profileName);
-    console.log(chalk.green(`Profile '${profileName}' created.`));
-
-    await this.authenticateWithProfile(authService, profileName, profileManager, false);
-  }
-
-  private async deleteProfile(
-    profileName: string,
-    skipConfirm: boolean,
-    profileManager: ProfileManager,
-    logger: Logger,
-  ): Promise<void> {
-    const profiles = listProfiles();
-    if (!profiles.includes(profileName)) {
-      throw new GemitermError(`Profile '${profileName}' does not exist.`);
-    }
-
-    logger.debug("Deleting profile:", profileName);
-
-    if (!skipConfirm) {
-      const confirmAnswer = await this.promptInput(`Delete profile '${profileName}'? [y/N]`);
-      if (!confirmAnswer.toLowerCase().startsWith("y")) {
-        console.log(chalk.dim("Cancelled."));
-        return;
-      }
-    }
-
-    profileManager.delete(profileName);
-    logger.info(`Deleted profile: ${profileName}`);
-    console.log(chalk.green(`Profile '${profileName}' deleted.`));
-  }
-
-  private async renameProfile(
-    profileName: string,
-    newName: string,
-    profileManager: ProfileManager,
-    logger: Logger,
-  ): Promise<void> {
-    const profiles = listProfiles();
-    if (!profiles.includes(profileName)) {
-      throw new GemitermError(`Profile '${profileName}' does not exist.`);
-    }
-
-    validateProfileName(newName);
-    logger.debug("Renaming profile:", profileName, "→", newName);
-
-    if (profiles.includes(newName)) {
-      throw new GemitermError(`Profile '${newName}' already exists.`);
-    }
-
-    profileManager.rename(profileName, newName);
-    logger.info(`Renamed profile: ${profileName} → ${newName}`);
-    console.log(chalk.green(`Profile renamed: ${profileName} → ${newName}`));
-  }
-
-  private async setDefaultProfile(
-    profileName: string,
-    profileManager: ProfileManager,
-    logger: Logger,
-  ): Promise<void> {
-    const profiles = listProfiles();
-    if (!profiles.includes(profileName)) {
-      throw new GemitermError(`Profile '${profileName}' does not exist.`);
-    }
-
-    logger.debug("Setting default profile:", profileName);
-
-    profileManager.setDefault(profileName);
-    setDefaultProfileName(profileName);
-    logger.info(`Set default profile: ${profileName}`);
-    console.log(chalk.green(`Default profile set to '${profileName}'.`));
-  }
-
-  private async renewProfile(
-    profileName: string,
-    authService: AuthService,
-    logger: Logger,
-  ): Promise<void> {
-    const profiles = listProfiles();
-    if (!profiles.includes(profileName)) {
-      throw new GemitermError(`Profile '${profileName}' does not exist.`);
-    }
-    logger.debug("Renewing profile:", profileName);
-    await authService.renew(profileName);
-  }
-
-  private async authenticateToProfile(
-    profileName: string,
-    profileManager: ProfileManager,
-    authService: AuthService,
-    logger: Logger,
-  ): Promise<void> {
-    const profiles = listProfiles();
-    if (!profiles.includes(profileName)) {
-      throw new GemitermError(`Profile '${profileName}' does not exist.`);
-    }
-    logger.debug("Authenticating with profile:", profileName);
-    await this.authenticateWithProfile(authService, profileName, profileManager, false);
-  }
-
-  private async showProfileMenu(
-    profiles: string[],
-    profileManager: ProfileManager,
-  ): Promise<
-    { type: "auth"; profileName: string } | { type: "renew"; profileName: string } | null
-  > {
-    console.log(chalk.bold("\nProfile Management"));
-    console.log("");
-
-    const statuses = profiles.map((name) => profileManager.getStatus(name));
-    console.log(formatProfileTable(statuses));
-
-    const options = [
-      { key: "A", label: "Add new profile" },
-      { key: "D", label: "Delete profile" },
-      { key: "S", label: "Set default" },
-      { key: "R", label: "Rename profile" },
-      { key: "E", label: "Renew session (extend/refresh cookies)" },
-      { key: "X", label: "Exit and continue with current default" },
-    ];
-
-    for (const opt of options) {
-      console.log(`  ${chalk.cyan(`[${opt.key}]`)} ${opt.label}`);
-    }
-    console.log("");
-
-    const answer = await this.promptInput("Select an option");
-    const choice = answer.toUpperCase().trim();
-
-    switch (choice) {
-      case "A": {
-        const name = await this.promptInput("Enter profile name", {
-          validate: (v) => /^[a-zA-Z0-9_-]+$/.test(v) || "Invalid profile name",
-        });
-        validateProfileName(name.trim());
-        if (listProfiles().includes(name.trim())) {
-          throw new GemitermError(`Profile '${name.trim()}' already exists.`);
-        }
-        profileManager.create(name.trim());
-        console.log(chalk.green(`Profile '${name.trim()}' created.`));
-        return { type: "auth", profileName: name.trim() };
-      }
-      case "D": {
-        const name = await this.promptInput("Enter profile name to delete");
-        const trimmed = name.trim();
-        if (!profiles.includes(trimmed)) {
-          throw new GemitermError(`Profile '${trimmed}' does not exist.`);
-        }
-        const confirmAnswer = await this.promptInput(`Delete profile '${trimmed}'? [y/N]`);
-        if (confirmAnswer.toLowerCase().startsWith("y")) {
-          profileManager.delete(trimmed);
-          console.log(chalk.green(`Profile '${trimmed}' deleted.`));
-        } else {
-          console.log(chalk.dim("Cancelled."));
-        }
-        return null;
-      }
-      case "S": {
-        const name = await this.promptInput("Enter profile name to set as default");
-        const trimmed = name.trim();
-        if (!profiles.includes(trimmed)) {
-          throw new GemitermError(`Profile '${trimmed}' does not exist.`);
-        }
-        profileManager.setDefault(trimmed);
-        setDefaultProfileName(trimmed);
-        console.log(chalk.green(`Default profile set to '${trimmed}'.`));
-        return null;
-      }
-      case "R": {
-        const oldName = await this.promptInput("Enter current profile name");
-        const oldTrimmed = oldName.trim();
-        if (!profiles.includes(oldTrimmed)) {
-          throw new GemitermError(`Profile '${oldTrimmed}' does not exist.`);
-        }
-        const newName = await this.promptInput("Enter new profile name", {
-          validate: (v) => /^[a-zA-Z0-9_-]+$/.test(v) || "Invalid profile name",
-        });
-        const newTrimmed = newName.trim();
-        validateProfileName(newTrimmed);
-        profileManager.rename(oldTrimmed, newTrimmed);
-        console.log(chalk.green(`Profile renamed: ${oldTrimmed} → ${newTrimmed}`));
-        return { type: "auth", profileName: newTrimmed };
-      }
-      case "E": {
-        const name = await this.promptInput("Enter profile name to renew");
-        const trimmed = name.trim();
-        if (!profiles.includes(trimmed)) {
-          throw new GemitermError(`Profile '${trimmed}' does not exist.`);
-        }
-        return { type: "renew", profileName: trimmed };
-      }
-      case "X":
-      default:
-        return null;
-    }
-  }
-
-  private async authenticateWithProfile(
-    authService: AuthService,
-    profileName: string,
-    profileManager: ProfileManager,
-    createFirst: boolean,
-  ): Promise<void> {
-    if (createFirst) {
-      profileManager.create(profileName);
-      console.log(chalk.dim(`Created profile: ${profileName}`));
-    }
-
-    await authService.authenticate(profileName);
   }
 
   private showUsage(): void {

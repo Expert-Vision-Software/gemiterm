@@ -645,6 +645,32 @@ describe("ListCommand --interactive flag", () => {
       }
     });
 
+    test("continue forwards the selected chat profile to continue command", async () => {
+      setStdinTty(true);
+      try {
+        const chat = { ...SAMPLE_CHATS[0], profile: "dhb-worker" };
+        spyOn(promptsModule, "browser")
+          .mockResolvedValueOnce({ kind: "pick", chat } as any)
+          .mockResolvedValue({ kind: "quit" } as any);
+        spyOn(promptsModule, "select").mockResolvedValue("continue" as any);
+
+        const mockHandler = {
+          queryType: QUERY_TYPES.LIST_CHATS,
+          handle: mock(async () => ({ chats: [chat] })),
+        };
+        mediator.registerQueryHandler(mockHandler as any);
+
+        await command.execute(["--interactive"], context);
+
+        expect(continueExecute).toHaveBeenCalledWith(
+          [chat.id, "--profile", "dhb-worker"],
+          context,
+        );
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
     test("selecting Export to Markdown prompts for a path and forwards --out", async () => {
       setStdinTty(true);
       try {

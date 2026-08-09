@@ -2,17 +2,44 @@ import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:
 import { AuthCommand } from "../../src/cli/commands/auth-command.ts";
 import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
+import { COMMAND_TYPES } from "../../src/core/command-handlers.ts";
 import * as configModule from "../../src/infrastructure/config.ts";
 
 describe("AuthCommand", () => {
   let command: AuthCommand;
   let context: CliCommandContext;
+  let mediator: Mediator;
   let listSpy: ReturnType<typeof spyOn>;
   let defaultProfileSpy: ReturnType<typeof spyOn>;
 
+  function registerMockHandlers() {
+    const authHandler = {
+      commandType: COMMAND_TYPES.AUTHENTICATE,
+      handle: mock(async () => ({ success: true, cookieCount: 0, expiresAt: null })),
+    };
+    const deleteHandler = {
+      commandType: COMMAND_TYPES.DELETE_PROFILE,
+      handle: mock(async () => ({ success: true })),
+    };
+    const renameHandler = {
+      commandType: COMMAND_TYPES.RENAME_PROFILE,
+      handle: mock(async () => ({ success: true })),
+    };
+    const defaultHandler = {
+      commandType: COMMAND_TYPES.SET_DEFAULT_PROFILE,
+      handle: mock(async () => ({ success: true })),
+    };
+    mediator.registerCommandHandler(authHandler as any);
+    mediator.registerCommandHandler(deleteHandler as any);
+    mediator.registerCommandHandler(renameHandler as any);
+    mediator.registerCommandHandler(defaultHandler as any);
+  }
+
   beforeEach(() => {
     command = new AuthCommand();
-    context = { verbose: false, mediator: new Mediator() };
+    mediator = new Mediator();
+    registerMockHandlers();
+    context = { verbose: false, mediator } as CliCommandContext;
     listSpy = spyOn(configModule, "listProfiles").mockReturnValue([]);
     defaultProfileSpy = spyOn(configModule, "getDefaultProfileName").mockReturnValue("default");
   });
@@ -32,28 +59,33 @@ describe("AuthCommand", () => {
     test("authenticates with default profile when no profiles exist", async () => {
       listSpy.mockReturnValue([]);
 
-      const authSpy = spyOn(command as any, "authenticateWithProfile").mockResolvedValue(undefined);
+      const sendSpy = spyOn(context.mediator, "send");
       await command.execute([], context);
 
-      expect(authSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        "default",
-        expect.anything(),
-        true,
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "default",
+            create: true,
+          }),
+        }),
       );
     });
 
     test("authenticates directly when only one profile exists", async () => {
       listSpy.mockReturnValue(["my-profile"]);
 
-      const authSpy = spyOn(command as any, "authenticateWithProfile").mockResolvedValue(undefined);
+      const sendSpy = spyOn(context.mediator, "send");
       await command.execute([], context);
 
-      expect(authSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        "my-profile",
-        expect.anything(),
-        false,
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "my-profile",
+          }),
+        }),
       );
     });
 
@@ -64,25 +96,6 @@ describe("AuthCommand", () => {
       await command.execute([], context);
 
       expect(menuSpy).toHaveBeenCalled();
-    });
-
-    test("authenticates selected profile from menu", async () => {
-      listSpy.mockReturnValue(["p1", "p2"]);
-
-      const menuSpy = spyOn(command as any, "showProfileMenu").mockResolvedValue({
-        type: "auth",
-        profileName: "p2",
-      });
-      const authSpy = spyOn(command as any, "authenticateWithProfile").mockResolvedValue(undefined);
-
-      await command.execute([], context);
-
-      expect(authSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        "p2",
-        expect.anything(),
-        false,
-      );
     });
 
     test("exits when X is selected in profile menu", async () => {
@@ -141,81 +154,69 @@ describe("AuthCommand", () => {
       await command.execute([], context);
     });
 
-    test("renames profile and authenticates with new name", async () => {
+    test("renames profile via mediator", async () => {
       listSpy.mockReturnValue(["p1", "p2"]);
 
-      const authSpy = spyOn(command as any, "authenticateWithProfile").mockResolvedValue(undefined);
-      const mockRename = mock(() => {});
+      const promptSpy = spyOn(command as any, "promptInput").mockImplementation(
+        (prompt: string) => {
+          if (prompt.includes("Select")) return Promise.resolve("R");
+          if (prompt.includes("current profile name")) return Promise.resolve("p1");
+          if (prompt.includes("new profile name")) return Promise.resolve("p1-new");
+          return Promise.resolve("");
+        },
+      );
 
-      const { ProfileManager } = await import("../../src/infrastructure/storage.ts");
-      const origProto = ProfileManager.prototype.rename;
-      ProfileManager.prototype.rename = mockRename;
+      const sendSpy = spyOn(context.mediator, "send");
+      await command.execute([], context);
 
-      try {
-        const promptSpy = spyOn(command as any, "promptInput").mockImplementation(
-          (prompt: string) => {
-            if (prompt.includes("Select")) return Promise.resolve("R");
-            if (prompt.includes("current profile name")) return Promise.resolve("p1");
-            if (prompt.includes("new profile name")) return Promise.resolve("p1-new");
-            return Promise.resolve("");
-          },
-        );
-
-        await command.execute([], context);
-
-        expect(mockRename).toHaveBeenCalledWith("p1", "p1-new");
-        expect(authSpy).toHaveBeenCalledWith(
-          expect.anything(),
-          "p1-new",
-          expect.anything(),
-          false,
-        );
-      } finally {
-        ProfileManager.prototype.rename = origProto;
-      }
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.RENAME_PROFILE,
+          payload: expect.objectContaining({
+            oldName: "p1",
+            newName: "p1-new",
+          }),
+        }),
+      );
     });
 
-    test("set default for a profile", async () => {
+    test("set default via mediator", async () => {
       listSpy.mockReturnValue(["p1", "p2"]);
 
-      const logSpy = spyOn(console, "log").mockImplementation(() => {});
-      const setDefaultSpy = spyOn(configModule, "setDefaultProfileName").mockImplementation(() => {});
-      const mockSetDefault = mock(() => {});
+      const promptSpy = spyOn(command as any, "promptInput").mockImplementation(
+        (prompt: string) => {
+          if (prompt.includes("Select")) return Promise.resolve("S");
+          if (prompt.includes("Enter profile name to set as default")) return Promise.resolve("p2");
+          return Promise.resolve("");
+        },
+      );
 
-      const { ProfileManager } = await import("../../src/infrastructure/storage.ts");
-      const origProto = ProfileManager.prototype.setDefault;
-      ProfileManager.prototype.setDefault = mockSetDefault;
+      const sendSpy = spyOn(context.mediator, "send");
+      await command.execute([], context);
 
-      try {
-        const promptSpy = spyOn(command as any, "promptInput").mockImplementation(
-          (prompt: string) => {
-            if (prompt.includes("Select")) return Promise.resolve("S");
-            if (prompt.includes("Enter profile name to set as default")) return Promise.resolve("p2");
-            return Promise.resolve("");
-          },
-        );
-
-        await command.execute([], context);
-
-        expect(mockSetDefault).toHaveBeenCalledWith("p2");
-        expect(setDefaultSpy).toHaveBeenCalledWith("p2");
-      } finally {
-        ProfileManager.prototype.setDefault = origProto;
-        logSpy.mockRestore();
-      }
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.SET_DEFAULT_PROFILE,
+          payload: expect.objectContaining({
+            profileName: "p2",
+          }),
+        }),
+      );
     });
 
     test("authenticates directly to profile when profileName is provided", async () => {
       listSpy.mockReturnValue(["p1", "p2"]);
 
-      const authSpy = spyOn(command as any, "authenticateWithProfile").mockResolvedValue(undefined);
+      const sendSpy = spyOn(context.mediator, "send");
       await command.execute(["p1"], context);
 
-      expect(authSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        "p1",
-        expect.anything(),
-        false,
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "p1",
+          }),
+        }),
       );
     });
 
@@ -265,29 +266,22 @@ describe("AuthCommand", () => {
   });
 
   describe("--add flag", () => {
-    test("creates profile and authenticates with --add", async () => {
+    test("dispatches AUTHENTICATE with create via mediator", async () => {
       listSpy.mockReturnValue(["existing"]);
       defaultProfileSpy.mockReturnValue("existing");
 
-      const createSpy = mock(() => {});
-      const { ProfileManager } = await import("../../src/infrastructure/storage.ts");
-      const origCreate = ProfileManager.prototype.create;
-      ProfileManager.prototype.create = createSpy;
+      const sendSpy = spyOn(context.mediator, "send");
+      await command.execute(["--add", "new-profile"], context);
 
-      try {
-        const authSpy = spyOn(command as any, "authenticateWithProfile").mockResolvedValue(undefined);
-        await command.execute(["--add", "new-profile"], context);
-
-        expect(createSpy).toHaveBeenCalledWith("new-profile");
-        expect(authSpy).toHaveBeenCalledWith(
-          expect.anything(),
-          "new-profile",
-          expect.anything(),
-          false,
-        );
-      } finally {
-        ProfileManager.prototype.create = origCreate;
-      }
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "new-profile",
+            create: true,
+          }),
+        }),
+      );
     });
 
     test("throws when adding profile that already exists", async () => {
@@ -307,56 +301,46 @@ describe("AuthCommand", () => {
     test("prompts for confirmation when deleting without --yes", async () => {
       listSpy.mockReturnValue(["p1"]);
 
-      const mockDelete = mock(() => {});
-      const { ProfileManager } = await import("../../src/infrastructure/storage.ts");
-      const origDelete = ProfileManager.prototype.delete;
-      ProfileManager.prototype.delete = mockDelete;
+      const promptSpy = spyOn(command as any, "promptInput").mockResolvedValue("n");
+      const sendSpy = spyOn(context.mediator, "send");
+      await command.execute(["--delete", "p1"], context);
 
-      try {
-        const confirmSpy = spyOn(command as any, "promptInput").mockResolvedValue("n");
-        await command.execute(["--delete", "p1"], context);
-
-        expect(mockDelete).not.toHaveBeenCalled();
-        confirmSpy.mockRestore();
-      } finally {
-        ProfileManager.prototype.delete = origDelete;
-      }
+      expect(sendSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: COMMAND_TYPES.DELETE_PROFILE }),
+      );
     });
 
-    test("deletes profile when confirmed", async () => {
+    test("deletes profile when confirmed via mediator", async () => {
       listSpy.mockReturnValue(["p1"]);
 
-      const mockDelete = mock(() => {});
-      const { ProfileManager } = await import("../../src/infrastructure/storage.ts");
-      const origDelete = ProfileManager.prototype.delete;
-      ProfileManager.prototype.delete = mockDelete;
+      const promptSpy = spyOn(command as any, "promptInput").mockResolvedValue("y");
+      const sendSpy = spyOn(context.mediator, "send");
+      await command.execute(["--delete", "p1"], context);
 
-      try {
-        const confirmSpy = spyOn(command as any, "promptInput").mockResolvedValue("y");
-        await command.execute(["--delete", "p1"], context);
-
-        expect(mockDelete).toHaveBeenCalledWith("p1");
-        confirmSpy.mockRestore();
-      } finally {
-        ProfileManager.prototype.delete = origDelete;
-      }
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.DELETE_PROFILE,
+          payload: expect.objectContaining({
+            profileName: "p1",
+          }),
+        }),
+      );
     });
 
-    test("deletes without confirmation when --yes is passed", async () => {
+    test("deletes without confirmation when --yes is passed via mediator", async () => {
       listSpy.mockReturnValue(["p1"]);
 
-      const mockDelete = mock(() => {});
-      const { ProfileManager } = await import("../../src/infrastructure/storage.ts");
-      const origDelete = ProfileManager.prototype.delete;
-      ProfileManager.prototype.delete = mockDelete;
+      const sendSpy = spyOn(context.mediator, "send");
+      await command.execute(["--delete", "p1", "--yes"], context);
 
-      try {
-        await command.execute(["--delete", "p1", "--yes"], context);
-
-        expect(mockDelete).toHaveBeenCalledWith("p1");
-      } finally {
-        ProfileManager.prototype.delete = origDelete;
-      }
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.DELETE_PROFILE,
+          payload: expect.objectContaining({
+            profileName: "p1",
+          }),
+        }),
+      );
     });
 
     test("throws when deleting nonexistent profile", async () => {
@@ -367,21 +351,21 @@ describe("AuthCommand", () => {
   });
 
   describe("--rename flag", () => {
-    test("renames profile with --rename", async () => {
+    test("dispatches RENAME_PROFILE via mediator", async () => {
       listSpy.mockReturnValue(["p1", "p2"]);
 
-      const mockRename = mock(() => {});
-      const { ProfileManager } = await import("../../src/infrastructure/storage.ts");
-      const origRename = ProfileManager.prototype.rename;
-      ProfileManager.prototype.rename = mockRename;
+      const sendSpy = spyOn(context.mediator, "send");
+      await command.execute(["--rename", "p1", "p1-renamed"], context);
 
-      try {
-        await command.execute(["--rename", "p1", "p1-renamed"], context);
-
-        expect(mockRename).toHaveBeenCalledWith("p1", "p1-renamed");
-      } finally {
-        ProfileManager.prototype.rename = origRename;
-      }
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.RENAME_PROFILE,
+          payload: expect.objectContaining({
+            oldName: "p1",
+            newName: "p1-renamed",
+          }),
+        }),
+      );
     });
 
     test("throws when renaming nonexistent profile", async () => {
@@ -404,25 +388,20 @@ describe("AuthCommand", () => {
   });
 
   describe("--default flag", () => {
-    test("sets default profile with --default", async () => {
+    test("dispatches SET_DEFAULT_PROFILE via mediator", async () => {
       listSpy.mockReturnValue(["p1", "p2"]);
 
-      const mockSetDefault = mock(() => {});
-      const { ProfileManager } = await import("../../src/infrastructure/storage.ts");
-      const origSetDefault = ProfileManager.prototype.setDefault;
-      ProfileManager.prototype.setDefault = mockSetDefault;
+      const sendSpy = spyOn(context.mediator, "send");
+      await command.execute(["--default", "p2"], context);
 
-      const setDefaultSpy = spyOn(configModule, "setDefaultProfileName").mockImplementation(() => {});
-
-      try {
-        await command.execute(["--default", "p2"], context);
-
-        expect(mockSetDefault).toHaveBeenCalledWith("p2");
-        expect(setDefaultSpy).toHaveBeenCalledWith("p2");
-      } finally {
-        ProfileManager.prototype.setDefault = origSetDefault;
-        setDefaultSpy.mockRestore();
-      }
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.SET_DEFAULT_PROFILE,
+          payload: expect.objectContaining({
+            profileName: "p2",
+          }),
+        }),
+      );
     });
 
     test("throws when setting default for nonexistent profile", async () => {
@@ -433,13 +412,21 @@ describe("AuthCommand", () => {
   });
 
   describe("--renew flag", () => {
-    test("calls renewProfile with existing profile", async () => {
+    test("dispatches AUTHENTICATE with renew via mediator", async () => {
       listSpy.mockReturnValue(["p1", "p2"]);
 
-      const renewSpy = spyOn(command as any, "renewProfile").mockResolvedValue(undefined);
+      const sendSpy = spyOn(context.mediator, "send");
       await command.execute(["--renew", "p1"], context);
 
-      expect(renewSpy).toHaveBeenCalledWith("p1", expect.anything(), expect.anything());
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "p1",
+            renew: true,
+          }),
+        }),
+      );
     });
 
     test("throws when renewing nonexistent profile", async () => {
@@ -451,10 +438,18 @@ describe("AuthCommand", () => {
     test("works with -e short flag", async () => {
       listSpy.mockReturnValue(["p1"]);
 
-      const renewSpy = spyOn(command as any, "renewProfile").mockResolvedValue(undefined);
+      const sendSpy = spyOn(context.mediator, "send");
       await command.execute(["-e", "p1"], context);
 
-      expect(renewSpy).toHaveBeenCalledWith("p1", expect.anything(), expect.anything());
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "p1",
+            renew: true,
+          }),
+        }),
+      );
     });
   });
 
@@ -464,12 +459,12 @@ describe("AuthCommand", () => {
 
       const result = await (command as any).showProfileMenu(["p1"], {
         getStatus: () => ({ name: "p1", exists: true, isActive: true, expiresAt: null, isDefault: true }),
-      } as any);
+      } as any, mediator);
 
       expect(result).toBeNull();
     });
 
-    test("renew option [E] returns renew type with selected profile", async () => {
+    test("renew option [E] dispatches AUTHENTICATE with renew and returns renew type", async () => {
       let call = 0;
       spyOn(command as any, "promptInput").mockImplementation((prompt: string) => {
         call++;
@@ -478,11 +473,22 @@ describe("AuthCommand", () => {
         return Promise.resolve("");
       });
 
+      const sendSpy = spyOn(mediator, "send");
+
       const result = await (command as any).showProfileMenu(["p1", "p2"], {
         getStatus: () => ({ name: "p1", exists: true, isActive: true, expiresAt: null, isDefault: true }),
-      } as any);
+      } as any, mediator);
 
       expect(result).toEqual({ type: "renew", profileName: "p1" });
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "p1",
+            renew: true,
+          }),
+        }),
+      );
     });
 
     test("renew option [E] rejects nonexistent profile name", async () => {
@@ -497,31 +503,61 @@ describe("AuthCommand", () => {
       await expect(
         (command as any).showProfileMenu(["p1"], {
           getStatus: () => ({ name: "p1", exists: true, isActive: true, expiresAt: null, isDefault: true }),
-        } as any),
+        } as any, mediator),
       ).rejects.toThrow("does not exist");
+    });
+
+    test("add option [A] dispatches AUTHENTICATE with create", async () => {
+      let call = 0;
+      spyOn(command as any, "promptInput").mockImplementation((prompt: string) => {
+        call++;
+        if (call === 1) return Promise.resolve("A");
+        if (call === 2 && prompt.includes("Enter profile name")) return Promise.resolve("new-pro");
+        return Promise.resolve("");
+      });
+
+      const sendSpy = spyOn(mediator, "send");
+
+      await (command as any).showProfileMenu(["p1"], {
+        getStatus: () => ({ name: "p1", exists: true, isActive: true, expiresAt: null, isDefault: true }),
+      } as any, mediator);
+
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "new-pro",
+            create: true,
+          }),
+        }),
+      );
     });
   });
 
   describe("interactive renew from menu", () => {
-    test("execute calls authService.renew when menu returns renew type", async () => {
+    test("renew dispatches AUTHENTICATE with renew through mediator", async () => {
       listSpy.mockReturnValue(["p1", "p2"]);
 
-      spyOn(command as any, "showProfileMenu").mockResolvedValue({
-        type: "renew",
-        profileName: "p1",
+      let call = 0;
+      spyOn(command as any, "promptInput").mockImplementation((prompt: string) => {
+        call++;
+        if (call === 1 && prompt.includes("Select")) return Promise.resolve("E");
+        if (call === 2 && prompt.includes("renew")) return Promise.resolve("p1");
+        return Promise.resolve("");
       });
 
-      const { AuthService } = await import("../../src/services/auth-service.ts");
-      const origRenew = AuthService.prototype.renew;
-      const mockRenew = mock(async () => ({ cookies: [], expiresAt: null }));
-      AuthService.prototype.renew = mockRenew;
+      const sendSpy = spyOn(context.mediator, "send");
+      await command.execute([], context);
 
-      try {
-        await command.execute([], context);
-        expect(mockRenew).toHaveBeenCalledWith("p1");
-      } finally {
-        AuthService.prototype.renew = origRenew;
-      }
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "p1",
+            renew: true,
+          }),
+        }),
+      );
     });
   });
 });

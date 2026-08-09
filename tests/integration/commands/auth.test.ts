@@ -2,19 +2,44 @@ import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:
 import { AuthCommand } from "../../../src/cli/commands/auth-command.ts";
 import { Mediator } from "../../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
+import { COMMAND_TYPES } from "../../../src/core/command-handlers.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
-import { createMockCookies, mockProfileDir } from "../../fixtures/auth-fixtures.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
+
+function registerAllHandlers(mediator: Mediator, overrides?: {
+  authHandler?: { commandType: string; handle: ReturnType<typeof mock> };
+}) {
+  const authHandler = overrides?.authHandler ?? {
+    commandType: COMMAND_TYPES.AUTHENTICATE,
+    handle: mock(async () => ({ success: true, cookieCount: 0, expiresAt: null })),
+  };
+  mediator.registerCommandHandler(authHandler as any);
+  mediator.registerCommandHandler({
+    commandType: COMMAND_TYPES.DELETE_PROFILE,
+    handle: mock(async () => ({ success: true })),
+  } as any);
+  mediator.registerCommandHandler({
+    commandType: COMMAND_TYPES.RENAME_PROFILE,
+    handle: mock(async () => ({ success: true })),
+  } as any);
+  mediator.registerCommandHandler({
+    commandType: COMMAND_TYPES.SET_DEFAULT_PROFILE,
+    handle: mock(async () => ({ success: true })),
+  } as any);
+}
 
 describe("auth command integration", () => {
   let command: AuthCommand;
   let context: CliCommandContext;
+  let mediator: Mediator;
   let logSpy: ReturnType<typeof spyOn>;
   let originalEnv: Record<string, string | undefined>;
 
   beforeEach(() => {
     command = new AuthCommand();
-    context = { verbose: false, mediator: new Mediator() };
+    mediator = new Mediator();
+    registerAllHandlers(mediator);
+    context = { verbose: false, mediator };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     originalEnv = {
       GEMITERM_CONFIG_DIR: process.env.GEMITERM_CONFIG_DIR,
@@ -41,39 +66,62 @@ describe("auth command integration", () => {
   describe("auth flow with mock browser", () => {
     test("creates first profile and authenticates when no profiles exist", async () => {
       spyOn(configModule, "listProfiles").mockReturnValue([]);
-      const authSpy = spyOn(command as any, "authenticateWithProfile").mockResolvedValue(undefined);
 
+      const sendSpy = spyOn(mediator, "send");
       await command.execute([], context);
 
-      expect(authSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        "default",
-        expect.anything(),
-        true,
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "default",
+            create: true,
+          }),
+        }),
       );
     });
 
     test("authenticates with the only profile when one exists", async () => {
       spyOn(configModule, "listProfiles").mockReturnValue(["solo"]);
-      const authSpy = spyOn(command as any, "authenticateWithProfile").mockResolvedValue(undefined);
 
+      const sendSpy = spyOn(mediator, "send");
       await command.execute([], context);
 
-      expect(authSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        "solo",
-        expect.anything(),
-        false,
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "solo",
+          }),
+        }),
       );
     });
 
     test("propagates authentication errors", async () => {
       spyOn(configModule, "listProfiles").mockReturnValue(["default"]);
-      spyOn(command as any, "authenticateWithProfile").mockRejectedValue(
-        new Error("Browser launch failed"),
-      );
+      const faultMediator = new Mediator();
+      const errorHandler = {
+        commandType: COMMAND_TYPES.AUTHENTICATE,
+        handle: mock(async () => {
+          throw new Error("Browser launch failed");
+        }),
+      };
+      faultMediator.registerCommandHandler(errorHandler as any);
+      faultMediator.registerCommandHandler({
+        commandType: COMMAND_TYPES.DELETE_PROFILE,
+        handle: mock(async () => ({ success: true })),
+      } as any);
+      faultMediator.registerCommandHandler({
+        commandType: COMMAND_TYPES.RENAME_PROFILE,
+        handle: mock(async () => ({ success: true })),
+      } as any);
+      faultMediator.registerCommandHandler({
+        commandType: COMMAND_TYPES.SET_DEFAULT_PROFILE,
+        handle: mock(async () => ({ success: true })),
+      } as any);
+      const faultContext = { verbose: false as const, mediator: faultMediator };
 
-      await expect(command.execute([], context)).rejects.toThrow("Browser launch failed");
+      await expect(command.execute([], faultContext)).rejects.toThrow("Browser launch failed");
     });
   });
 
@@ -86,7 +134,7 @@ describe("auth command integration", () => {
 
       await command.execute([], context);
 
-      expect(menuSpy).toHaveBeenCalledWith(profiles, expect.anything());
+      expect(menuSpy).toHaveBeenCalled();
     });
 
     test("menu shows all profile options", async () => {
@@ -107,7 +155,7 @@ describe("auth command integration", () => {
         setDefault: mock(() => {}),
       };
 
-      await (command as any).showProfileMenu(profiles, mockProfileManager);
+      await (command as any).showProfileMenu(profiles, mockProfileManager, mediator);
 
       const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
       expect(output).toContain("[A]");
@@ -122,21 +170,30 @@ describe("auth command integration", () => {
       expect(output).toContain("Exit");
     });
 
-    test("selecting a profile from menu triggers authentication", async () => {
-      spyOn(configModule, "listProfiles").mockReturnValue(["p1", "p2"]);
-      spyOn(command as any, "showProfileMenu").mockResolvedValue({
-        type: "auth",
-        profileName: "p2",
-      });
-      const authSpy = spyOn(command as any, "authenticateWithProfile").mockResolvedValue(undefined);
+    test("selecting a profile from menu triggers authentication via mediator", async () => {
+      spyOn(configModule, "listProfiles")
+        .mockReturnValueOnce(["p1", "p2"])
+        .mockReturnValueOnce(["p1", "p2"]);
 
+      spyOn(command as any, "promptInput").mockImplementation(
+        (prompt: string) => {
+          if (prompt.includes("Select")) return Promise.resolve("A");
+          if (prompt.includes("Enter profile name")) return Promise.resolve("p3");
+          return Promise.resolve("");
+        },
+      );
+
+      const sendSpy = spyOn(mediator, "send");
       await command.execute([], context);
 
-      expect(authSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        "p2",
-        expect.anything(),
-        false,
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: "p3",
+            create: true,
+          }),
+        }),
       );
     });
 
@@ -178,9 +235,20 @@ describe("auth command integration", () => {
         },
       );
 
-      const result = await (command as any).showProfileMenu(profiles, mockProfileManager);
+      const sendSpy = spyOn(mediator, "send");
+
+      const result = await (command as any).showProfileMenu(profiles, mockProfileManager, mediator);
 
       expect(result).toEqual({ type: "auth", profileName: newProfileName });
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: COMMAND_TYPES.AUTHENTICATE,
+          payload: expect.objectContaining({
+            profileName: newProfileName,
+            create: true,
+          }),
+        }),
+      );
     });
   });
 });

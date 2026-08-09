@@ -6,6 +6,8 @@ import {
   COMMAND_TYPES,
   type StartNewChatCommandPayload,
   type StartNewChatCommandResult,
+  type SendMessageCommandPayload,
+  type SendMessageCommandResult,
 } from "../../core/command-handlers.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 import { checkArgLength } from "../utils/long-arg-guard.ts";
@@ -131,23 +133,29 @@ export class NewCommand implements CliCommand {
     let conversationId: string | null = null;
 
     const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
-      const payload: StartNewChatCommandPayload = { message };
-      if (profileName) {
-        payload.profileName = profileName;
-      }
-
-      const result = await mediator.send<StartNewChatCommandResult>({
-        type: COMMAND_TYPES.START_NEW_CHAT,
-        payload,
-      } as Command<StartNewChatCommandPayload>);
-
       const isFirst = !conversationId;
       if (isFirst) {
+        const payload: StartNewChatCommandPayload = { message };
+        if (profileName) {
+          payload.profileName = profileName;
+        }
+
+        const result = await mediator.send<StartNewChatCommandResult>({
+          type: COMMAND_TYPES.START_NEW_CHAT,
+          payload,
+        } as Command<StartNewChatCommandPayload>);
+
         conversationId = result.conversationId;
         console.log(chalk.dim(`Conversation started: ${chalk.cyan(conversationId)}`));
-      } else {
-        console.log(chalk.dim(`Response from: ${chalk.cyan(result.conversationId)}`));
+
+        return { response: result.response };
       }
+
+      logger.debug(`Sending message to ${conversationId}`);
+      const result = await mediator.send<SendMessageCommandResult>({
+        type: COMMAND_TYPES.SEND_MESSAGE,
+        payload: { conversationId: conversationId!, message, profileName: profileName ?? undefined },
+      } as Command<SendMessageCommandPayload>);
 
       return { response: result.response };
     };

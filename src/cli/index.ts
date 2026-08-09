@@ -32,6 +32,7 @@ import {
 import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
 import { CookieMonitor } from "../services/cookie-monitor.ts";
 import { AuthService } from "../services/auth-service.ts";
+import { ProfileService } from "../services/profile-service.ts";
 import { confirm } from "./utils/prompts.ts";
 import { runReauthFlow } from "./utils/reauth.ts";
 import { createClientServices } from "./client-services.ts";
@@ -133,10 +134,10 @@ async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: 
   mediator.registerQueryHandler(new ListModelsQueryHandler(clientService));
   mediator.registerQueryHandler(new ProbeProfileQueryHandler(getGeminiClient));
 
-  mediator.registerCommandHandler(new AuthenticateCommandHandler(null as any));
-  mediator.registerCommandHandler(new DeleteProfileCommandHandler(null as any));
-  mediator.registerCommandHandler(new RenameProfileCommandHandler(null as any));
-  mediator.registerCommandHandler(new SetDefaultProfileCommandHandler(null as any));
+  mediator.registerCommandHandler(new AuthenticateCommandHandler(new ProfileService(authService, profileManager)));
+  mediator.registerCommandHandler(new DeleteProfileCommandHandler(new ProfileService(authService, profileManager)));
+  mediator.registerCommandHandler(new RenameProfileCommandHandler(new ProfileService(authService, profileManager)));
+  mediator.registerCommandHandler(new SetDefaultProfileCommandHandler(new ProfileService(authService, profileManager)));
   mediator.registerCommandHandler(new DeleteConversationCommandHandler(commandClientService));
   mediator.registerCommandHandler(new SendMessageCommandHandler(commandClientService));
   mediator.registerCommandHandler(new StartNewChatCommandHandler(commandClientService));
