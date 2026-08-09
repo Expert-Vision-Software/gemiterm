@@ -1,8 +1,25 @@
 import { describe, test, expect, afterAll } from "bun:test";
 import { spawn, Subprocess } from "bun";
 import { resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const CLI_ENTRY = resolve(import.meta.dir, "..", "..", "src", "cli", "index.ts");
+
+let configDir: string;
+const cleanupDirs: Set<string> = new Set();
+
+function setupConfigDir(): string {
+  const dir = mkdtempSync(resolve(tmpdir(), "gemiterm-smoke-"));
+  cleanupDirs.add(dir);
+  return dir;
+}
+
+afterAll(() => {
+  for (const dir of cleanupDirs) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
 
 interface SpawnResult {
   exitCode: number;
@@ -15,7 +32,7 @@ async function runCli(args: string[]): Promise<SpawnResult> {
     cmd: ["bun", CLI_ENTRY, ...args],
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, GEMITERM_CONFIG_DIR: "" },
+    env: { ...process.env, GEMITERM_CONFIG_DIR: configDir },
   });
 
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -29,6 +46,7 @@ async function runCli(args: string[]): Promise<SpawnResult> {
 
 describe("Smoke Tests", () => {
   test("--help displays usage information and exits 0", async () => {
+    configDir = setupConfigDir();
     const result = await runCli(["--help"]);
 
     expect(result.exitCode).toBe(0);
@@ -37,6 +55,7 @@ describe("Smoke Tests", () => {
   });
 
   test("--version prints version string and exits 0", async () => {
+    configDir = setupConfigDir();
     const result = await runCli(["--version"]);
 
     expect(result.exitCode).toBe(0);
@@ -44,6 +63,7 @@ describe("Smoke Tests", () => {
   });
 
   test("status runs without crashing", async () => {
+    configDir = setupConfigDir();
     const result = await runCli(["status"]);
 
     expect(result.exitCode).toBeGreaterThanOrEqual(0);
