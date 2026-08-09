@@ -1,4 +1,4 @@
-import { describe, test, expect, afterAll } from "bun:test";
+import { describe, test, expect, afterAll, beforeEach } from "bun:test";
 import { spawn, Subprocess } from "bun";
 import { resolve } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -45,8 +45,11 @@ async function runCli(args: string[]): Promise<SpawnResult> {
 }
 
 describe("Smoke Tests", () => {
-  test("--help displays usage information and exits 0", async () => {
+  beforeEach(() => {
     configDir = setupConfigDir();
+  });
+
+  test("--help displays usage information and exits 0", async () => {
     const result = await runCli(["--help"]);
 
     expect(result.exitCode).toBe(0);
@@ -55,7 +58,6 @@ describe("Smoke Tests", () => {
   });
 
   test("--version prints version string and exits 0", async () => {
-    configDir = setupConfigDir();
     const result = await runCli(["--version"]);
 
     expect(result.exitCode).toBe(0);
@@ -63,7 +65,6 @@ describe("Smoke Tests", () => {
   });
 
   test("status runs without crashing", async () => {
-    configDir = setupConfigDir();
     const result = await runCli(["status"]);
 
     expect(result.exitCode).toBeGreaterThanOrEqual(0);

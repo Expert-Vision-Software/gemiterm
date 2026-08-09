@@ -253,17 +253,14 @@ export class AuthService {
     const timeoutMs = opts.timeoutMs ?? SILENT_REFRESH_TIMEOUT_MS;
     this.logger.debug(`Silent refresh attempt (mode=targeted) for profile: ${name}`);
 
-    let snapshot: { activePsid: string; activePsidts: string | null } | null = null;
+    let snapshot: { activePsidts: string | null } | null = null;
     try {
       const stored = this.cookieStorage.load(name);
-      const psid = stored.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value
-        ?? stored.find((c) => c.name === "__Secure-1PSID")?.value
-        ?? "";
       const psidts = stored.find((c) => c.name === "__Secure-1PSIDTS" && isGoogleDomainCookie(c))?.value
         ?? stored.find((c) => c.name === "__Secure-1PSIDTS")?.value
         ?? null;
-      if (psid) {
-        snapshot = { activePsid: psid, activePsidts: psidts };
+      if (psidts !== null) {
+        snapshot = { activePsidts: psidts };
       }
     } catch (err) {
       this.logger.debug(`silentRefresh: snapshot load failed: ${err}`);
