@@ -87,31 +87,46 @@ export class ProfileAuthManager {
     const name = profileName ?? getDefaultProfileName();
     validateProfileName(name);
 
-    if (!this.profileManager.hasValidCookies(name)) {
-      const extended = await this.autoExtendSession(name);
-      if (extended) {
-        this.logger.info(`Session auto-refreshed for profile '${name}'`);
-        return this.cookieStorageService.loadCookiesForProfile(name);
-      }
-      if (!this.profileManager.hasStoredCookies(name)) {
-        throw new AuthenticationError(
-          `No valid session for profile '${name}'. Run 'gemiterm login' to authenticate.`,
-        );
-      }
-    }
+    const restored = await this.tryRestoreStaleCookies(name);
+    if (restored) return restored;
 
-    let probe = await this.probeServerSession(name);
-    if (probe === "stale") {
-      const refreshed = await this.silentRefresh(name);
-      if (refreshed) {
-        this.probeCache.delete(name);
-        await this.probeServerSession(name);
-        this.logger.info(`Profile '${name}' is authenticated`);
-        return this.cookieStorageService.loadCookiesForProfile(name);
-      }
-      probe = "valid";
-    }
+    const probeResult = await this.tryRestoreStaleProbe(name);
+    if (probeResult.cookies) return probeResult.cookies;
 
+    return this.finishAuthentication(name, probeResult.state);
+  }
+
+  private async tryRestoreStaleCookies(name: string): Promise<LoadedCookies | null> {
+    if (this.profileManager.hasValidCookies(name)) return null;
+
+    const extended = await this.autoExtendSession(name);
+    if (extended) {
+      this.logger.info(`Session auto-refreshed for profile '${name}'`);
+      return this.cookieStorageService.loadCookiesForProfile(name);
+    }
+    if (!this.profileManager.hasStoredCookies(name)) {
+      throw new AuthenticationError(
+        `No valid session for profile '${name}'. Run 'gemiterm login' to authenticate.`,
+      );
+    }
+    return null;
+  }
+
+  private async tryRestoreStaleProbe(name: string): Promise<{ state: ProbeResult; cookies: LoadedCookies | null }> {
+    const probe = await this.probeServerSession(name);
+    if (probe === "valid") return { state: "valid", cookies: null };
+
+    const refreshed = await this.silentRefresh(name);
+    if (refreshed) {
+      this.probeCache.delete(name);
+      await this.probeServerSession(name);
+      this.logger.info(`Profile '${name}' is authenticated`);
+      return { state: "valid", cookies: this.cookieStorageService.loadCookiesForProfile(name) };
+    }
+    return { state: "valid", cookies: null };
+  }
+
+  private async finishAuthentication(name: string, probe: ProbeResult): Promise<LoadedCookies> {
     let rotation: RotateCookiesResult = { rotated: false, attempted: false };
     try {
       rotation = await this.rotateCookies(name);
@@ -131,9 +146,7 @@ export class ProfileAuthManager {
       isPhantom,
     });
 
-    const action = getRecoveryAction(state);
-
-    if (action === RecoveryAction.TargetedRefresh) {
+    if (getRecoveryAction(state) === RecoveryAction.TargetedRefresh) {
       const refreshed = await this.silentRefresh(name, { mode: "targeted" });
       if (!refreshed) {
         throw new AuthenticationError(
