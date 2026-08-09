@@ -118,19 +118,9 @@ export class ProfileAuthManager {
       this.logger.debug(`ensureAuthenticated: best-effort rotation failed for profile '${name}': ${e}`);
     }
 
-    if (rotation.sessionInvalid) {
-      // RotateCookies returned 401/403: the server rejected the session outright.
-      // models() (PSID-only) can still succeed in this state, so the stale-probe path
-      // never fires — but the session is dead for PSIDTS-requiring RPCs (listChats).
-      // Only a headed reauth recovers this; throw so the CLI's reauth prompt fires.
-      throw new AuthenticationError(
-        `Session for profile '${name}' is no longer valid (server rejected RotateCookies). Run 'gemiterm login' to re-authenticate.`,
-      );
-    }
-
     if (rotation.rotated) {
       // Fresh __Secure-1PSIDTS obtained; session is fully usable.
-    } else if (rotation.attempted) {
+    } else if (rotation.attempted || rotation.sessionInvalid) {
       const isPhantom = await this.detectPhantomAuth(name);
       if (isPhantom) {
         this.logger.debug(`Phantom-auth detected for profile '${name}'; attempting targeted L2 silent refresh`);
@@ -141,7 +131,7 @@ export class ProfileAuthManager {
           );
         }
       } else {
-        this.logger.debug(`ensureAuthenticated: L1 RotateCookies declined for profile '${name}'; session is valid.`);
+        this.logger.debug(`ensureAuthenticated: L1 RotateCookies did not produce a fresh session for profile '${name}'; session may still be usable via Gemini API directly.`);
       }
     } else {
       // L1 was throttled (600 s disk-mtime guard), disabled, or unavailable before any
