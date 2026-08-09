@@ -12,6 +12,7 @@ import { existsFile } from "../infrastructure/io.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
 import { rotateCookies, isGoogleDomainCookie, COOKIE_NAMES_OF_INTEREST, type RotateCookiesResult } from "./cookie-rotation.ts";
 import { CookieStorageService } from "./cookie-storage-service.ts";
+import type { CookieJar } from "./cookie-jar.ts";
 
 const GEMINI_AUTH_URL = "https://gemini.google.com/app";
 const DEFAULT_AUTH_TIMEOUT_MS = 300_000;
@@ -42,6 +43,7 @@ export interface AuthServiceDeps {
   cookieStorageService: CookieStorageService;
   logger: Logger;
   silentRefreshMonitorFactory?: () => CookieMonitor;
+  cookieJar?: CookieJar;
 }
 
 export class AuthServiceTimeoutError extends Error {
@@ -56,6 +58,7 @@ export class AuthService {
   private readonly cookieMonitor: CookieMonitor;
   private readonly cookieStorage: CookieStorage;
   private readonly cookieStorageService: CookieStorageService;
+  private readonly cookieJar?: CookieJar;
   private readonly logger: Logger;
   private readonly silentRefreshMonitorFactory: () => CookieMonitor;
 
@@ -64,6 +67,7 @@ export class AuthService {
     this.cookieMonitor = deps.cookieMonitor;
     this.cookieStorage = deps.cookieStorage;
     this.cookieStorageService = deps.cookieStorageService;
+    this.cookieJar = deps.cookieJar;
     this.logger = deps.logger;
     this.silentRefreshMonitorFactory = deps.silentRefreshMonitorFactory
       ?? (() => new CookieMonitorImpl({ driver: deps.driver, logger: deps.logger }));
@@ -181,7 +185,11 @@ export class AuthService {
   async extractCookies(profileName: string, cookies: Cookie[]): Promise<void> {
     ensureConfigDir();
     this.logger.info(`Saving ${cookies.length} cookies for profile: ${profileName}`);
-    this.cookieStorage.save(profileName, cookies);
+    if (this.cookieJar) {
+      this.cookieJar.replace(profileName, cookies);
+    } else {
+      this.cookieStorage.save(profileName, cookies);
+    }
   }
 
   confirmAuthSuccess(cookieCount: number, expiresAt: Date | null, cookies: Cookie[] = []): void {
@@ -225,6 +233,7 @@ export class AuthService {
         cookieStorage: this.cookieStorage,
         cookieStorageService: this.cookieStorageService,
         logger: this.logger,
+        cookieJar: this.cookieJar,
       });
     } catch (err) {
       this.logger.debug(`rotateCookies failed for profile '${name}': ${err}`);
@@ -253,6 +262,7 @@ export class AuthService {
           cookieStorage: this.cookieStorage,
           cookieStorageService: this.cookieStorageService,
           logger: this.logger,
+          cookieJar: this.cookieJar,
         });
         if (l1.rotated) {
           return true;
@@ -324,7 +334,11 @@ export class AuthService {
           this.logger.debug(`silentRefresh (targeted): no PSIDTS-related cookie changed vs baseline`);
           return false;
         }
-        this.cookieStorageService.saveCookiesForProfile(name, next);
+        if (this.cookieJar) {
+          this.cookieJar.upsert(name, cookies.filter((bc) => COOKIE_NAMES_OF_INTEREST.has(bc.name)));
+        } else {
+          this.cookieStorageService.saveCookiesForProfile(name, next);
+        }
         return true;
       }
 
@@ -334,8 +348,12 @@ export class AuthService {
         this.logger.debug(`silentRefresh: cookies unchanged vs baseline, treating as no rotation`);
         return false;
       }
-      const merged = mergeCookies(existing, cookies);
-      this.cookieStorageService.saveCookiesForProfile(name, merged);
+      if (this.cookieJar) {
+        this.cookieJar.upsert(name, cookies);
+      } else {
+        const merged = mergeCookies(existing, cookies);
+        this.cookieStorageService.saveCookiesForProfile(name, merged);
+      }
       return true;
     } catch (err) {
       this.logger.debug(`silentRefresh: ${err}`);

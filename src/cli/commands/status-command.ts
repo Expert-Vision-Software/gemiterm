@@ -45,21 +45,24 @@ export class StatusCommand implements CliCommand {
       return { ...status, isDefault: name === getDefaultProfileName() };
     });
 
-    const probes = await Promise.all(
-      profileNames.map((name) =>
-        context.mediator
-          .send<ProbeProfileQueryResult>({
+    const probes: ProbeProfileQueryResult[] = [];
+    for (const name of profileNames) {
+      try {
+        probes.push(
+          await context.mediator.send<ProbeProfileQueryResult>({
             type: QUERY_TYPES.PROBE_PROFILE,
             payload: { profileName: name },
-          })
-          .catch((err): ProbeProfileQueryResult => ({
-            result: "dead",
-            chatsCount: 0,
-            modelsCount: 0,
-            error: err instanceof Error ? err.message : String(err),
-          })),
-      ),
-    );
+          }),
+        );
+      } catch (err) {
+        probes.push({
+          result: "dead",
+          chatsCount: 0,
+          modelsCount: 0,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     const probeByName = new Map(profileNames.map((name, i) => [name, probes[i]!]));
     const enriched = statuses.map((s) => ({ ...s, probe: probeByName.get(s.name) }));

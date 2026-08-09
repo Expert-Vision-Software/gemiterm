@@ -1,10 +1,12 @@
-import type { ChatInfo, Message } from "../core/types.ts";
+import type { Cookie, ChatInfo, Message } from "../core/types.ts";
 import type { IGeminiClientService } from "../core/command-handlers.ts";
 import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
+import type { CookieJar } from "./cookie-jar.ts";
 import type { ChatMetadata } from "./chat-metadata-storage.ts";
 import { ChatMetadataStorage } from "./chat-metadata-storage.ts";
+import { makeMetadata, threadOnto, captureFrom } from "./conversation-threading.ts";
 import { GeminiAPIError, AuthenticationError, GemitermError } from "../core/errors.ts";
 
 export interface GeminiClientDeps {
@@ -68,15 +70,6 @@ interface GeminiClientConfig {
   secure1psidts?: string | null;
 }
 
-function extractChatMetadata(metadata: (string | null)[] | undefined): ChatMetadata | null {
-  if (!metadata) return null;
-  const rid = metadata[1];
-  const rcid = metadata[2];
-  if (!rid && !rcid) return null;
-  const ctx = metadata[9];
-  return { rid: rid ?? "", rcid: rcid ?? "", ctx: ctx === "" ? null : (ctx ?? null) };
-}
-
 export class GeminiClientService
   implements IGeminiClientService, IGeminiClientQueryService
 {
@@ -85,17 +78,19 @@ export class GeminiClientService
   private initialized = false;
   readonly logger: Logger;
   readonly cookieStorageService?: CookieStorageService;
+  readonly cookieJar?: CookieJar;
   readonly profileName?: string;
   private readonly deps: GeminiClientDeps;
   private baselineSecure1psid: string;
   private baselineSecure1psidts: string | null;
   private readonly chatMetadata: ChatMetadataStorage;
 
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps, chatMetadata?: ChatMetadataStorage);
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: "_test", chatMetadata?: ChatMetadataStorage);
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps | "_test", chatMetadata?: ChatMetadataStorage) {
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps, chatMetadata?: ChatMetadataStorage, cookieJar?: CookieJar);
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: "_test", chatMetadata?: ChatMetadataStorage, cookieJar?: CookieJar);
+  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps | "_test", chatMetadata?: ChatMetadataStorage, cookieJar?: CookieJar) {
     this.logger = logger;
     this.cookieStorageService = cookieStorageService;
+    this.cookieJar = cookieJar;
     this.profileName = profileName;
     this.deps = (typeof _deps === "object" ? _deps : null) ?? getRealDeps();
     this.client = new this.deps.Gemini({ secure_1psid: config.secure1psid, timeout: 300_000, autoClose: false });
@@ -118,7 +113,8 @@ export class GeminiClientService
 
   private persistRefreshedCookies(): void {
     try {
-      if (!this.cookieStorageService || !this.profileName || !this.client) return;
+      if (!this.profileName || !this.client) return;
+      if (!this.cookieStorageService && !this.cookieJar) return;
       const jar = this.client.cookies as Record<string, string>;
       const live1psid = jar["__Secure-1PSID"];
       const live1psidts = jar["__Secure-1PSIDTS"];
@@ -126,22 +122,32 @@ export class GeminiClientService
       const changed1psidts = typeof live1psidts === "string" && live1psidts !== "" && live1psidts !== this.baselineSecure1psidts;
       if (!changed1psid && !changed1psidts) return;
 
-      const stored = this.cookieStorageService.loadAllCookiesForProfile(this.profileName);
-      let changed = false;
-      const merged = stored.map((c) => {
+      const stored = this.cookieStorageService!.loadAllCookiesForProfile(this.profileName);
+      const changedCookies: Cookie[] = [];
+      for (const c of stored) {
         if (c.name === "__Secure-1PSID" && changed1psid && c.value === this.baselineSecure1psid) {
-          changed = true;
-          return { ...c, value: live1psid };
+          changedCookies.push({ ...c, value: live1psid });
         }
         if (c.name === "__Secure-1PSIDTS" && changed1psidts && c.value === this.baselineSecure1psidts) {
-          changed = true;
-          return { ...c, value: live1psidts };
+          changedCookies.push({ ...c, value: live1psidts });
         }
-        return c;
-      });
-      if (!changed) return;
+      }
+      if (changedCookies.length === 0) return;
 
-      this.cookieStorageService.saveCookiesForProfile(this.profileName, merged);
+      if (this.cookieJar) {
+        this.cookieJar.upsert(this.profileName, changedCookies);
+      } else {
+        const merged = stored.map((c) => {
+          if (c.name === "__Secure-1PSID" && changed1psid && c.value === this.baselineSecure1psid) {
+            return { ...c, value: live1psid };
+          }
+          if (c.name === "__Secure-1PSIDTS" && changed1psidts && c.value === this.baselineSecure1psidts) {
+            return { ...c, value: live1psidts };
+          }
+          return c;
+        });
+        this.cookieStorageService!.saveCookiesForProfile(this.profileName, merged);
+      }
       if (changed1psid) this.baselineSecure1psid = live1psid;
       if (changed1psidts) this.baselineSecure1psidts = live1psidts;
       this.logger.debug(`Persisted refreshed cookies for profile '${this.profileName}'`);
@@ -215,6 +221,7 @@ export class GeminiClientService
       profileName,
       this.deps,
       this.chatMetadata,
+      this.cookieJar,
     );
   }
 
@@ -267,13 +274,14 @@ export class GeminiClientService
       const turns = raw ?? [];
       if (turns.length > 0) {
         const lastModelTurn = [...turns].reverse().find((t) => t.role === "model");
-        if (lastModelTurn?.rid && this.profileName) {
+        if (lastModelTurn && this.profileName) {
           const existing = this.chatMetadata.lookup(this.profileName, conversationId);
-          this.chatMetadata.save(this.profileName, conversationId, {
-            rid: lastModelTurn.rid,
+          const meta: ChatMetadata = {
+            rid: lastModelTurn.rid ?? "",
             rcid: lastModelTurn.rcid ?? "",
             ctx: existing?.ctx ?? null,
-          });
+          };
+          this.chatMetadata.save(this.profileName, conversationId, meta);
         }
       }
       const messages = turns.length === 0 ? [] : this.toDomainMessages(turns, conversationId);
@@ -308,24 +316,25 @@ export class GeminiClientService
     return session;
   }
 
-  private async seedMetadataFromChat(conversationId: string): Promise<boolean> {
+  private async seedMetadataFromChat(conversationId: string): Promise<ChatMetadata | null> {
     try {
       const raw = (await this.client!.readChat(conversationId)) as RawChatTurn[] | null;
       const turns = raw ?? [];
       const lastModelTurn = [...turns].reverse().find((t) => t.role === "model");
-      if (lastModelTurn?.rid && this.profileName) {
+      if (lastModelTurn && this.profileName) {
         const existing = this.chatMetadata.lookup(this.profileName, conversationId);
-        this.chatMetadata.save(this.profileName, conversationId, {
-          rid: lastModelTurn.rid,
+        const meta: ChatMetadata = {
+          rid: lastModelTurn.rid ?? "",
           rcid: lastModelTurn.rcid ?? "",
           ctx: existing?.ctx ?? null,
-        });
-        return true;
+        };
+        this.chatMetadata.save(this.profileName, conversationId, meta);
+        return meta;
       }
     } catch {
       this.logger.debug(`seedMetadataFromChat: readChat failed for cid='${conversationId}' on profile='${this.profileName}'`);
     }
-    return false;
+    return null;
   }
 
   async sendMessage(conversationId: string, message: string): Promise<string> {
@@ -334,35 +343,25 @@ export class GeminiClientService
       let session: RawChatSession;
       if (this.profileName) {
         const stored = this.chatMetadata.lookup(this.profileName, conversationId);
-        if (stored) {
-          session = this.buildSession(conversationId, [
-            conversationId, stored.rid, stored.rcid, null, null, null, null, null, null,
-            stored.ctx ?? "",
-          ]);
-        } else {
-          const seeded = await this.seedMetadataFromChat(conversationId);
-          if (seeded) {
-            const stored = this.chatMetadata.lookup(this.profileName, conversationId);
-            if (stored) {
-              session = this.buildSession(conversationId, [
-                conversationId, stored.rid, stored.rcid, null, null, null, null, null, null,
-                stored.ctx ?? "",
-              ]);
-            } else {
-              session = this.buildSession(conversationId);
-            }
+        const { metadata, seeded } = threadOnto(conversationId, stored);
+        if (!seeded) {
+          const seededMeta = await this.seedMetadataFromChat(conversationId);
+          if (seededMeta) {
+            session = this.buildSession(conversationId, makeMetadata(conversationId, seededMeta));
           } else {
             this.logger.debug(
               `sendMessage: no prior metadata for cid='${conversationId}' on profile='${this.profileName}'; falling back to cid-only send.`,
             );
             session = this.buildSession(conversationId);
           }
+        } else {
+          session = this.buildSession(conversationId, metadata);
         }
       } else {
         session = this.buildSession(conversationId);
       }
       const output = await session.generateContent({ prompt: message });
-      const captured = extractChatMetadata(output.metadata);
+      const captured = captureFrom(output, conversationId);
       if (captured && this.profileName) {
         this.chatMetadata.save(this.profileName, conversationId, captured);
       }
@@ -384,7 +383,7 @@ export class GeminiClientService
       const response = output.text.toString();
       const conversationId = output.cid ?? session.cid;
       if (this.profileName) {
-        const captured = extractChatMetadata(output.metadata);
+        const captured = captureFrom(output, conversationId);
         if (captured) {
           this.chatMetadata.save(this.profileName, conversationId, captured);
         }

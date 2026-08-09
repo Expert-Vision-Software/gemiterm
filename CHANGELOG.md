@@ -1,11 +1,11 @@
-## [2.7.0] - 2026-08-08
+## [2.7.0] - 2026-08-09
 
 ### Added
 
 - **`gemiterm status --verbose` (`-v`).** Prints per-profile cookie counts and the next `__Secure-1PSIDTS` expiry countdown, followed by the absolute path to each profile storage directory — useful for diagnosing cookie expiry without opening the `%APPDATA%\gemiterm` directory by hand. New `formatDuration(ms)` helper in `infrastructure/formatters.ts` renders compact age strings ("4d 6h" / "2h 30m" / "expired").
 - **`status` PROBE column.** `bun run dev status` now validates every profile against Google's API on every invocation — `models()` and `listChats({ limit: 1 })` run in parallel. Three-state column: `✓ live (N≥1)`, `⚠ phantom (models N)`, or `✗ dead: <error>`. Catches the phantom-auth state that was hiding behind local freshness checks. Always-on, no flag needed.
 - **Targeted L2 recovery for phantom-auth sessions.** When phantom-auth is detected (models works, listChats empty), `ensureAuthenticated` triggers a headless browser refresh that updates only PSIDTS-related cookies (`__Secure-1PSIDTS`, `__Secure-3PSIDTS`, `SIDCC`) instead of replacing the full jar. Preserves the original login's PSID + companion cookies while picking up a fresh PSIDTS from the browser session. Falls through to full headed re-auth when targeted L2 cannot recover.
-- **Phase 0 v2 regression net.** 10 tests (0a–0j) across 8 files lock every known auth bug contract at the cheapest seam: cookie-monitor full-jar capture (0a), auth round-trip (0b), time-passing clock injection (0c), continue-chat metadata (0d), profile routing (0e), recovery ladder (0f), L2 cookie corruption (0g), context roundtrip (0i), status PROBE (0j). Designed to go RED on the exact commit that introduced each historical regression. Documented at `docs/phase-0/phase-0-v2-design.md`.
+- **Dormancy-resilient auth gates.** `ensureAuthenticated` no longer throws when probe/freshness checks fail — the session is allowed to reach the Gemini API, which returns a 401 only if the session is genuinely dead. Expired-but-present cookies no longer force a re-login; stale server probes no longer kill the session. The two fatal gates (cookie freshness and server-side probe) are now non-fatal, with `DO NOT THROW` regression tests locking this behavior. This restores v2.4.0's multi-day session tolerance while keeping v2.7.0's server-side validation and recovery ladder.
 
 ### Fixed
 
@@ -27,10 +27,14 @@
 ### Internal
 
 - `createClientServices` extracted from `src/cli/index.ts` into `src/cli/client-services.ts` to expose a testable seam for the `forProfile` wiring.
-- Test suite: **954 pass / 1 skip / 0 fail / 2030 expects** (was 928 / 1945 at 2.6.1). Red-then-green regression tests added for each fix at the cheapest seam.
+- Test suite: **990 pass / 1 skip / 0 fail / 2089 expects** (was 954 / 2030). Red-then-green regression tests added for each fix at the cheapest seam.
+- **CookieJar unification (Candidate A).** Replaced 5 uncoordinated cookie-jar writers with a single `CookieJar` module offering two policies: `replace()` (login capture) and `upsert()` (rotations/refreshes), keyed by `(name, domain, path)`. All jar mutations now flow through one interface. See `src/services/cookie-jar.ts`.
+- **Explicit auth state machine (Candidate C).** `classifySession()` + `getRecoveryAction()` replace 10+ branches of implicit state logic in `ensureAuthenticated` with 5 named states (Fresh/Phantom/Dead/Stale/Declined) and typed recovery actions. Both functions are pure and independently testable. See `src/services/session-state.ts`.
+- **Conversation threading module (Candidate B).** `makeMetadata()`, `extractMetadata()`, `threadOnto()`, and `captureFrom()` consolidate all cid/rid/rcid magic indices into one file. `sendMessage` threading simplified from 20+ lines to 10. See `src/services/conversation-threading.ts`.
+- **Post-call seam consolidation (Candidate E).** `persistRefreshedCookies` now delegates to `cookieJar.upsert()` as the single write path for SDK-refreshed cookies.
 - Phase 0 v2 regression net: 10 tests (0a–0j) across 8 files. Documented at `docs/phase-0/phase-0-v2-design.md`. Bug history ledger at `docs/phantom-bug-synthesis.md`.
 - `tests/services/cookie-jar-repro.test.ts`: deterministic repro harness for the 4-cookie degradation symptom at the `GeminiClientService`/SDK seam.
-- Architecture review v3 at `docs/phase-0/architecture-review-auth-2026-08-08-v3.html` identifies two deepening candidates for post-v2.7.0 work (state machine explicitness, cookie jar unification).
+- Architecture review v5 at `docs/phase-0/architecture-review-auth-2026-08-09-v5.html` identifies deepening candidates (A+B+C+E) — all four now implemented.
 
 ---
 

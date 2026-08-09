@@ -2,7 +2,11 @@ import type { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import type { IGeminiClientService } from "../core/command-handlers.ts";
 import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 
-export type GetGeminiClientFn = (profileName?: string) => Promise<GeminiClientService>;
+export interface GetGeminiClientOptions {
+  nonInteractive?: boolean;
+}
+
+export type GetGeminiClientFn = (profileName?: string, opts?: GetGeminiClientOptions) => Promise<GeminiClientService>;
 
 export interface ClientServices {
   clientService: IGeminiClientQueryService;
