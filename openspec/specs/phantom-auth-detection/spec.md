@@ -1,9 +1,7 @@
 ## Purpose
 
 Server-side phantom-auth detection for `gemiterm`. Detects when Google invalidates a session server-side (cookies remain locally valid but the server no longer recognizes them) by probing the Gemini API with the `models()` RPC. Owns the probe cache and classification logic that distinguishes valid sessions from stale ones.
-
 ## Requirements
-
 ### Requirement: ProfileAuthManager probes server-side session validity before declaring authenticated
 
 When `ProfileAuthManager.ensureAuthenticated(profileName?)` is called and the profile's local cookies pass `profileManager.hasValidCookies(name)`, the method MUST consult a server-side probe before returning a successful result, AND it MUST attempt a cookie rotation via the injected `rotateCookies(name)` (the L1 `RotateCookies` POST) regardless of the probe outcome. The probe MUST call `geminiClient.models()` on a client scoped to the profile name. A process-level cache (default TTL 150_000 ms / 2.5 min, overridable via `GEMITERM_PROBE_TTL_MS` env var) MUST memoize the probe result per profile. The rotation is throttled by the 600 s disk-mtime guard inside `rotateCookies`, so an actual `RotateCookies` POST happens at most once per 600 s per profile; sub-threshold calls return early without network I/O.
@@ -15,17 +13,44 @@ The two recovery functions have distinct roles:
 
 The probe result classification MUST be:
 
-- **RPC succeeds:** the session is usable for PSID-only calls, but a stale `__Secure-1PSIDTS` cannot be ruled out, so the method MUST call `rotateCookies(name)` to refresh the token. A rotation failure MUST NOT throw. Log info, return `LoadedCookies`.
+- **RPC succeeds:** the session is usable for PSID-only calls, but a stale `__Secure-1PSIDTS` cannot be ruled out, so the method MUST call `rotateCookies(name)` to refresh the token. A rotation failure MUST NOT throw. After rotation, the method proceeds to the rotation-result handling described below. Log info, return `LoadedCookies` if the session is valid.
 - **RPC throws:** server-side session invalidation. Log a warning, classify as "stale", call `silentRefresh(name)`. If `silentRefresh` returns `true`, return the refreshed `LoadedCookies`. If `silentRefresh` returns `false`, throw `AuthenticationError`.
 
 On probe error, the method MUST log at debug level and classify as "stale".
+
+**Rotation result handling (after probe success):**
+
+- **`rotation.rotated === true`:** Fresh `__Secure-1PSIDTS` obtained. Session is fully usable. Return `LoadedCookies`.
+- **`rotation.attempted === true` or `rotation.sessionInvalid === true`:** L1 reached Google but either the server declined to issue fresh PSIDTS (HTTP 200, no fresh PSIDTS in response) or the server rejected the request (401/403). In both cases, the session MAY still be usable via the Gemini API directly (RotateCookies is an `accounts.google.com` endpoint with different session validation behavior than the Gemini API). The method MUST run phantom-auth detection (`detectPhantomAuth`) — a `listChats({ limit: 1 })` call — to determine whether the session is functional. If phantom is detected (listChats returns empty), the method MUST attempt targeted L2 silent refresh (`silentRefresh(name, { mode: "targeted" })`). If targeted L2 fails, throw `AuthenticationError`. If phantom is NOT detected, the session is functional; log and return `LoadedCookies`.
+- **Otherwise (`rotation.attempted === false` and `rotation.sessionInvalid` is falsy):** L1 was throttled, disabled, or unavailable. Cookies are likely still fresh. Log at debug level and return `LoadedCookies`.
+
+#### Scenario: models() succeeds — L1 rotation returns 401, phantom detected, targeted L2 recovers
+
+- **WHEN** `ensureAuthenticated("default")` is called and the default profile has locally-valid cookies
+- **AND** `geminiClient.models()` returns successfully
+- **AND** `rotateCookies("default")` returns `{ rotated: false, attempted: false, sessionInvalid: true }`
+- **AND** `detectPhantomAuth("default")` returns `true`
+- **AND** `silentRefresh("default", { mode: "targeted" })` returns `true`
+- **THEN** the method returns `LoadedCookies` with refreshed values
+- **AND** `AuthenticationError` is NOT thrown
+- **AND** `silentRefresh` was called with `mode: "targeted"`
+
+#### Scenario: models() succeeds — L1 rotation returns 401, phantom not detected, session still valid
+
+- **WHEN** `ensureAuthenticated("default")` is called and the default profile has locally-valid cookies
+- **AND** `geminiClient.models()` returns successfully
+- **AND** `rotateCookies("default")` returns `{ rotated: false, attempted: false, sessionInvalid: true }`
+- **AND** `detectPhantomAuth("default")` returns `false` (listChats returns ≥1 chat)
+- **THEN** the method returns `LoadedCookies` with the stored values
+- **AND** `AuthenticationError` is NOT thrown
+- **AND** `silentRefresh` is NOT called
 
 #### Scenario: models() succeeds — L1 rotation still attempted (stale 1PSIDTS detection)
 
 - **WHEN** `ensureAuthenticated("default")` is called and the default profile has locally-valid cookies
 - **AND** `geminiClient.models()` returns successfully
+- **AND** `rotateCookies("default")` returns `{ rotated: true, attempted: true }` or `{ rotated: false, attempted: true }`
 - **THEN** the method returns `LoadedCookies` with the stored values
-- **AND** `rotateCookies("default")` IS called (to refresh a possibly-stale `__Secure-1PSIDTS`)
 - **AND** `silentRefresh` is NOT called on this path (L1 only; no browser)
 - **AND** a rotation failure does NOT cause `AuthenticationError` to be thrown
 
@@ -76,3 +101,4 @@ MUST fall back to the default.
 
 - **WHEN** `GEMITERM_PROBE_TTL_MS` is set to `"60000"`
 - **THEN** the probe cache TTL is 60_000 ms
+
