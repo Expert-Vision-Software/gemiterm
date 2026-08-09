@@ -68,7 +68,7 @@ interface GeminiClientConfig {
   secure1psidts?: string | null;
 }
 
-const COOKIE_EXPIRY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+const COOKIE_EXPIRY_THRESHOLD_MS = 365 * 24 * 60 * 60 * 1000;
 
 function extractChatMetadata(metadata: (string | null)[] | undefined): ChatMetadata | null {
   if (!metadata) return null;
@@ -177,8 +177,9 @@ export class GeminiClientService
 
   private translateError(e: unknown): GeminiAPIError | AuthenticationError {
     if (e instanceof this.deps.AuthError) {
+      const profile = this.profileName ?? "default";
       return new AuthenticationError(
-        "Session expired or invalid. Please run 'gemiterm login' again.",
+        `Session for profile '${profile}' is no longer valid (Gemini returned 401). Run 'gemiterm auth ${profile}' to re-authenticate.`,
       );
     }
     const ax = e as AxiosLikeError;

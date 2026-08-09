@@ -1,3 +1,25 @@
+## [2.4.3] - 2026-08-09
+
+### Changed
+
+- `ProfileManager.hasValidCookies` renamed to `hasRequiredCookies`. The previous name was misleading: the method only checks for the presence of `__Secure-1PSID` (see "Fixed" below) and does not perform any expiry or validity check.
+- `ProfileManager.getStatus.isActive` is now `hasRequired` only. The previous hard past-expiry filter (`expiresMs > Date.now()`) was display-only and produced confusing "inactive" statuses for profiles that would actually work. The `expiresAt` field is still populated from the on-disk expiry for user reference; it no longer flips `isActive`.
+- `GeminiClientService.persistRefreshedCookies` now writes `expires = now + 365 days` (was 7 days) for SDK-rotated cookie values. The 7-day horizon was tied to the removed freshness gate; the 1-year horizon matches the actual server-issued PSID lifetime.
+- 401-triggered `AuthError` translation now produces an actionable, profile-specific `AuthenticationError` message. Was: `"Session expired or invalid. Please run 'gemiterm login' again."`. Now: `` `Session for profile '<name>' is no longer valid (Gemini returned 401). Run 'gemiterm auth <name>' to re-authenticate.` `` — names the profile, identifies the underlying 401, and points to the correct re-auth command.
+
+### Fixed
+
+- **Dormant sessions no longer force-prompt re-auth.** `ProfileManager.hasRequiredCookies` and `loadCookiesForApi` previously gated on a 7-day PSIDTS freshness threshold via `checkCookieFreshness` (a local `expires` check). The Gemini auth server does not honor the local `expires` timestamp as a session-lifetime bound; PSID is issued with a ~1-year horizon and the server-side session remains valid as long as PSID is valid. The local check produced false-positive force-prompt re-authentication for users idle for more than 7 days. New posture: cookies present → trust them. Real session death is detected by an actual 401 from the Gemini API, which now surfaces a clear, actionable error.
+- **Required-cookie set relaxed to PSID-only.** `validateCookies` in `storage.ts` and `cookie-storage-service.ts` previously required both `__Secure-1PSID` and `__Secure-1PSIDTS`. The SDK (`gemini-web-sdk@^2.2.0`) accepts a `secure_1psidts: undefined` cookie — PSID alone is sufficient to attempt an API call. The two checks (presence and load) now agree: PSID-only profiles are reported as authenticated and produce a working API client.
+
+### Removed
+
+- `ProfileManager.checkCookieFreshness` and the `CookieStorageService.checkCookieFreshness` method (both gated the now-removed 7-day freshness threshold).
+- `CookieStorageService.COOKIE_EXPIRY_THRESHOLD_MS` constant (7-day gate).
+- The `requireRotation` parameter and the `isGoogleDomainCookie` import from `src/services/cookie-monitor.ts`. The `cookie-rotation.ts` module was not part of this branch's posture; the parameter had no callers and the import was dead code. This restores the full `bun test` suite to green (4 pre-existing test failures in smoke + ContinueCommand tests caused by the missing module are now resolved).
+
+---
+
 ## [2.4.2] - 2026-08-01
 
 ### Added

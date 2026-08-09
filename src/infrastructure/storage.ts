@@ -17,7 +17,7 @@ interface StorageState {
 
 function validateCookies(cookies: Cookie[]): boolean {
   const names = new Set(cookies.map((c) => c.name));
-  return names.has("__Secure-1PSID") && names.has("__Secure-1PSIDTS");
+  return names.has("__Secure-1PSID");
 }
 
 function getCookieExpiryTimestamp(cookies: Cookie[]): number | null {
@@ -146,7 +146,7 @@ export class ProfileManager {
       const cookies = this.cookieStorage.load(name);
       const hasRequired = validateCookies(cookies);
       const expiresMs = getCookieExpiryTimestamp(cookies);
-      const isActive = hasRequired && (expiresMs === null || expiresMs > Date.now());
+      const isActive = hasRequired;
       let expiresAt: string | null = null;
       if (expiresMs !== null) {
         expiresAt = new Date(expiresMs).toISOString();

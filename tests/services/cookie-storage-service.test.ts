@@ -136,8 +136,23 @@ describe("CookieStorageService", () => {
       expect(service.validateCookies(makeFreshCookies())).toBe(true);
     });
 
-    test("returns false when __Secure-1PSIDTS is missing", () => {
-      expect(service.validateCookies(makePartialCookies())).toBe(false);
+    test("returns true when only PSID is present (PSID is the only required cookie)", () => {
+      expect(service.validateCookies(makePartialCookies())).toBe(true);
+    });
+
+    test("returns false when PSID is missing", () => {
+      expect(service.validateCookies([
+        {
+          name: "__Secure-1PSIDTS",
+          value: "psidts-only",
+          domain: ".google.com",
+          path: "/",
+          expires: -1,
+          httpOnly: true,
+          secure: true,
+          sameSite: "Lax",
+        },
+      ])).toBe(false);
     });
 
     test("returns false for empty array", () => {

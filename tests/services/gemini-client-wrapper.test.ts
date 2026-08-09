@@ -989,7 +989,7 @@ describe("GeminiClientService", () => {
   });
 
   describe("error translations", () => {
-    test("AuthError -> AuthenticationError", async () => {
+    test("AuthError -> AuthenticationError (message names the profile and the auth command)", async () => {
       const d = installGeminiReverseMock({
         chatsImplementation: () => {
           throw new MockAuthError("auth failure");
@@ -997,9 +997,10 @@ describe("GeminiClientService", () => {
       });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
-      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, "work", d);
 
-      await expect(service.listChats()).rejects.toThrow("Session expired or invalid");
+      await expect(service.listChats()).rejects.toThrow("'work' is no longer valid");
+      await expect(service.listChats()).rejects.toThrow("gemiterm auth work");
     });
 
     test("ECONNABORTED -> GeminiAPIError timeout", async () => {

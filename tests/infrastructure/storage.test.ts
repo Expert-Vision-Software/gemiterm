@@ -223,14 +223,14 @@ describe("ProfileManager", () => {
     expect(status.isDefault).toBe(false);
   });
 
-  test("getStatus returns inactive for expired cookies", () => {
+  test("getStatus returns active for expired cookies (trusts cookies, ignores expires)", () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
     storage.save("expired", makeExpiredCookies());
 
     const status = mgr.getStatus("expired");
     expect(status.exists).toBe(true);
-    expect(status.isActive).toBe(false);
+    expect(status.isActive).toBe(true);
   });
 
   test("getStatus returns active for session cookies (expires: -1)", () => {
@@ -289,7 +289,7 @@ describe("ProfileManager", () => {
     const active = statuses.find((s) => s.name === "active")!;
     const expired = statuses.find((s) => s.name === "expired")!;
     expect(active.isActive).toBe(true);
-    expect(expired.isActive).toBe(false);
+    expect(expired.isActive).toBe(true);
   });
 
   test("hasRequiredCookies returns true for fresh cookies", () => {
@@ -312,10 +312,10 @@ describe("ProfileManager", () => {
     expect(manager.hasRequiredCookies("nope")).toBe(false);
   });
 
-  test("hasRequiredCookies returns false when required cookies are missing", () => {
+  test("hasRequiredCookies returns true when only PSID is present (PSID is the only required cookie)", () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
-    storage.save("incomplete", [
+    storage.save("psid-only", [
       {
         name: "__Secure-1PSID",
         value: "psid-only",
@@ -328,7 +328,26 @@ describe("ProfileManager", () => {
       },
     ]);
 
-    expect(mgr.hasRequiredCookies("incomplete")).toBe(false);
+    expect(mgr.hasRequiredCookies("psid-only")).toBe(true);
+  });
+
+  test("hasRequiredCookies returns false when PSID is missing", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    storage.save("psidts-only", [
+      {
+        name: "__Secure-1PSIDTS",
+        value: "psidts-only",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ]);
+
+    expect(mgr.hasRequiredCookies("psidts-only")).toBe(false);
   });
 
   test("loadCookiesForApi returns cookie values", () => {

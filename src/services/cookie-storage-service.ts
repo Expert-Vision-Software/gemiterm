@@ -2,7 +2,7 @@ import type { Cookie } from "../core/types.ts";
 import type { CookieStorage } from "../infrastructure/storage.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 
-const REQUIRED_COOKIE_NAMES = new Set(["__Secure-1PSID", "__Secure-1PSIDTS"]);
+const REQUIRED_COOKIE_NAMES = new Set(["__Secure-1PSID"]);
 
 export interface LoadedCookies {
   secure_1psid: string;
