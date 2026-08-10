@@ -724,6 +724,33 @@ describe("AuthService", () => {
       const saved = cookieStorage.save.mock.calls[0]![1] as Cookie[];
       const savedNames = new Set(saved.map((c) => c.name));
       expect(savedNames.has("__Secure-1PSIDTS")).toBe(true);
+      const savedPsid = saved.find((c) => c.name === "__Secure-1PSID");
+      expect(savedPsid).toBeDefined();
+      expect(savedPsid!.value).toBe("new-psid");
+    });
+
+    test("persists __Secure-1PSID change when browser rotates PSID (regression: silentRefresh discards PSID rotation)", async () => {
+      const storedCookies = makeRotationCookies("old-psid", "old-psidts");
+      const browserCookies = makeRotationCookies("new-psid", "new-psidts");
+      cookieStorage.load.mockReturnValue(storedCookies);
+      cookieMonitor.start.mockImplementationOnce(
+        async (_session, callback) => {
+          callback(browserCookies);
+        },
+      );
+
+      const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
+      const result = await svc.silentRefresh("test-profile");
+
+      expect(result).toBe(true);
+      expect(cookieStorage.save).toHaveBeenCalledTimes(1);
+      const saved = cookieStorage.save.mock.calls[0]![1] as Cookie[];
+      const savedPsid = saved.find((c) => c.name === "__Secure-1PSID");
+      expect(savedPsid).toBeDefined();
+      expect(savedPsid!.value).toBe("new-psid");
+      const savedPsidts = saved.find((c) => c.name === "__Secure-1PSIDTS");
+      expect(savedPsidts).toBeDefined();
+      expect(savedPsidts!.value).toBe("new-psidts");
     });
 
     test("returns false when cookies are identical to the snapshot", async () => {
@@ -1000,7 +1027,7 @@ describe("AuthService", () => {
       expect(apisidCookie?.value).toBe("apisid-original");
 
       const psidCookie = saved.find((c) => c.name === "__Secure-1PSID");
-      expect(psidCookie?.value).toBe("psid-original");
+      expect(psidCookie?.value).toBe("psid-rotated");
       const psidtsCookie = saved.find((c) => c.name === "__Secure-1PSIDTS");
       expect(psidtsCookie?.value).toBe("psidts-rotated");
     });

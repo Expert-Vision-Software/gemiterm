@@ -253,14 +253,18 @@ export class AuthService {
     const timeoutMs = opts.timeoutMs ?? SILENT_REFRESH_TIMEOUT_MS;
     this.logger.debug(`Silent refresh attempt (mode=targeted) for profile: ${name}`);
 
-    let snapshot: { activePsidts: string | null } | null = null;
+    const REFRESH_COOKIE_NAMES: ReadonlySet<string> = new Set([...COOKIE_NAMES_OF_INTEREST, "__Secure-1PSID"]);
+
+    let snapshot: { activePsid: string; activePsidts: string | null } | null = null;
     try {
       const stored = this.cookieStorage.load(name);
+      const psid = stored.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value
+        ?? stored.find((c) => c.name === "__Secure-1PSID")?.value;
       const psidts = stored.find((c) => c.name === "__Secure-1PSIDTS" && isGoogleDomainCookie(c))?.value
         ?? stored.find((c) => c.name === "__Secure-1PSIDTS")?.value
         ?? null;
-      if (psidts !== null) {
-        snapshot = { activePsidts: psidts };
+      if (psid) {
+        snapshot = { activePsid: psid, activePsidts: psidts };
       }
     } catch (err) {
       this.logger.debug(`silentRefresh: snapshot load failed: ${err}`);
@@ -291,13 +295,15 @@ export class AuthService {
         return false;
       }
 
+      const polledPsid = cookies.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value ?? null;
       const polledPsidts = cookies.find((c) => c.name === "__Secure-1PSIDTS" && isGoogleDomainCookie(c))?.value ?? null;
+      const psidChanged = polledPsid !== null && polledPsid !== snapshot.activePsid;
       const psidtsChanged = polledPsidts !== snapshot.activePsidts;
 
       let updated = false;
       const existing = this.cookieStorageService.loadAllCookiesForProfile(name);
       const next = existing.map((c) => {
-        if (!COOKIE_NAMES_OF_INTEREST.has(c.name)) return c;
+        if (!REFRESH_COOKIE_NAMES.has(c.name)) return c;
         const browser = cookies.find((bc) =>
           bc.name === c.name && bc.domain === c.domain && bc.path === c.path,
         );
@@ -307,13 +313,13 @@ export class AuthService {
         }
         return c;
       });
-      if (!updated && !psidtsChanged) {
+      if (!updated && !psidtsChanged && !psidChanged) {
         this.logger.debug(`silentRefresh: no PSIDTS-related cookie changed vs baseline`);
         return false;
       }
 
       if (this.cookieJar) {
-        this.cookieJar.upsert(name, cookies.filter((bc) => COOKIE_NAMES_OF_INTEREST.has(bc.name)));
+        this.cookieJar.upsert(name, cookies.filter((bc) => REFRESH_COOKIE_NAMES.has(bc.name)));
       } else {
         this.cookieStorageService.saveCookiesForProfile(name, next);
       }

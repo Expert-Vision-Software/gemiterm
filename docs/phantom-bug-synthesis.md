@@ -532,7 +532,7 @@ The change is in `profile-auth-manager.ts:121-129` — replace the existing `ses
 - §"The 3-release arc" — traces how RotateCookies detection was added across v2.6.0–v2.6.2.
 - §"2026-08-06 — Session 3" (L2 removal) — the earlier removal of the L2 cookie-corruption path; this is the companion fix for RotateCookies 401.
 
-## 2026-08-09 — Definitive fix: full L2 silent refresh removed (targeted-only, no mergeCookies)
+## 2026-08-09 — Definitive fix: full L2 silent refresh removed (targeted-only, no mergeCookies) **[BUG INTRODUCED: PSID discard — see 2026-08-10 entry below]**
 
 **Discovered by:** Diego, live dormancy verification (~1h40m idle → `gemiterm list` still returns chats). Code review of `fix/remove-full-l2-mergecookies` branch.
 
@@ -550,7 +550,7 @@ The change is in `profile-auth-manager.ts:121-129` — replace the existing `ses
 |-------|-----|--------|---------------|
 | Capture | CookieMonitor passes full jar, not just PSID/PSIDTS | `6bc51f6` | Companions captured at login time (definitive root cause) |
 | Detection | RotateCookies 401 treated as "declined", not session-death | `85f3e7f` (on `main`) | Valid sessions no longer killed by secondary endpoint |
-| Recovery | Full L2 `mergeCookies` removed; targeted-only preserves companions | `f681c66` (this branch) | Silent refresh no longer corrupts companion cookies |
+| Recovery | Full L2 `mergeCookies` removed; targeted-only preserves companions | `f681c66` (this branch) | Silent refresh no longer corrupts companion cookies. **⚠ However, this also discards `__Secure-1PSID` rotation — see 2026-08-10 entry below.** |
 
 The capture fix (`6bc51f6`) was necessary but insufficient: companions were captured at login, but the *recovery* path (triggered after idle) overwrote them with browser session cookies. The targeted-only fix closes the recovery corruption gap — after idle recovery, the jar retains original companion cookies with updated PSIDTS-family cookies. `listChats` works because companions are intact.
 
@@ -571,4 +571,72 @@ If someone re-adds full-mode `mergeCookies` to `silentRefresh`, `:945` goes RED 
 - §"The 4-cookie discovery" — the capture fix (layer 1)
 - §"2026-08-09 — RotateCookies 401 pre-emptively kills sessions" — the detection fix (layer 2)
 - §"2026-08-06 — Session 3" — predicted targeted L2 as the recovery design; implemented here
+
+## 2026-08-10 — silentRefresh targeted L2 discards __Secure-1PSID rotation, causing phantom auth after dormancy
+
+**Discovered by:** User reported `list -i` returns 0 chats after ~2h idle despite silent refresh "succeeding". Verbose logs showed: rotateCookies → "no fresh __Secure-1PSIDTS" → silentRefresh "recovered" → CookieJar.upsert "merged 3 into jar" → "Profile is authenticated" → but Browse conversations shows "0 chats".
+
+**Symptom:** After 1-2 hours of dormancy, `gemiterm list -i` returns "No conversations found." despite cookies on disk being valid and silent refresh succeeding. Verbose logs show the chain: rotateCookies fails → phantom detected → targeted L2 silentRefresh runs → upserts 3 cookies (PSIDTS, 3PSIDTS, SIDCC) but NOT PSID → profile "authenticated" → 0 chats.
+
+**Root cause:** `src/services/auth-service.ts` `silentRefresh` method (lines 293-319) captures ALL browser cookies including the new `__Secure-1PSID`, but when persisting:
+- cookieJar path (line 316): filters to ONLY `COOKIE_NAMES_OF_INTEREST` = {__Secure-1PSIDTS, __Secure-3PSIDTS, SIDCC}. `__Secure-1PSID` is filtered OUT.
+- Non-cookieJar path (line 298-309): preserves non-`COOKIE_NAMES_OF_INTEREST` cookies from `existing` (disk), NOT from browser.
+
+The snapshot (line 256) only captured `activePsidts`, not `activePsid`. The change-detection check (line 310) only checked `psidtsChanged`, not PSID changes.
+
+**Bug introduced at:** Two-commit chain:
+1. **`0f9154f`** (Aug 7, v2.7.0 era) — **originally introduced the bug.** Added `COOKIE_NAMES_OF_INTEREST` = {__Secure-1PSIDTS, __Secure-3PSIDTS, SIDCC} (intentionally excluding PSID) and created the dual-mode `silentRefresh` with a `"targeted"` mode that filtered to this set. The default was still `"full"` (safe — used `mergeCookies`). But `detectPhantomAuth` recovery path explicitly called `silentRefresh(name, { mode: "targeted" })` — the first caller to hit the bug.
+2. **`f681c66`** (Aug 9) — **amplified the bug by removing the escape hatch.** Deleted the `"full"` mode entirely, making `COOKIE_NAMES_OF_INTEREST` filtering the ONLY path. All callers now hit the bug.
+
+v2.4.0 (`6e82e25`) predates all of this — `silentRefresh` was introduced in `da215dc` (post-v2.4.0), so v2.4.0 has no L2 recovery at all. DHBGAMING2's 12-day session works because v2.4.0 never touches the jar after login — it just calls the SDK directly with stored cookies.
+
+After 1-2 hours of dormancy, Google rotates BOTH `__Secure-1PSID` and `__Secure-1PSIDTS`. The targeted L2 captures the new PSID from the browser but discards it. Stored PSID stays stale, stored PSIDTS is new → mismatch → phantom auth (Google accepts session, returns 0 conversations).
+
+The design assumption in §"Session 3" (line 95-96 of this doc): "`__Secure-1PSID` — Not silently rotated" was WRONG. Google DOES rotate PSID, just less frequently than PSIDTS.
+
+**Fix:** Modified `silentRefresh` to:
+1. Snapshot now includes `activePsid` in addition to `activePsidts` (`auth-service.ts:256-265`)
+2. `REFRESH_COOKIE_NAMES` set expands `COOKIE_NAMES_OF_INTEREST` with `__Secure-1PSID` (line 253)
+3. Extracts `polledPsid` from browser and detects `psidChanged` (lines 294-297)
+4. Both persistence paths use `REFRESH_COOKIE_NAMES` instead of `COOKIE_NAMES_OF_INTEREST` (lines 304, 319)
+5. "Nothing changed" check includes `psidChanged` (line 313)
+6. Non-cookieJar path also updates PSID in the `next` array (line 301 now includes PSID in the set)
+Commit: pending (not yet committed as of this entry)
+
+**Verified:** Test baseline 986 pass / 0 fail / 1 skip (up from previous 954). New regression test `"persists __Secure-1PSID change when browser rotates PSID (regression: silentRefresh discards PSID rotation)"` added at `auth-service.test.ts:729`. Fails on old code (PSID preserved as "old-psid" instead of "new-psid"), passes on fix. Existing test `"targeted mode updates only PSIDTS-family cookies; companions keep original values"` updated from asserting PSID NOT rotated to asserting PSID IS rotated (value "psid-original" → "psid-rotated"). Typecheck clean.
+
+**Related ledger entries:**
+- §"2026-08-06 — Session 3" (targeted-L2 design sketch, lines 257-283) — the design assumed PSID doesn't rotate. This entry proves that assumption was wrong.
+- §"2026-08-09 — Definitive fix: full L2 silent refresh removed (targeted-only, no mergeCookies)" — the targeted-only design preserved companions but also preserved stale PSID. This fix adds PSID rotation to targeted L2 without re-introducing companion corruption.
+
+**IMPORTANT NOTE:** This is the THIRD capture/persistence path to exhibit a cookie-filtering bug:
+1. CookieMonitor filtered to REQUIRED_COOKIES (fixed `6bc51f6`) — capture
+2. Silent refresh full-mode mergeCookies replaced all companions (fixed `f681c66`) — recovery
+3. Silent refresh targeted-mode filtered to COOKIE_NAMES_OF_INTEREST, excluding PSID (fixed now) — recovery
+
+The common pattern: a "designed subset" filter that was correct for one purpose (rotation, gating, companion preservation) but discarded cookies that later proved necessary for full API functionality.
+
+## 2026-08-10 — Companion cookies (SID/HSID/SSID/APISID/SAPISID/SIDCC/NID) still not refreshed by any mechanism
+
+**Discovered by:** Code review following the PSID rotation fix. While the fix above handles PSID rotation during targeted L2, companion cookies remain unrefreshed by any code path.
+
+**Symptom:** None observed yet. Companion cookies are more stable than PSID/PSIDTS and typically set with the login envelope. However, if Google ever rotates companion cookies silently during an active session, no existing mechanism (L1 rotation, L2 silent refresh, or persistRefreshedCookies) will capture or persist the new values.
+
+**Root cause:** All cookie persistence paths use either `COOKIE_NAMES_OF_INTEREST` (rotation) or `REFRESH_COOKIE_NAMES` (silent refresh). Neither set includes companion cookies (SID/HSID/SSID/APISID/SAPISID/SIDCC/NID). Companions are captured once at login time and never updated thereafter.
+
+**Fix:** None at this time — low priority. Companions are more stable than PSID/PSIDTS, and the existing `listChats` regression tests (`auth-service.test.ts:945` guards companion count; `:976` guards companion values) will catch any future breakage. If companion rotation is ever observed in the wild, the fix pattern would be analogous to the PSID fix: expand the refresh cookie set.
+
+**Verified:** Not applicable (no code change). Baseline 986/0/1 unchanged from PSID fix entry above.
+
+**Related ledger entry:** §"2026-08-09 — Definitive fix: full L2 silent refresh removed" — the companion-preservation regression test at `:945` is the guard for this latent risk.
+
+## 2026-08-10 — Simplify plan revised: remove all cookie-name filtering from silentRefresh
+
+**Discovered by:** User question: "why filter at all? how are we sure we're not filtering out any more good cookies?"
+
+The answer: **we shouldn't filter by cookie name in `silentRefresh` at all.** The correct approach is match-by-`(name, domain, path)` on ALL browser cookies — update anything that changed, preserve everything the browser doesn't have. No allowlist. No denylist. No risk of excluding a cookie Google starts rotating tomorrow.
+
+The three cookie-filtering bugs all share the same root pattern: a "designed subset" (REQUIRED_COOKIES, COOKIE_NAMES_OF_INTEREST, REFRESH_COOKIE_NAMES) that was correct for one purpose but wrong for another. The fix for each was expanding the set. The permanent fix is removing the set entirely.
+
+See `docs/alternate-plan-simplify.md` for the full revised plan — removes RotateCookies from hot path, removes phantom detection, removes the 5-state classifier, and rewrites `silentRefresh` to use key-based matching with no cookie-name filtering.
 
