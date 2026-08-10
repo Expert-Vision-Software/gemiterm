@@ -1,3 +1,17 @@
+## [2.7.1] - 2026-08-09
+
+### Removed
+
+- **Full L2 silent refresh (`mergeCookies` path).** Full-mode silent refresh in `auth-service.ts` replaced companion cookies (SID/HSID/SSID/APISID/SAPISID/…) with browser session cookies from a different session, corrupting the jar and causing `listChats` to return 0 chats or RotateCookies 401 on the next command. `silentRefresh` is now **targeted-only** — it updates only PSIDTS-family cookies (`__Secure-1PSIDTS`/`__Secure-3PSIDTS`/`SIDCC`) via `cookieJar.upsert`. Companion cookies from the original login are preserved through recovery. The `SilentRefreshMode` type, the `mode` option from `SilentRefreshOptions`, and `RecoveryAction.FullRefresh` are removed. The `mergeCookies` call from `silentRefresh` is removed (the standalone function remains for tests). All `silentRefresh` call sites in `profile-auth-manager.ts` no longer pass `{ mode: "targeted" }` — targeted is the only behavior.
+- **Dead `activePsid` from silentRefresh snapshot.** The pre-L2 snapshot no longer captures `__Secure-1PSID` — only `activePsidts` is tracked, since targeted mode never reads PSID. The dead `psid` variable and gate are removed.
+
+### Fixed
+
+- **Dormancy recovery preserves companion cookies (definitive fix for list-returns-0-chats).** v2.7.0 fixed the capture path (CookieMonitor now passes full jar at login) and the detection path (RotateCookies 401 → Decline, not session-death). But the *recovery* path — triggered after ~1h15m idle when PSIDTS rotates server-side — still corrupted the jar via full-L2 `mergeCookies`. Removing full L2 closes the third and final gap: after idle recovery, the jar retains original companion cookies with updated PSIDTS-family cookies. `listChats` works because companions are intact. Live-verified ~1h40m idle on 2026-08-09.
+- **Test config dir leak in `gemini-client-wrapper.test.ts`.** `teardownTestConfig` unset `GEMITERM_CONFIG_DIR` between tests, causing `ChatMetadataStorage` writes to land in `%APPDATA%\gemiterm\profiles`. Added file-level `beforeAll`/`afterAll` temp-dir guard with `teardownTestConfig` restoring to the file-level dir instead of deleting the env var.
+- **Smoke tests leaked real config directories.** `GEMITERM_CONFIG_DIR: ""` resolved to the real config dir, probing live system profiles (15s timeouts). Switched to per-test `mkdtempSync` temp directories with `afterAll` cleanup. Deduplicated setup into a shared `beforeEach`.
+- **Phantom-auth test env isolation.** `silentRefresh` was called with `{ mode: "targeted" }` in 8 phantom-auth + profile-auth-manager tests — updated to the new arg-less signature. All 985 tests green.
+
 ## [2.7.0] - 2026-08-09
 
 ### Added

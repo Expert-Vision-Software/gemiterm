@@ -207,7 +207,7 @@ describe("phantom-auth regression suite", () => {
 
       expect(cookies.secure_1psid).toBe("refreshed-psid");
       expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default", { mode: "targeted" });
+      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("models() throws followed by a failed silent refresh continues (dormancy-resilient)", async () => {
@@ -232,7 +232,7 @@ describe("phantom-auth regression suite", () => {
       const cookies = await mgr.ensureAuthenticated("default");
       expect(cookies.secure_1psid).toBe("active-psid");
       expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default", { mode: "targeted" });
+      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("models() succeeds still rotates (stale 1PSIDTS detection)", async () => {
@@ -297,7 +297,7 @@ describe("phantom-auth regression suite", () => {
 
       expect(cookies.secure_1psid).toBe("active-psid");
       expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default", { mode: "targeted" });
+      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("rotateCookies declined (200, no fresh PSIDTS) does NOT escalate to L2 silentRefresh", async () => {
@@ -357,7 +357,7 @@ describe("phantom-auth regression suite", () => {
       expect(cookies.secure_1psid).toBe("active-psid");
       expect(listChatsFn).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default", { mode: "targeted" });
+      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("L1 declined + phantom-auth detected + targeted silentRefresh returns false => AuthenticationError", async () => {
@@ -388,7 +388,7 @@ describe("phantom-auth regression suite", () => {
       expect(err).toBeInstanceOf(AuthenticationError);
       expect((err as Error).message).toMatch(/phantom|re-authenticate|login/i);
       expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default", { mode: "targeted" });
+      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("L1 declined + listChats returns >=1 (not phantom) => no recovery, no throw", async () => {
@@ -507,7 +507,7 @@ describe("phantom-auth regression suite", () => {
       await mgr.ensureAuthenticated("default");
 
       expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default", { mode: "targeted" });
+      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("B3 — silentRefresh 4→3 cookie drop: .google.com __Secure-1PSIDTS evicted", async () => {

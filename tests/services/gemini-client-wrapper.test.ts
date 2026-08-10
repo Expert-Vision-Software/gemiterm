@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock, beforeAll, afterAll } from "bun:test";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
 import { ChatMetadataStorage } from "../../src/services/chat-metadata-storage.ts";
@@ -6,6 +6,19 @@ import { setupTestConfig, teardownTestConfig } from "../setup.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { GeminiClientDeps } from "../../src/services/gemini-client-wrapper.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+
+const fileConfigDir = mkdtempSync(resolve(tmpdir(), "gemiterm-test-gcw-"));
+
+beforeAll(() => {
+  process.env.GEMITERM_CONFIG_DIR = fileConfigDir;
+});
+
+afterAll(() => {
+  try { rmSync(fileConfigDir, { recursive: true, force: true }); } catch { /* best effort */ }
+});
 
 interface RawChatRow {
   cid: string;
@@ -237,7 +250,7 @@ describe("GeminiClientService", () => {
   });
 
   afterEach(() => {
-    teardownTestConfig();
+    teardownTestConfig({ GEMITERM_CONFIG_DIR: fileConfigDir });
   });
 
   describe("listChats", () => {

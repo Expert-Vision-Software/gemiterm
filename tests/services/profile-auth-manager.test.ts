@@ -629,7 +629,7 @@ describe("ProfileAuthManager", () => {
       expect(cookies.secure_1psid).toBe("test-psid-value");
       expect(modelsFn).toHaveBeenCalledTimes(2);
       expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default", { mode: "targeted" });
+      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("models() throws + silent refresh fails continues (dormancy-resilient)", async () => {
@@ -651,7 +651,7 @@ describe("ProfileAuthManager", () => {
       expect(cookies.secure_1psid).toBe("test-psid-value");
       expect(modelsFn).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default", { mode: "targeted" });
+      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("probe cache TTL: repeat ensureAuthenticated within TTL reuses cached result", async () => {

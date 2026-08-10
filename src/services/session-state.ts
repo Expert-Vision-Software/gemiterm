@@ -12,7 +12,6 @@ export type SessionState = (typeof SessionState)[keyof typeof SessionState];
 
 export const RecoveryAction = {
   None: "None",
-  FullRefresh: "FullRefresh",
   TargetedRefresh: "TargetedRefresh",
   AutoExtend: "AutoExtend",
 } as const;

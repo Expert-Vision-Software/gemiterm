@@ -116,7 +116,7 @@ export class ProfileAuthManager {
     const probe = await this.probeServerSession(name);
     if (probe === "valid") return { state: "valid", cookies: null };
 
-    const refreshed = await this.silentRefresh(name, { mode: "targeted" });
+    const refreshed = await this.silentRefresh(name);
     if (refreshed) {
       this.probeCache.delete(name);
       await this.probeServerSession(name);
@@ -147,7 +147,7 @@ export class ProfileAuthManager {
     });
 
     if (getRecoveryAction(state) === RecoveryAction.TargetedRefresh) {
-      const refreshed = await this.silentRefresh(name, { mode: "targeted" });
+      const refreshed = await this.silentRefresh(name);
       if (!refreshed) {
         throw new AuthenticationError(
           `Session for profile '${name}' is in phantom-auth state; targeted refresh failed. Run 'gemiterm login' to re-authenticate.`,
