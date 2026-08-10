@@ -2,7 +2,6 @@ import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:
 import {
   AuthService,
   AuthServiceTimeoutError,
-  mergeCookies,
 } from "../../src/services/auth-service.ts";
 import { CookieMonitor } from "../../src/services/cookie-monitor.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
@@ -401,87 +400,6 @@ describe("AuthService", () => {
     });
   });
 
-  describe("mergeCookies", () => {
-    function cookie(name: string, value: string, domain: string, path = "/"): Cookie {
-      return {
-        name,
-        value,
-        domain,
-        path,
-        expires: -1,
-        httpOnly: true,
-        secure: true,
-        sameSite: "None",
-      };
-    }
-
-    test("preserves existing entry when polled set lacks it", () => {
-      const existing: Cookie[] = [
-        cookie("__Secure-1PSID", "g-psid", ".google.com"),
-        cookie("__Secure-1PSIDTS", "g-psidts", ".google.com"),
-        cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
-        cookie("__Secure-1PSIDTS", "yt-psidts", ".youtube.com"),
-      ];
-      const polled: Cookie[] = [
-        cookie("__Secure-1PSID", "new-g-psid", ".google.com"),
-        cookie("__Secure-1PSIDTS", "new-yt-psidts", ".youtube.com"),
-        cookie("__Secure-1PSID", "new-yt-psid", ".youtube.com"),
-      ];
-
-      const merged = mergeCookies(existing, polled);
-
-      expect(merged).toHaveLength(4);
-      const gPsid = merged.find((c) => c.name === "__Secure-1PSID" && c.domain === ".google.com");
-      expect(gPsid?.value).toBe("new-g-psid");
-      const gPsidts = merged.find((c) => c.name === "__Secure-1PSIDTS" && c.domain === ".google.com");
-      expect(gPsidts).toBeDefined();
-      expect(gPsidts?.value).toBe("g-psidts");
-    });
-
-    test("overwrites when key matches", () => {
-      const existing: Cookie[] = [
-        cookie("__Secure-1PSID", "old-value", ".google.com"),
-      ];
-      const polled: Cookie[] = [
-        cookie("__Secure-1PSID", "new-value", ".google.com"),
-      ];
-
-      const merged = mergeCookies(existing, polled);
-
-      expect(merged).toHaveLength(1);
-      expect(merged[0]!.value).toBe("new-value");
-    });
-
-    test("handles empty existing jar", () => {
-      const existing: Cookie[] = [];
-      const polled: Cookie[] = [
-        cookie("__Secure-1PSID", "g-psid", ".google.com"),
-        cookie("__Secure-1PSIDTS", "g-psidts", ".google.com"),
-      ];
-
-      const merged = mergeCookies(existing, polled);
-
-      expect(merged).toHaveLength(2);
-      expect(merged.find((c) => c.name === "__Secure-1PSID")?.value).toBe("g-psid");
-      expect(merged.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("g-psidts");
-    });
-
-    test("adds new polled entries not in existing jar", () => {
-      const existing: Cookie[] = [
-        cookie("__Secure-1PSID", "g-psid", ".google.com"),
-      ];
-      const polled: Cookie[] = [
-        cookie("__Secure-1PSID", "g-psid", ".google.com"),
-        cookie("__Secure-1PSIDTS", "new-psidts", ".google.com"),
-      ];
-
-      const merged = mergeCookies(existing, polled);
-
-      expect(merged).toHaveLength(2);
-      expect(merged.find((c) => c.name === "__Secure-1PSIDTS")?.value).toBe("new-psidts");
-    });
-  });
-
   describe("confirmAuthSuccess", () => {
     test("prints success messages, expiry, and __Secure-1PSID check", () => {
       const logSpy = spyOn(console, "log").mockImplementation(() => {});
@@ -679,7 +597,7 @@ describe("AuthService", () => {
     });
   });
 
-  describe("silentRefresh targeted-only", () => {
+  describe("silentRefresh cookie matching", () => {
     const originalFetch = globalThis.fetch;
 
     function makeRotationCookies(psid: string, psidts: string): Cookie[] {
@@ -696,14 +614,13 @@ describe("AuthService", () => {
 
     beforeEach(() => {
       spyOn(io, "existsFile").mockReturnValue(true);
-      spyOn(io, "getFileMtime").mockReturnValue(null);
     });
 
     afterEach(() => {
       globalThis.fetch = originalFetch;
     });
 
-    test("returns true when PSIDTS-family cookies change", async () => {
+    test("returns true when cookies change", async () => {
       const storedCookies = makeRotationCookies("active-psid", "active-psidts");
       const rotatedCookies = makeRotationCookies("new-psid", "new-psidts");
       cookieStorage.load.mockReturnValue(storedCookies);
@@ -720,13 +637,13 @@ describe("AuthService", () => {
       expect(driver.openHeadless).toHaveBeenCalledTimes(1);
       expect(cookieStorage.save).toHaveBeenCalledTimes(1);
       expect(cookieStorage.save.mock.calls[0]![0]).toBe("test-profile");
-      // Targeted mode only saves COOKIE_NAMES_OF_INTEREST cookies (PSIDTS-family)
       const saved = cookieStorage.save.mock.calls[0]![1] as Cookie[];
-      const savedNames = new Set(saved.map((c) => c.name));
-      expect(savedNames.has("__Secure-1PSIDTS")).toBe(true);
       const savedPsid = saved.find((c) => c.name === "__Secure-1PSID");
       expect(savedPsid).toBeDefined();
       expect(savedPsid!.value).toBe("new-psid");
+      const savedPsidts = saved.find((c) => c.name === "__Secure-1PSIDTS");
+      expect(savedPsidts).toBeDefined();
+      expect(savedPsidts!.value).toBe("new-psidts");
     });
 
     test("persists __Secure-1PSID change when browser rotates PSID (regression: silentRefresh discards PSID rotation)", async () => {
@@ -770,7 +687,7 @@ describe("AuthService", () => {
       expect(cookieStorage.save).not.toHaveBeenCalled();
     });
 
-    test("snapshot strict filter rejects evilgoogle.com; fallback catches by name (requireRotation disabled in targeted mode)", async () => {
+    test("snapshot strict filter rejects evilgoogle.com; fallback catches by name", async () => {
       const farFuture = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
       const spoofedCookies: Cookie[] = [
         {
@@ -804,7 +721,6 @@ describe("AuthService", () => {
       expect(driver.openHeadless).toHaveBeenCalledTimes(1);
       const monitorCall = cookieMonitor.start.mock.calls[0];
       expect(monitorCall).toBeDefined();
-      // Targeted mode never passes requireRotation (3rd arg = undefined)
       const requireRotationArg = monitorCall?.[3];
       expect(requireRotationArg).toBeUndefined();
     });
@@ -1000,7 +916,7 @@ describe("AuthService", () => {
       expect(savedNames.has("OGPC")).toBe(true);
     });
 
-    test("targeted mode updates only PSIDTS-family cookies; companions keep original values", async () => {
+    test("silentRefresh updates only matching cookies; companions keep original values", async () => {
       const largeJar = makeLargeJar();
       cookieStorage.load.mockReturnValue(largeJar);
       globalThis.fetch = mock(async () => {
@@ -1032,7 +948,7 @@ describe("AuthService", () => {
       expect(psidtsCookie?.value).toBe("psidts-rotated");
     });
 
-    test("targeted silentRefresh returns false when PSIDTS unchanged (no rotation possible)", async () => {
+    test("silentRefresh returns false when PSIDTS unchanged (no rotation possible)", async () => {
       const largeJar = makeLargeJar();
       cookieStorage.load.mockReturnValue(largeJar);
       globalThis.fetch = mock(async () => {
@@ -1041,7 +957,6 @@ describe("AuthService", () => {
       spyOn(io, "existsFile").mockReturnValue(true);
       spyOn(io, "getFileMtime").mockReturnValue(null);
 
-      // Browser produces same cookies as stored (phantom-auth: frontend-valid, same session)
       cookieMonitor.start.mockImplementationOnce(
         async (_session, callback) => {
           callback(largeJar);
@@ -1049,14 +964,13 @@ describe("AuthService", () => {
       );
 
       const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
-      const result = await svc.silentRefresh("test-profile", { mode: "targeted" });
+      const result = await svc.silentRefresh("test-profile");
 
-      // No PSIDTS change + no COOKIE_NAMES_OF_INTEREST update => false
       expect(result).toBe(false);
       expect(cookieStorage.save).not.toHaveBeenCalled();
     });
 
-    test("targeted silentRefresh does NOT pass requireRotation to CookieMonitor (RED: snapshot leaked as 4th arg)", async () => {
+    test("silentRefresh does NOT pass requireRotation to CookieMonitor", async () => {
       const largeJar = makeLargeJar();
       cookieStorage.load.mockReturnValue(largeJar);
       globalThis.fetch = mock(async () => {
@@ -1075,12 +989,8 @@ describe("AuthService", () => {
       );
 
       const svc = buildService(driver, cookieMonitor, cookieStorage, logger);
-      await svc.silentRefresh("test-profile", { mode: "targeted" });
+      await svc.silentRefresh("test-profile");
 
-      // RED: current code passes `snapshot` as requireRotation in ALL modes.
-      // Targeted mode must not pass requireRotation, because the browser may
-      // auto-sign-in with the same session (phantom-auth: frontend-valid, API-dead).
-      // Passing requireRotation blocks the CookieMonitor callback → 30 s timeout.
       expect(capturedRequireRotation).toBeUndefined();
     });
   });

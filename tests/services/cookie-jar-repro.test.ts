@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { ProfileAuthManager } from "../../src/services/profile-auth-manager.ts";
 import { ProfileManager, CookieStorage } from "../../src/infrastructure/storage.ts";
 import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
-import { mergeCookies } from "../../src/services/auth-service.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { IGeminiClientService } from "../../src/core/command-handlers.ts";
@@ -97,7 +96,6 @@ function buildManager(
     logger,
     geminiClient: client,
     silentRefresh: mock(async () => false),
-    rotateCookies: mock(async () => ({ rotated: false, attempted: false })),
   });
 }
 
@@ -130,7 +128,7 @@ describe("cookie-jar repro harness — 4-cookie degradation symptom", () => {
     expect(chats).toEqual([]);
   });
 
-  test("PSIDTS-only refresh via real mergeCookies cannot restore listChats", async () => {
+  test("PSIDTS-only refresh via inline merge cannot restore listChats", async () => {
     const storage = new CookieStorage();
     const profileManager = new ProfileManager(storage);
     profileManager.create(PROFILE);
@@ -144,10 +142,13 @@ describe("cookie-jar repro harness — 4-cookie degradation symptom", () => {
     const polledPsidtsOnly = degraded
       .filter((c) => c.name === "__Secure-1PSIDTS")
       .map((c) => ({ ...c, value: "redacted-refreshed-psidts" }));
-    const afterRefresh = mergeCookies(degraded, polledPsidtsOnly);
-    storage.save(PROFILE, afterRefresh);
+    const merged = degraded.map((c) => {
+      const match = polledPsidtsOnly.find((pc) => pc.name === c.name && pc.domain === c.domain && pc.path === c.path);
+      return match ? { ...c, value: match.value } : c;
+    });
+    storage.save(PROFILE, merged);
 
-    expect(afterRefresh).toHaveLength(4);
+    expect(merged).toHaveLength(4);
     expect(await client.listChats()).toEqual([]);
   });
 
