@@ -39,42 +39,6 @@ function makeActiveCookies(): Cookie[] {
   ];
 }
 
-function makeDroppedCookies(): Cookie[] {
-  const farFuture = Math.floor(Date.now() / 1000) + 2 * 365 * 24 * 60 * 60;
-  return [
-    {
-      name: "__Secure-1PSID",
-      value: "yt-psid-refreshed",
-      domain: ".youtube.com",
-      path: "/",
-      expires: farFuture,
-      httpOnly: true,
-      secure: true,
-      sameSite: "Lax" as const,
-    },
-    {
-      name: "__Secure-1PSIDTS",
-      value: "yt-psidts-refreshed",
-      domain: ".youtube.com",
-      path: "/",
-      expires: farFuture,
-      httpOnly: true,
-      secure: true,
-      sameSite: "Lax" as const,
-    },
-    {
-      name: "__Secure-1PSID",
-      value: "g-psid-refreshed",
-      domain: ".google.com",
-      path: "/",
-      expires: farFuture,
-      httpOnly: true,
-      secure: true,
-      sameSite: "Lax" as const,
-    },
-  ];
-}
-
 function makeRefreshedCookies(): Cookie[] {
   const farFuture = Math.floor(Date.now() / 1000) + 2 * 365 * 24 * 60 * 60;
   return [
@@ -147,20 +111,52 @@ function makeMultiDomainCookies(): Cookie[] {
   ];
 }
 
+function makeDroppedCookies(): Cookie[] {
+  const farFuture = Math.floor(Date.now() / 1000) + 2 * 365 * 24 * 60 * 60;
+  return [
+    {
+      name: "__Secure-1PSID",
+      value: "yt-psid-refreshed",
+      domain: ".youtube.com",
+      path: "/",
+      expires: farFuture,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax" as const,
+    },
+    {
+      name: "__Secure-1PSIDTS",
+      value: "yt-psidts-refreshed",
+      domain: ".youtube.com",
+      path: "/",
+      expires: farFuture,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax" as const,
+    },
+    {
+      name: "__Secure-1PSID",
+      value: "g-psid-refreshed",
+      domain: ".google.com",
+      path: "/",
+      expires: farFuture,
+      httpOnly: true,
+      secure: true,
+      sameSite: "Lax" as const,
+    },
+  ];
+}
+
 interface GimmeClient extends IGeminiClientService {
   _modelsSpy: ReturnType<typeof mock>;
-  _listChatsSpy: ReturnType<typeof mock>;
 }
 
 function gimme(
   modelsImpl: ReturnType<typeof mock>,
-  listChatsImpl: ReturnType<typeof mock> = mock(async () => [] as { cid: string; title: string }[]),
 ): GimmeClient {
   return {
     _modelsSpy: modelsImpl,
-    _listChatsSpy: listChatsImpl,
     models: modelsImpl as unknown as IGeminiClientService["models"],
-    listChats: listChatsImpl as unknown as IGeminiClientService["listChats"],
     async deleteChat() {},
     async sendMessage() { return ""; },
     async startNewChat() { return { response: "", conversationId: "" }; },
@@ -210,7 +206,7 @@ describe("phantom-auth regression suite", () => {
       expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
-    test("models() throws followed by a failed silent refresh continues (dormancy-resilient)", async () => {
+    test("models() throws followed by a failed silent refresh throws AuthenticationError", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -229,13 +225,12 @@ describe("phantom-auth regression suite", () => {
         silentRefresh,
       });
 
-      const cookies = await mgr.ensureAuthenticated("default");
-      expect(cookies.secure_1psid).toBe("active-psid");
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow(AuthenticationError);
       expect(silentRefresh).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
-    test("models() succeeds still rotates (stale 1PSIDTS detection)", async () => {
+    test("models() succeeds returns cookies without silentRefresh", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -245,7 +240,6 @@ describe("phantom-auth regression suite", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
-      const rotateCookies = mock(async (_profileName: string) => ({ rotated: true, attempted: true }));
 
       const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
       const mgr = new ProfileAuthManager({
@@ -254,200 +248,14 @@ describe("phantom-auth regression suite", () => {
         logger,
         geminiClient: geminiClient as unknown as IGeminiClientService,
         silentRefresh,
-        rotateCookies,
       });
 
       const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("active-psid");
       expect(cookies.secure_1psidts).toBe("active-psidts");
-      expect(rotateCookies).toHaveBeenCalledTimes(1);
-      expect(rotateCookies).toHaveBeenCalledWith("default");
       expect(silentRefresh).toHaveBeenCalledTimes(0);
       expect(modelsFn).toHaveBeenCalledTimes(1);
-    });
-
-    test("rotateCookies reports session-invalid (401/403) => phantom detection + targeted L2 recovers", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeActiveCookies());
-
-      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
-      const geminiClient = gimme(modelsFn);
-
-      const silentRefresh = mock(async (_profileName: string, _opts?: unknown) => true);
-      const rotateCookies = mock(async (_profileName: string) => ({
-        rotated: false,
-        attempted: false,
-        sessionInvalid: true,
-      }));
-
-      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
-      const mgr = new ProfileAuthManager({
-        profileManager: manager,
-        cookieStorageService: cookieStorage,
-        logger,
-        geminiClient: geminiClient as unknown as IGeminiClientService,
-        silentRefresh,
-        rotateCookies,
-      });
-
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("active-psid");
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
-    });
-
-    test("rotateCookies declined (200, no fresh PSIDTS) does NOT escalate to L2 silentRefresh", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeActiveCookies());
-
-      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
-      const listChatsFn = mock(async () => [{ cid: "c1", title: "existing chat" }]);
-      const geminiClient = gimme(modelsFn, listChatsFn);
-
-      const silentRefresh = mock(async (_profileName: string) => false);
-      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: true }));
-
-      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
-      const mgr = new ProfileAuthManager({
-        profileManager: manager,
-        cookieStorageService: cookieStorage,
-        logger,
-        geminiClient: geminiClient as unknown as IGeminiClientService,
-        silentRefresh,
-        rotateCookies,
-      });
-
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("active-psid");
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
-    });
-
-    test("L1 declined + phantom-auth detected (models ok, listChats empty) => targeted silentRefresh recovers", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeActiveCookies());
-
-      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
-      const listChatsFn = mock(async () => [] as { cid: string; title: string }[]);
-      const geminiClient = gimme(modelsFn, listChatsFn);
-
-      const silentRefresh = mock(async (_profileName: string, _opts?: unknown) => true);
-      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: true }));
-
-      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
-      const mgr = new ProfileAuthManager({
-        profileManager: manager,
-        cookieStorageService: cookieStorage,
-        logger,
-        geminiClient: geminiClient as unknown as IGeminiClientService,
-        silentRefresh,
-        rotateCookies,
-      });
-
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("active-psid");
-      expect(listChatsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
-    });
-
-    test("L1 declined + phantom-auth detected + targeted silentRefresh returns false => AuthenticationError", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeActiveCookies());
-
-      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
-      const listChatsFn = mock(async () => [] as { cid: string; title: string }[]);
-      const geminiClient = gimme(modelsFn, listChatsFn);
-
-      const silentRefresh = mock(async (_profileName: string, _opts?: unknown) => false);
-      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: true }));
-
-      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
-      const mgr = new ProfileAuthManager({
-        profileManager: manager,
-        cookieStorageService: cookieStorage,
-        logger,
-        geminiClient: geminiClient as unknown as IGeminiClientService,
-        silentRefresh,
-        rotateCookies,
-      });
-
-      const err = await mgr.ensureAuthenticated("default").catch((e) => e);
-
-      expect(err).toBeInstanceOf(AuthenticationError);
-      expect((err as Error).message).toMatch(/phantom|re-authenticate|login/i);
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
-    });
-
-    test("L1 declined + listChats returns >=1 (not phantom) => no recovery, no throw", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeActiveCookies());
-
-      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
-      const listChatsFn = mock(async () => [{ cid: "c1", title: "real chat" }]);
-      const geminiClient = gimme(modelsFn, listChatsFn);
-
-      const silentRefresh = mock(async (_profileName: string, _opts?: unknown) => true);
-      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: true }));
-
-      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
-      const mgr = new ProfileAuthManager({
-        profileManager: manager,
-        cookieStorageService: cookieStorage,
-        logger,
-        geminiClient: geminiClient as unknown as IGeminiClientService,
-        silentRefresh,
-        rotateCookies,
-      });
-
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("active-psid");
-      expect(listChatsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
-    });
-
-    test("L1 declined + listChats rejects => no recovery (treated as non-phantom)", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeActiveCookies());
-
-      const modelsFn = mock(async () => ["gemini-2.5-flash"] as string[]);
-      const listChatsFn = mock(async () => { throw new Error("listChats failed"); });
-      const geminiClient = gimme(modelsFn, listChatsFn);
-
-      const silentRefresh = mock(async (_profileName: string, _opts?: unknown) => true);
-      const rotateCookies = mock(async (_profileName: string) => ({ rotated: false, attempted: true }));
-
-      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
-      const mgr = new ProfileAuthManager({
-        profileManager: manager,
-        cookieStorageService: cookieStorage,
-        logger,
-        geminiClient: geminiClient as unknown as IGeminiClientService,
-        silentRefresh,
-        rotateCookies,
-      });
-
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("active-psid");
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
 
     test("Probe budget — repeat ensureAuthenticated within TTL reuses the cached result", async () => {
@@ -460,7 +268,6 @@ describe("phantom-auth regression suite", () => {
       const geminiClient = gimme(modelsFn);
 
       const silentRefresh = mock(async (_profileName: string) => true);
-      const rotateCookies = mock(async (_profileName: string) => ({ rotated: true, attempted: true }));
 
       const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
       const mgr = new ProfileAuthManager({
@@ -469,7 +276,6 @@ describe("phantom-auth regression suite", () => {
         logger,
         geminiClient: geminiClient as unknown as IGeminiClientService,
         silentRefresh,
-        rotateCookies,
       });
 
       const r1 = await mgr.ensureAuthenticated("default");
@@ -477,7 +283,6 @@ describe("phantom-auth regression suite", () => {
       const r3 = await mgr.ensureAuthenticated("default");
 
       expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(rotateCookies).toHaveBeenCalledTimes(3);
       expect(silentRefresh).toHaveBeenCalledTimes(0);
       expect(r2.secure_1psid).toBe(r1.secure_1psid);
       expect(r3.secure_1psid).toBe(r1.secure_1psid);
@@ -556,8 +361,6 @@ describe("phantom-auth regression suite", () => {
 
       const cookieStorageService = new CookieStorageService({ cookieStorage: storage, logger });
 
-      let capturedInstance: Record<string, unknown> | null = null;
-
       const MockAuthError = class extends Error { name = "AuthError"; };
       const MockAPIError = class extends Error { name = "APIError"; };
       const MockGeminiError = class extends Error { name = "GeminiError"; };
@@ -582,7 +385,6 @@ describe("phantom-auth regression suite", () => {
         }));
         this.deleteChat = mock(async () => {});
         this.models = mock(async () => []);
-        capturedInstance = this;
         return this;
       };
 

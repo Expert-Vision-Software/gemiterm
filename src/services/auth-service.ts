@@ -10,7 +10,7 @@ import { validateProfileName } from "../infrastructure/validators.ts";
 import { getProfilePath } from "../infrastructure/path-utils.ts";
 import { existsFile } from "../infrastructure/io.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
-import { rotateCookies, isGoogleDomainCookie, COOKIE_NAMES_OF_INTEREST, type RotateCookiesResult } from "./cookie-rotation.ts";
+import { rotateCookies, isGoogleDomainCookie, type RotateCookiesResult } from "./cookie-rotation.ts";
 import { CookieStorageService } from "./cookie-storage-service.ts";
 import type { CookieJar } from "./cookie-jar.ts";
 
@@ -20,18 +20,6 @@ const SILENT_REFRESH_TIMEOUT_MS = 30_000;
 
 export interface SilentRefreshOptions {
   timeoutMs?: number;
-}
-
-export function mergeCookies(existing: Cookie[], polled: Cookie[]): Cookie[] {
-  const key = (c: Cookie) => `${c.name}|${c.domain}|${c.path}`;
-  const polledByKey = new Map(polled.map((c) => [key(c), c]));
-  const merged = existing.map((c) => polledByKey.has(key(c)) ? polledByKey.get(key(c))! : c);
-  for (const c of polled) {
-    if (!existing.some((e) => key(e) === key(c))) {
-      merged.push(c);
-    }
-  }
-  return merged;
 }
 
 export interface AuthServiceDeps {
@@ -251,9 +239,7 @@ export class AuthService {
     }
 
     const timeoutMs = opts.timeoutMs ?? SILENT_REFRESH_TIMEOUT_MS;
-    this.logger.debug(`Silent refresh attempt (mode=targeted) for profile: ${name}`);
-
-    const REFRESH_COOKIE_NAMES: ReadonlySet<string> = new Set([...COOKIE_NAMES_OF_INTEREST, "__Secure-1PSID"]);
+    this.logger.debug(`Silent refresh attempt for profile: ${name}`);
 
     let snapshot: { activePsid: string; activePsidts: string | null } | null = null;
     try {
@@ -295,31 +281,30 @@ export class AuthService {
         return false;
       }
 
-      const polledPsid = cookies.find((c) => c.name === "__Secure-1PSID" && isGoogleDomainCookie(c))?.value ?? null;
-      const polledPsidts = cookies.find((c) => c.name === "__Secure-1PSIDTS" && isGoogleDomainCookie(c))?.value ?? null;
-      const psidChanged = polledPsid !== null && polledPsid !== snapshot.activePsid;
-      const psidtsChanged = polledPsidts !== snapshot.activePsidts;
-
       let updated = false;
       const existing = this.cookieStorageService.loadAllCookiesForProfile(name);
+      const browserByKey = new Map(
+        cookies.map((bc) => [`${bc.name}|${bc.domain}|${bc.path}`, bc]),
+      );
       const next = existing.map((c) => {
-        if (!REFRESH_COOKIE_NAMES.has(c.name)) return c;
-        const browser = cookies.find((bc) =>
-          bc.name === c.name && bc.domain === c.domain && bc.path === c.path,
-        );
+        const browser = browserByKey.get(`${c.name}|${c.domain}|${c.path}`);
         if (browser && browser.value !== c.value) {
           updated = true;
           return { ...c, value: browser.value };
         }
         return c;
       });
-      if (!updated && !psidtsChanged && !psidChanged) {
-        this.logger.debug(`silentRefresh: no PSIDTS-related cookie changed vs baseline`);
+      if (!updated) {
+        this.logger.debug(`silentRefresh: no cookies changed vs stored values`);
         return false;
       }
 
       if (this.cookieJar) {
-        this.cookieJar.upsert(name, cookies.filter((bc) => REFRESH_COOKIE_NAMES.has(bc.name)));
+        const storedKeySet = new Set(existing.map((c) => `${c.name}|${c.domain}|${c.path}`));
+        const matchingBrowserCookies = cookies.filter((bc) =>
+          storedKeySet.has(`${bc.name}|${bc.domain}|${bc.path}`),
+        );
+        this.cookieJar.upsert(name, matchingBrowserCookies);
       } else {
         this.cookieStorageService.saveCookiesForProfile(name, next);
       }
