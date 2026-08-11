@@ -1,5 +1,6 @@
 import type { Mediator } from "../core/mediator.ts";
 import type { ProfileAuthManager } from "../services/profile-auth-manager.ts";
+import type { AuthService } from "../services/auth-service.ts";
 import { AuthCommand } from "./commands/auth-command.ts";
 import { StatusCommand } from "./commands/status-command.ts";
 import { ListCommand } from "./commands/list-command.ts";
@@ -17,6 +18,7 @@ export interface CliCommandContext {
   verbose: boolean;
   mediator: Mediator;
   profileAuthManager: ProfileAuthManager;
+  authService?: AuthService;
 }
 
 export interface CliCommand {

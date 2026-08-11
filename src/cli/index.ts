@@ -38,7 +38,7 @@ import { createClientServices } from "./client-services.ts";
 
 const pkg = getPackageJson(import.meta.url);
 
-async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: ProfileAuthManager; getGeminiClient: (profileName?: string) => Promise<GeminiClientService> }> {
+async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: ProfileAuthManager; getGeminiClient: (profileName?: string) => Promise<GeminiClientService>; authService: AuthService }> {
   const logger = new Logger("mediator");
   const cookieStorage = new CookieStorage();
   const profileManager = new ProfileManager(cookieStorage);
@@ -138,7 +138,7 @@ async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: 
   mediator.registerCommandHandler(new SendMessageCommandHandler(commandClientService));
   mediator.registerCommandHandler(new StartNewChatCommandHandler(commandClientService));
 
-  return { profileAuthManager, getGeminiClient };
+  return { profileAuthManager, getGeminiClient, authService };
 }
 
 async function main(): Promise<void> {
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
   }
 
   const mediator = new Mediator();
-  const { profileAuthManager } = await setupMediator(mediator);
+  const { profileAuthManager, authService } = await setupMediator(mediator);
 
   const handler = registry.getHandler(subcommand);
   if (!handler) {
@@ -191,7 +191,7 @@ async function main(): Promise<void> {
   }
 
   try {
-    await handler.execute(subcommandArgs, { verbose, mediator, profileAuthManager });
+    await handler.execute(subcommandArgs, { verbose, mediator, profileAuthManager, authService });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Command '${subcommand}' failed: ${message}`);

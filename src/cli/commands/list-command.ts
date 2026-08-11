@@ -10,8 +10,9 @@ import {
 import { formatChatList } from "../../infrastructure/formatters.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
-import { GemitermError } from "../../core/errors.ts";
-import { browser, select, text, type BrowserAction } from "../utils/prompts.ts";
+import { AuthenticationError, GemitermError } from "../../core/errors.ts";
+import { browser, select, text, confirm, type BrowserAction } from "../utils/prompts.ts";
+import { runReauthFlow } from "../utils/reauth.ts";
 
 interface ListCommandOptions {
   help: boolean;
@@ -73,6 +74,34 @@ export class ListCommand implements CliCommand {
     } as Query<ListChatsQueryPayload>);
 
     let chats = result.chats;
+
+    if (result.phantom) {
+      try {
+        const answer = await confirm({
+          message: "Session is active but no conversations were returned. The session may be stale. Re-authenticate?",
+          default: true,
+        });
+        if (answer) {
+          if (!context.authService) {
+            console.log(chalk.yellow("Re-authentication not available in this context. Run 'gemiterm login' to re-authenticate."));
+            return;
+          }
+          const profileName = options.profile || undefined;
+          await runReauthFlow(profileName || "", {
+            authService: context.authService,
+            confirmPrompt: confirm,
+            originalError: new AuthenticationError("Session may be stale — no conversations were found."),
+          });
+          const retryResult = await mediator.send<ListChatsQueryResult>({
+            type: QUERY_TYPES.LIST_CHATS,
+            payload: query,
+          } as Query<ListChatsQueryPayload>);
+          chats = retryResult.chats;
+        }
+      } catch (error) {
+        if (error instanceof AuthenticationError) throw error;
+      }
+    }
 
     if (options.interactive) {
       await this.runInteractiveBrowser(chats, options, context);

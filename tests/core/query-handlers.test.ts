@@ -26,6 +26,7 @@ describe("ListChatsQueryHandler", () => {
       listChats: mock(() => Promise.resolve([])),
       fetchChat: mock(() => Promise.resolve([])),
       listModels: mock(() => Promise.resolve([])),
+      models: mock(() => Promise.resolve([])),
       forProfile: (name: string) => mockClient,
     };
     warnCalls = [];

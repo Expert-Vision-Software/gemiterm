@@ -17,6 +17,7 @@ export interface ListChatsQueryPayload {
 
 export interface ListChatsQueryResult {
   chats: ChatInfo[];
+  phantom?: boolean;
 }
 
 export interface FetchChatQueryPayload {
@@ -108,8 +109,11 @@ export class ListChatsQueryHandler
     const client = await this.getGeminiClient(profile);
 
     let chats: ChatInfo[];
+    let phantomClient: IGeminiClientService | null = null;
     if (profile) {
-      chats = await (await client.forProfile(profile)).listChats(options);
+      const profileClient = await client.forProfile(profile);
+      chats = await profileClient.listChats(options);
+      phantomClient = profileClient;
     } else if (allProfiles) {
       const allProfilesList = this.profileManager.list();
       const authenticated = allProfilesList.filter((name) => {
@@ -142,8 +146,18 @@ export class ListChatsQueryHandler
       }
     } else {
       chats = await client.listChats(options);
+      phantomClient = client;
     }
-    return { chats };
+
+    let phantom = false;
+    if (chats.length === 0 && phantomClient) {
+      try {
+        await phantomClient.models();
+        phantom = true;
+      } catch {}
+    }
+
+    return { chats, phantom };
   }
 }
 

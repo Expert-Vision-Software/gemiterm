@@ -640,3 +640,37 @@ The three cookie-filtering bugs all share the same root pattern: a "designed sub
 
 See `docs/alternate-plan-simplify.md` for the full revised plan — removes RotateCookies from hot path, removes phantom detection, removes the 5-state classifier, and rewrites `silentRefresh` to use key-based matching with no cookie-name filtering.
 
+## 2026-08-11 — Reactive phantom detection at the response layer (not the auth gate)
+
+**Discovered by:** Diego, after live dormancy test failed again on `fix/remove-full-l2-mergecookies` (which already removed probe, RotateCookies, phantom detection, and L2 from the hot path). Even with `ensureAuthenticated` reduced to `hasStoredCookies` + `loadCookiesForProfile` (~30 lines), `listChats` still returned 0 chats after ~1-2h idle.
+
+**Symptom:** `gemiterm list` returns "No conversations found" after dormancy, with no error. The session is phantom — cookies are on disk, `models()` would succeed, but `listChats` enumerates 0 conversations. There is no preemptive probe to detect this, so the user sees a silent empty result with no guidance.
+
+**Root cause:** The simplified auth gate (`ensureAuthenticated`) correctly loads cookies from disk and builds a client. The SDK accepts these cookies for `models()` but `listChats` returns empty (the phantom-auth state). With no probe on the hot path (correct — per Point 2 below), there is no opportunity to surface the degradation before the user sees the empty result.
+
+**Three-point design (per user instructions, 2026-08-11):**
+
+**Point 1 — full-jar capture (hygiene, NOT the dormancy fix):** The `CookieMonitor` full-jar capture fix (`6bc51f6`) ensures all companion cookies are captured at login time. This is correct hygiene but does not prevent dormancy phantom-auth. Both working (13-day) and phantom (6-hour) profiles have identical 4-cookie jars.
+
+**Point 2 — remove probe from hot path (already done, still correct):** The preemptive `models()` probe on the hot path was accurate about session validity but had a destructive consequence: when it said "stale" and `silentRefresh` failed, it killed a session that might have worked for the actual API call. v2.4.0 had no such probe. The `ensureAuthenticated` on this branch has no probe — correct.
+
+**Point 3 — detect phantom at the response layer, not the auth gate (NEW):** After `listChats` returns 0 conversations, probe with `models()` to distinguish phantom from dead:
+- `models()` succeeds → phantom → "Session is active but no conversations were returned. The session may be stale. Re-authenticate?"
+- `models()` fails → dead → session is dead, existing error handling applies
+- Don't try to predict it preemptively; react after the fact
+
+**Fix:** Three changes:
+
+1. **`src/core/query-handlers.ts`**: `ListChatsQueryHandler.handle()` — after `listChats` returns 0 for a single profile, call `client.models()`. If models succeeds, set `phantom: true` on the result. `ListChatsQueryResult` gains `phantom?: boolean`.
+
+2. **`src/cli/command-registry.ts`**: `CliCommandContext` gains optional `authService?: AuthService` for re-auth flow.
+
+3. **`src/cli/commands/list-command.ts`**: If `result.phantom`, show confirm prompt and run `runReauthFlow` to re-authenticate. On success, retry the list query.
+
+The phantom check is skipped for `allProfiles` queries (profiles aggregate, per-profile detection is complex). For single-profile queries (`gemiterm list`, `gemiterm list -p <name>`), phantom detection fires when `chats.length === 0`.
+
+**Verified:** 953 pass / 0 fail / 1 skip, typecheck clean. Test mock (`query-handlers.test.ts`) updated with `models: mock(...)` to match new `IGeminiClientService.models()` call in the handler.
+
+**Related ledger entries:**
+- §"2026-08-10 — Simplify plan revised" — the companion design doc; this fix is the reactive phantom detection described in the simplify plan's `ensureAuthenticated` ladder but implemented at a higher layer (command/query handler, not auth gate).
+
