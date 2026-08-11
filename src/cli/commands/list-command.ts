@@ -100,6 +100,7 @@ export class ListCommand implements CliCommand {
         }
       } catch (error) {
         if (error instanceof AuthenticationError) throw error;
+        console.log(chalk.yellow("Session may be stale. Run 'gemiterm login' to re-authenticate."));
       }
     }
 

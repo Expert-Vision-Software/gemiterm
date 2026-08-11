@@ -81,8 +81,6 @@ export class GeminiClientService
   readonly cookieJar?: CookieJar;
   readonly profileName?: string;
   private readonly deps: GeminiClientDeps;
-  private baselineSecure1psid: string;
-  private baselineSecure1psidts: string | null;
   private readonly chatMetadata: ChatMetadataStorage;
 
   constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps, chatMetadata?: ChatMetadataStorage, cookieJar?: CookieJar);
@@ -97,8 +95,6 @@ export class GeminiClientService
     if (config.secure1psidts) {
       this.client.cookies["__Secure-1PSIDTS"] = config.secure1psidts;
     }
-    this.baselineSecure1psid = config.secure1psid;
-    this.baselineSecure1psidts = config.secure1psidts ?? null;
     this.chatMetadata = chatMetadata ?? new ChatMetadataStorage(logger);
   }
 

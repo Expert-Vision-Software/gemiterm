@@ -21,7 +21,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = $PSScriptRoot | Split-Path -Parent
 
 $DHB_PROFILE     = "c:\temp\gemiterm\profiles\dhb-zeek"
-$LOCAL_PROFILE   = "$env:APPDATA\gemiterm\profiles\dhb-zeek-readonly"
+$LOCAL_WORKING   = "$env:APPDATA\gemiterm\profiles\dhb-zeek"
 $STORAGE_FILE    = "storage_state.json"
 
 $pass = 0
@@ -134,10 +134,19 @@ $out = Run-Gemiterm "list"
 Assert "t1" $out "Total: (\d+) conversations" "returns conversations"
 if (-not $Keep) { Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue }
 
-# Test 2 — phantom profile
-Write-Host "[2] Phantom profile (must detect, NOT silent 0)" -ForegroundColor Yellow
+# Test 2 — simulated phantom from local working profile
+Write-Host "[2] Simulated phantom (must detect, NOT silent 0)" -ForegroundColor Yellow
 $TempDir = Join-Path $env:TEMP "gemiterm-t2-$([Guid]::NewGuid().ToString().Substring(0,6))"
-SetupProfile $LOCAL_PROFILE $TempDir "dhb-zeek" | Out-Null
+SetupProfile $LOCAL_WORKING $TempDir "dhb-zeek" | Out-Null
+# Scramble PSIDTS to simulate dormancy
+$sp = Join-Path $TempDir "profiles\dhb-zeek\storage_state.json"
+$j = Get-Content $sp -Raw | ConvertFrom-Json
+foreach ($c in $j.cookies) {
+    if ($c.name -eq "__Secure-1PSIDTS") {
+        $c.value = "sidts-Cj0B-SIMULATED-PHANTOM-$([Guid]::NewGuid().ToString().Substring(0,8))"
+    }
+}
+$j | ConvertTo-Json -Depth 10 | Set-Content $sp -NoNewline
 $out = Run-Gemiterm "list"
 if ($out -match "Total: (\d+) conversations" -and [int]$Matches[1] -gt 0) {
     Write-Host "  PASS — recovered phantom ($($Matches[1]) chats)" -ForegroundColor Green
