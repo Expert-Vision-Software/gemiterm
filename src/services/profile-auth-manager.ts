@@ -74,6 +74,19 @@ export class ProfileAuthManager {
       return this.cookieStorageService.loadCookiesForProfile(name);
     }
 
+    try {
+      const probed = await this.geminiClient.forProfile(name);
+      await probed.models();
+    } catch (err) {
+      this.logger.warn(`Server-side session for profile '${name}' appears stale; forcing refresh`);
+      this.logger.debug(`probeServerSession: models failed for profile '${name}': ${err}`);
+      const refreshed = await this.silentRefresh(name);
+      if (refreshed) {
+        this.logger.info(`Profile '${name}' is authenticated`);
+        return this.cookieStorageService.loadCookiesForProfile(name);
+      }
+    }
+
     this.logger.info(`Profile '${name}' is authenticated`);
     return this.cookieStorageService.loadCookiesForProfile(name);
   }
