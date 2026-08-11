@@ -8,6 +8,7 @@ import {
   QUERY_TYPES,
 } from "../../src/core/query-handlers.ts";
 import type { IGeminiClientQueryService, IProfileQueryService, ProfileManagerForQuery } from "../../src/core/query-handlers.ts";
+import type { IGeminiClientService } from "../../src/core/command-handlers.ts";
 import type { Query } from "../../src/core/mediator.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 
@@ -26,6 +27,7 @@ describe("ListChatsQueryHandler", () => {
       listChats: mock(() => Promise.resolve([])),
       fetchChat: mock(() => Promise.resolve([])),
       listModels: mock(() => Promise.resolve([])),
+      models: mock(() => Promise.resolve(["gemini-2.5-flash"])),
       forProfile: (name: string) => mockClient,
     };
     warnCalls = [];
@@ -260,6 +262,69 @@ describe("ListChatsQueryHandler", () => {
 
     expect(factorySpy).toHaveBeenCalledTimes(1);
     expect(factorySpy.mock.calls[0]?.[0]).toBe("dhb-zeek");
+  });
+
+  describe("phantom detection in ListChatsQueryHandler", () => {
+    test("sets authState to 'phantom' when listChats returns 0 but models() succeeds", async () => {
+      mockClient.listChats = mock(() => Promise.resolve([]));
+      mockClient.models = mock(() => Promise.resolve(["gemini-2.5-flash"]));
+
+      const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
+      const result = await handler.handle(makeQuery(QUERY_TYPES.LIST_CHATS, {}));
+
+      expect(result.chats).toEqual([]);
+      expect(result.authState).toBe("phantom");
+      expect(mockClient.models).toHaveBeenCalledTimes(1);
+    });
+
+    test("sets authState to 'dead' when listChats returns 0 and models() throws", async () => {
+      mockClient.listChats = mock(() => Promise.resolve([]));
+      mockClient.models = mock(() => { throw new Error("401 Unauthorized"); });
+
+      const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
+      const result = await handler.handle(makeQuery(QUERY_TYPES.LIST_CHATS, {}));
+
+      expect(result.chats).toEqual([]);
+      expect(result.authState).toBe("dead");
+    });
+
+    test("does not probe models() when listChats returns non-empty chats", async () => {
+      const chats = [{ id: "1", title: "Chat", isPinned: false, timestamp: 1000 }];
+      mockClient.listChats = mock(() => Promise.resolve(chats));
+      mockClient.models = mock(() => Promise.resolve(["gemini-2.5-flash"]));
+
+      const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
+      const result = await handler.handle(makeQuery(QUERY_TYPES.LIST_CHATS, {}));
+
+      expect(result.chats).toEqual(chats);
+      expect(result.authState).toBeUndefined();
+      expect(mockClient.models).toHaveBeenCalledTimes(0);
+    });
+
+    test("sets authState with profile name when profile is specified in payload", async () => {
+      mockClient.listChats = mock(() => Promise.resolve([]));
+      mockClient.models = mock(() => Promise.resolve(["gemini-2.5-flash"]));
+
+      const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
+      const result = await handler.handle(makeQuery(QUERY_TYPES.LIST_CHATS, { profile: "work" }));
+
+      expect(result.authState).toBe("phantom");
+      expect(result.authProfile).toBe("work");
+    });
+
+    test("allProfiles path does not trigger phantom detection (by design)", async () => {
+      mockClient.listChats = mock(() => Promise.resolve([]));
+      mockClient.models = mock(() => Promise.resolve(["gemini-2.5-flash"]));
+      mockProfileManager.hasStoredCookies = mock(() => true);
+      mockProfileManager.list = mock(() => ["work"]);
+
+      const handler = new ListChatsQueryHandler(() => mockClient as any, mockProfileManager, mockLogger);
+      const result = await handler.handle(makeQuery(QUERY_TYPES.LIST_CHATS, { allProfiles: true }));
+
+      expect(result.chats).toEqual([]);
+      expect(result.authState).toBeUndefined();
+      expect(mockClient.models).toHaveBeenCalledTimes(0);
+    });
   });
 });
 

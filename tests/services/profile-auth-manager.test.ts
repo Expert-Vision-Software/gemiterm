@@ -209,13 +209,13 @@ describe("ProfileAuthManager", () => {
         expect(result.secure_1psid).toBeTruthy();
       });
 
-      test("DO NOT THROW: models() throws + silentRefresh fails must resolve", async () => {
+      test("DO NOT THROW: valid cookies resolve without probing models or calling silentRefresh", async () => {
         const storage = new CookieStorage();
         const manager = new ProfileManager(storage);
         manager.create("default");
         storage.save("default", makeValidCookies());
 
-        const modelsFn = mock(async () => { throw new Error("network error"); });
+        const modelsFn = mock(async () => ["gemini-2.5-flash"]);
         const geminiClient = {
           models: modelsFn as unknown as IGeminiClientService["models"],
           async forProfile() { return this as unknown as IGeminiClientService; },
@@ -229,29 +229,8 @@ describe("ProfileAuthManager", () => {
         const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
         const result = await mgr.ensureAuthenticated("default");
         expect(result.secure_1psid).toBe("test-psid-value");
-      });
-
-      test("DO NOT THROW: probe stale + silentRefresh fails must resolve", async () => {
-        const storage = new CookieStorage();
-        const manager = new ProfileManager(storage);
-        manager.create("default");
-        storage.save("default", makeValidCookies());
-
-        const modelsFn = mock(async () => { throw new Error("network error"); });
-        const geminiClient = {
-          models: modelsFn as unknown as IGeminiClientService["models"],
-          async forProfile() { return this as unknown as IGeminiClientService; },
-          async deleteChat() {},
-          async sendMessage() { return ""; },
-          async startNewChat() { return { response: "", conversationId: "" }; },
-          async profileHasConversation() { return false; },
-        };
-        const silentRefresh = mock(async () => false);
-
-        const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
-        const result = await mgr.ensureAuthenticated("default");
-        expect(result.secure_1psid).toBe("test-psid-value");
-        expect(silentRefresh).toHaveBeenCalledTimes(1);
+        expect(modelsFn).toHaveBeenCalledTimes(0);
+        expect(silentRefresh).toHaveBeenCalledTimes(0);
       });
     });
 
@@ -540,7 +519,7 @@ describe("ProfileAuthManager", () => {
     });
   });
 
-  describe("server-side probe", () => {
+  describe("server-side probe — removed from hot path", () => {
     function gimme(
       modelsImpl: ReturnType<typeof mock>,
     ): IGeminiClientService {
@@ -554,7 +533,7 @@ describe("ProfileAuthManager", () => {
       };
     }
 
-    test("models() succeeds and logs authenticated", async () => {
+    test("authenticated with valid cookies does NOT probe models() or call silentRefresh", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -581,56 +560,11 @@ describe("ProfileAuthManager", () => {
       const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(modelsFn).toHaveBeenCalledTimes(1);
+      expect(modelsFn).toHaveBeenCalledTimes(0);
       expect(silentRefresh).toHaveBeenCalledTimes(0);
       expect(infoSpy).toHaveBeenCalledWith(
         expect.stringContaining("Profile 'default' is authenticated"),
       );
-    });
-
-    test("models() throws triggers silent refresh", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeValidCookies());
-
-      const modelsFn = mock(async () => {
-        throw new Error("network error");
-      });
-      const geminiClient = gimme(modelsFn);
-
-      const silentRefresh = mock(async (_profileName: string) => true);
-
-      const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
-
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
-    });
-
-    test("models() throws + silent refresh fails continues (dormancy-resilient)", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeValidCookies());
-
-      const modelsFn = mock(async () => {
-        throw new Error("network error");
-      });
-      const geminiClient = gimme(modelsFn);
-
-      const silentRefresh = mock(async (_profileName: string) => false);
-
-      const mgr = createManager(manager, geminiClient as unknown as IGeminiClientService, silentRefresh);
-
-      const cookies = await mgr.ensureAuthenticated("default");
-      expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
     });
 
     test("models() succeeds with no stored cookies throws AuthenticationError", async () => {

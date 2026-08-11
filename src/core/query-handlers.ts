@@ -17,6 +17,8 @@ export interface ListChatsQueryPayload {
 
 export interface ListChatsQueryResult {
   chats: ChatInfo[];
+  authState?: "phantom" | "dead";
+  authProfile?: string;
 }
 
 export interface FetchChatQueryPayload {
@@ -108,8 +110,17 @@ export class ListChatsQueryHandler
     const client = await this.getGeminiClient(profile);
 
     let chats: ChatInfo[];
+    let authState: "phantom" | "dead" | undefined;
+    let authProfile: string | undefined;
+
     if (profile) {
-      chats = await (await client.forProfile(profile)).listChats(options);
+      const profileClient = await client.forProfile(profile);
+      chats = await profileClient.listChats(options);
+      if (chats.length === 0) {
+        const result = await this.detectAuthState(profileClient, profile);
+        authState = result.state;
+        authProfile = result.profile;
+      }
     } else if (allProfiles) {
       const allProfilesList = this.profileManager.list();
       const authenticated = allProfilesList.filter((name) => {
@@ -142,8 +153,31 @@ export class ListChatsQueryHandler
       }
     } else {
       chats = await client.listChats(options);
+      if (chats.length === 0) {
+        const result = await this.detectAuthState(client);
+        authState = result.state;
+        authProfile = result.profile;
+      }
     }
-    return { chats };
+    return { chats, authState, authProfile };
+  }
+
+  private async detectAuthState(
+    client: { models(): Promise<string[]> },
+    profileName?: string,
+  ): Promise<{ state: "phantom" | "dead" | undefined; profile?: string }> {
+    try {
+      const models = await client.models();
+      if (models.length > 0) {
+        this.logger.warn(`Phantom session detected${profileName ? ` for profile '${profileName}'` : ""}: models() works but listChats() returned 0 chats. Run 'gemiterm login' to re-authenticate.`);
+        return { state: "phantom", profile: profileName };
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Session appears dead${profileName ? ` for profile '${profileName}'` : ""}: models() failed (${msg}). Run 'gemiterm login' to re-authenticate.`);
+      return { state: "dead", profile: profileName };
+    }
+    return { state: undefined };
   }
 }
 

@@ -177,18 +177,16 @@ afterEach(() => {
 
 describe("phantom-auth regression suite", () => {
   describe("ProfileAuthManager server-side probe", () => {
-    test("models() throws triggers silent refresh, not silent success", async () => {
+    test("probe removed: models() is NOT called, cookies returned as-is", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeActiveCookies());
 
-      const geminiClient = gimme(mock(async () => { throw new Error("auth error"); }));
+      const modelsSpy = mock(async () => ["gemini-2.5-flash"]);
+      const geminiClient = gimme(modelsSpy);
 
-      const silentRefresh = mock(async (_profileName: string) => {
-        storage.save("default", makeRefreshedCookies());
-        return true;
-      });
+      const silentRefresh = mock(async (_profileName: string) => true);
 
       const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
       const mgr = new ProfileAuthManager({
@@ -201,18 +199,19 @@ describe("phantom-auth regression suite", () => {
 
       const cookies = await mgr.ensureAuthenticated("default");
 
-      expect(cookies.secure_1psid).toBe("refreshed-psid");
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
+      expect(cookies.secure_1psid).toBe("active-psid");
+      expect(modelsSpy).toHaveBeenCalledTimes(0);
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
 
-    test("models() throws followed by a failed silent refresh continues (dormancy-resilient)", async () => {
+    test("dormancy-resilient: cookies returned without probing server", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeActiveCookies());
 
-      const geminiClient = gimme(mock(async () => { throw new Error("auth error"); }));
+      const modelsSpy = mock(async () => { throw new Error("auth error"); });
+      const geminiClient = gimme(modelsSpy);
 
       const silentRefresh = mock(async (_profileName: string) => false);
 
@@ -227,19 +226,20 @@ describe("phantom-auth regression suite", () => {
 
       const cookies = await mgr.ensureAuthenticated("default");
       expect(cookies.secure_1psid).toBe("active-psid");
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
+      expect(modelsSpy).toHaveBeenCalledTimes(0);
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
   });
 
-  describe("Smoke harness — B1+B2 (false-positive probe) + B3 (jar corruption)", () => {
-    test("B1+B2 — multi-domain cookies + models() throws triggers silentRefresh (false positive)", async () => {
+  describe("Smoke harness — probe removed, no spurious refresh", () => {
+    test("multi-domain cookies + models() NOT called, no spurious silentRefresh", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeMultiDomainCookies());
 
-      const geminiClient = gimme(mock(async () => { throw new Error("auth error"); }));
+      const modelsSpy = mock(async () => { throw new Error("auth error"); });
+      const geminiClient = gimme(modelsSpy);
 
       const silentRefresh = mock(async (_profileName: string) => true);
 
@@ -254,25 +254,20 @@ describe("phantom-auth regression suite", () => {
 
       await mgr.ensureAuthenticated("default");
 
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
+      expect(modelsSpy).toHaveBeenCalledTimes(0);
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
 
-    test("B3 — silentRefresh 4→3 cookie drop: .google.com __Secure-1PSIDTS evicted", async () => {
+    test("multi-domain cookies preserved intact without spurious refresh", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeMultiDomainCookies());
 
-      const geminiClient = gimme(mock(async () => { throw new Error("auth error"); }));
+      const modelsSpy = mock(async () => { throw new Error("auth error"); });
+      const geminiClient = gimme(modelsSpy);
 
-      const droppedCookies = makeDroppedCookies();
-      let savedDropCount = 0;
-      const silentRefresh = mock(async (_profileName: string) => {
-        storage.save("default", droppedCookies);
-        savedDropCount = storage.load("default").length;
-        return true;
-      });
+      const silentRefresh = mock(async (_profileName: string) => false);
 
       const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger });
       const mgr = new ProfileAuthManager({
@@ -285,13 +280,15 @@ describe("phantom-auth regression suite", () => {
 
       await mgr.ensureAuthenticated("default");
 
-      const postRefresh = storage.load("default");
-      const googlePsidts = postRefresh.find((c) => c.name === "__Secure-1PSIDTS" && c.domain === ".google.com");
+      const postAuth = storage.load("default");
+      const googlePsidts = postAuth.find((c) => c.name === "__Secure-1PSIDTS" && c.domain === ".google.com");
+      const ytPsidts = postAuth.find((c) => c.name === "__Secure-1PSIDTS" && c.domain === ".youtube.com");
 
-      expect(savedDropCount).toBe(3);
-      expect(postRefresh.length).toBe(3);
-      expect(googlePsidts).toBeUndefined();
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
+      expect(postAuth.length).toBe(4);
+      expect(googlePsidts?.value).toBe("g-psidts");
+      expect(ytPsidts?.value).toBe("yt-psidts");
+      expect(modelsSpy).toHaveBeenCalledTimes(0);
+      expect(silentRefresh).toHaveBeenCalledTimes(0);
     });
   });
 

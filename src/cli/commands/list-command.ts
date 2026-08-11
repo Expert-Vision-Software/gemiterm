@@ -74,6 +74,12 @@ export class ListCommand implements CliCommand {
 
     let chats = result.chats;
 
+    if (result.authState === "phantom") {
+      console.error(chalk.yellow(`\n⚠ Phantom session detected${result.authProfile ? ` for profile '${result.authProfile}'` : ""} — your login is valid but the Gemini API returned no conversations. Run \`gemiterm login\` to refresh your session.\n`));
+    } else if (result.authState === "dead") {
+      console.error(chalk.red(`\n✗ Session is no longer valid${result.authProfile ? ` for profile '${result.authProfile}'` : ""}. Run \`gemiterm login\` to re-authenticate.\n`));
+    }
+
     if (options.interactive) {
       await this.runInteractiveBrowser(chats, options, context);
       return;
