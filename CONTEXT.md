@@ -9,17 +9,20 @@ Stable terminology for the auth and conversation modules. No implementation deta
 ### Cookie jar
 The persisted collection of authentication cookies for a single profile, stored at `%APPDATA%\gemiterm\profiles\<name>\cookies.json` (Windows) or `~/gemiterm/profiles/<name>/cookies.json` (POSIX). Contains the long-lived identity cookie (`__Secure-1PSID`), the short-lived session cookie (`__Secure-1PSIDTS`), and companion auth cookies (`SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `__Secure-3PSID`, `SIDCC`, etc.). All API operations ultimately read from this jar.
 
-### Capture-integrity
-The property that the cookie-capture path (login flow, silentRefresh) stores the COMPLETE jar the browser holds, not a filtered subset. Violated when the capture path trims to a "required cookies" predicate before persisting; the symptom is that `models()` succeeds but `listChats` returns empty, because `listChats` requires companion cookies that the trimmed jar lacks.
+### cookiesLocalValid
+A profile whose on-disk jar exists, contains `__Secure-1PSID` + `__Secure-1PSIDTS`, and whose PSIDTS `expires` field is not within the freshness-threshold of expiring. Purely local — no network I/O. This is the only check v2.4.0 performs; it is deterministic. The threshold is configurable (7 days in v2.4.0, 1 hour in HEAD [change `7e2c486`]).
+
+### cookiesRemoteValid
+A profile whose cookies are accepted by a live Gemini API call (currently `models()`). Depends on network, server-side session state, and rate limits — probabilistic, not deterministic. Introduced post-v2.4.0 as the **probe** concept. A session can be `cookiesLocalValid` but not `cookiesRemoteValid` (server-side rotation made PSIDTS stale, network error, etc.), and this asymmetry is the root of the probe-induced death-spiral.
 
 ### Phantom-auth session
-A session state where `models()` succeeds (the PSID is server-accepted) but `listChats` returns empty (companion cookies are absent or stale). The freshness model says "valid"; the API reality says "broken". Distinguished from a **dead session** (RotateCookies returns 401/403) and a **fresh session** (every probe passes).
-
-### Session state
-The named condition of a profile's server-accepted credentials. Enumerated values: `Fresh | Phantom | Dead | Stale | Declined`. Computed from the probe result (models), the rotation result (rotateCookies), and the listChats result. Currently an implicit state machine inside `ProfileAuthManager.ensureAuthenticated`; an explicit classifier is proposed (Candidate C).
+A session state where `models()` succeeds (the PSID is server-accepted) but `listChats` returns empty. Previously attributed to missing companion cookies; **empirically disproven 2026-08-10** — a 4-cookie jar (PSID + PSIDTS only, no companions) returns full chat lists on both v2.4.0 and HEAD. The actual cause of phantom-auth remains unconfirmed. Distinguished from a **dead session** (RotateCookies returns 401/403) and a **fresh session** (every probe passes).
 
 ### Companion cookies
-Auth cookies set alongside `__Secure-1PSID` and `__Secure-1PSIDTS` during the Google login envelope: `SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `__Secure-3PSID`, `__Secure-3PSIDTS`, `SIDCC`, `NID`. Required by `listChats`; NOT required by `models()` or `readChat(cid)` (in practice). Their absence is the proximate cause of phantom-auth.
+Auth cookies set alongside `__Secure-1PSID` and `__Secure-1PSIDTS` during the Google login envelope: `SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `__Secure-3PSID`, `__Secure-3PSIDTS`, `SIDCC`, `NID`. **Previously believed required by `listChats` — disproven 2026-08-10.** A 4-cookie jar (no companions) returns full chat lists. The functional role of companion cookies is currently unknown.
+
+### Probe death-spiral
+The failure mode where `ensureAuthenticated`'s server probe (`models()`) returns "stale" (for any reason: network blip, transient server rejection, rate limit), triggering silentRefresh which itself fails (frontend-valid session produces identical cookies → no rotation detected → returns false), and the session is killed with `AuthenticationError`. The probe transforms a potentially-viable session into a dead one — destructive validation. v2.4.0 avoids this entirely by never probing.
 
 ### PSID-only probe
 A server-side validity check using `models()` which succeeds with only `__Secure-1PSID` present. Insufficient as the sole auth gate because it cannot detect phantom-auth. See **Probe cache** below.

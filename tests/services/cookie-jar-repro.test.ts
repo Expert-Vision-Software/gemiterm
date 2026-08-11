@@ -96,7 +96,6 @@ function buildManager(
     cookieStorageService,
     logger,
     geminiClient: client,
-    silentRefresh: mock(async () => false),
   });
 }
 

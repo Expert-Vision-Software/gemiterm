@@ -77,8 +77,6 @@ async function setupMediator(mediator: Mediator): Promise<{ profileAuthManager: 
     cookieStorageService,
     logger,
     geminiClient: factoryClient,
-    silentRefresh: (profileName: string, opts?: Parameters<typeof authService.silentRefresh>[1]) =>
-      authService.silentRefresh(profileName, opts),
   });
 
   let geminiClient: GeminiClientService | null = null;
