@@ -108,10 +108,9 @@ export class GeminiClientService
     this.initPromise = this.client!.init();
     await this.initPromise;
     this.initialized = true;
-    this.persistRefreshedCookies();
   }
 
-  private persistRefreshedCookies(): void {
+  persistRefreshedCookies(): void {
     try {
       if (!this.profileName || !this.client) return;
       if (!this.cookieStorageService && !this.cookieJar) return;
@@ -258,7 +257,6 @@ export class GeminiClientService
         chats = chats.slice(0, options.limit);
       }
 
-      this.persistRefreshedCookies();
       return chats;
     } catch (e) {
       const err = this.translateError(e);
@@ -285,7 +283,6 @@ export class GeminiClientService
         }
       }
       const messages = turns.length === 0 ? [] : this.toDomainMessages(turns, conversationId);
-      this.persistRefreshedCookies();
       return messages;
     } catch (e) {
       const err = this.translateError(e);
@@ -298,7 +295,6 @@ export class GeminiClientService
     await this.init();
     try {
       await this.client!.deleteChat(conversationId);
-      this.persistRefreshedCookies();
     } catch (e) {
       const err = this.translateError(e);
       this.logger.debug(`deleteChat failed: ${e}`);
@@ -366,7 +362,6 @@ export class GeminiClientService
         this.chatMetadata.save(this.profileName, conversationId, captured);
       }
       const text = output.text.toString();
-      this.persistRefreshedCookies();
       return text;
     } catch (e) {
       const err = this.translateError(e);
@@ -388,7 +383,6 @@ export class GeminiClientService
           this.chatMetadata.save(this.profileName, conversationId, captured);
         }
       }
-      this.persistRefreshedCookies();
       return { response, conversationId };
     } catch (e) {
       const err = this.translateError(e);
@@ -402,7 +396,6 @@ export class GeminiClientService
     try {
       const raw = await this.client!.models();
       const result = (raw ?? []).map((m: RawAvailableModel) => this.toDomainModelName(m));
-      this.persistRefreshedCookies();
       return result;
     } catch (e) {
       const err = this.translateError(e);
@@ -416,7 +409,6 @@ export class GeminiClientService
     try {
       const raw = await this.client!.models();
       const models = (raw ?? []).map((m: RawAvailableModel) => this.toDomainModelName(m));
-      this.persistRefreshedCookies();
       return models;
     } catch (e) {
       const err = this.translateError(e);
