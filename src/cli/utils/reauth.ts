@@ -8,12 +8,13 @@ export interface ReauthDeps {
 }
 
 export async function runReauthFlow(
-  profileName: string,
+  profileName: string | undefined,
   deps: ReauthDeps,
 ): Promise<void> {
   try {
+    const name = profileName ?? "";
     const answer = await deps.confirmPrompt({
-      message: `Session for profile '${profileName}' has expired. Would you like to launch browser to re-authenticate? (y/n)`,
+      message: `Session for profile '${name}' has expired. Would you like to launch browser to re-authenticate? (y/n)`,
       default: true,
     });
     if (!answer) throw deps.originalError;

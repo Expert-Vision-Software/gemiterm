@@ -87,7 +87,7 @@ export class ListCommand implements CliCommand {
             return;
           }
           const profileName = options.profile || undefined;
-          await runReauthFlow(profileName || "", {
+          await runReauthFlow(profileName, {
             authService: context.authService,
             confirmPrompt: confirm,
             originalError: new AuthenticationError("Session may be stale — no conversations were found."),
@@ -100,6 +100,7 @@ export class ListCommand implements CliCommand {
         }
       } catch (error) {
         if (error instanceof AuthenticationError) throw error;
+        if (error instanceof GemitermError) throw error;
         console.log(chalk.yellow("Session may be stale. Run 'gemiterm login' to re-authenticate."));
       }
     }
