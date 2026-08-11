@@ -1,4 +1,4 @@
-import type { ChatInfo, Message } from "../core/types.ts";
+import type { ChatInfo, Cookie, Message } from "../core/types.ts";
 import type { IGeminiClientService } from "../core/command-handlers.ts";
 import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
@@ -81,6 +81,8 @@ export class GeminiClientService
   readonly cookieJar?: CookieJar;
   readonly profileName?: string;
   private readonly deps: GeminiClientDeps;
+  private baselineSecure1psid: string;
+  private baselineSecure1psidts: string | null;
   private readonly chatMetadata: ChatMetadataStorage;
 
   constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps, chatMetadata?: ChatMetadataStorage, cookieJar?: CookieJar);
@@ -95,6 +97,8 @@ export class GeminiClientService
     if (config.secure1psidts) {
       this.client.cookies["__Secure-1PSIDTS"] = config.secure1psidts;
     }
+    this.baselineSecure1psid = config.secure1psid;
+    this.baselineSecure1psidts = config.secure1psidts ?? null;
     this.chatMetadata = chatMetadata ?? new ChatMetadataStorage(logger);
   }
 
@@ -104,6 +108,35 @@ export class GeminiClientService
     this.initPromise = this.client!.init();
     await this.initPromise;
     this.initialized = true;
+    await this.persistRefreshedCookies();
+  }
+
+  private async persistRefreshedCookies(): Promise<void> {
+    if (!this.cookieStorageService || !this.profileName) return;
+
+    const currentPsid = this.client?.cookies?.["__Secure-1PSID"];
+    const currentPsidts = this.client?.cookies?.["__Secure-1PSIDTS"] ?? null;
+
+    if (currentPsid === this.baselineSecure1psid && currentPsidts === this.baselineSecure1psidts) return;
+
+    try {
+      const allCookies = this.cookieStorageService.loadAllCookiesForProfile(this.profileName);
+      const updated: Cookie[] = allCookies.map((cookie) => {
+        if (cookie.name === "__Secure-1PSID" && currentPsid) {
+          return { ...cookie, value: currentPsid };
+        }
+        if (cookie.name === "__Secure-1PSIDTS" && currentPsidts) {
+          return { ...cookie, value: currentPsidts };
+        }
+        return cookie;
+      });
+      this.cookieStorageService.saveCookiesForProfile(this.profileName, updated);
+
+      if (currentPsid) this.baselineSecure1psid = currentPsid;
+      this.baselineSecure1psidts = currentPsidts;
+    } catch {
+      this.logger.debug("persistRefreshedCookies: failed to persist refreshed cookies");
+    }
   }
 
   private toDomainChatInfo(raw: RawChatRow, profileName?: string): ChatInfo {
@@ -209,6 +242,7 @@ export class GeminiClientService
       }
 
 
+      await this.persistRefreshedCookies();
       return chats;
     } catch (e) {
       const err = this.translateError(e);
@@ -236,6 +270,7 @@ export class GeminiClientService
       }
       const messages = turns.length === 0 ? [] : this.toDomainMessages(turns, conversationId);
 
+      await this.persistRefreshedCookies();
       return messages;
     } catch (e) {
       const err = this.translateError(e);
@@ -248,6 +283,7 @@ export class GeminiClientService
     await this.init();
     try {
       await this.client!.deleteChat(conversationId);
+      await this.persistRefreshedCookies();
 
     } catch (e) {
       const err = this.translateError(e);
@@ -317,6 +353,7 @@ export class GeminiClientService
       }
       const text = output.text.toString();
 
+      await this.persistRefreshedCookies();
       return text;
     } catch (e) {
       const err = this.translateError(e);
@@ -339,6 +376,7 @@ export class GeminiClientService
         }
       }
 
+      await this.persistRefreshedCookies();
       return { response, conversationId };
     } catch (e) {
       const err = this.translateError(e);
@@ -353,6 +391,7 @@ export class GeminiClientService
       const raw = await this.client!.models();
       const result = (raw ?? []).map((m: RawAvailableModel) => this.toDomainModelName(m));
 
+      await this.persistRefreshedCookies();
       return result;
     } catch (e) {
       const err = this.translateError(e);
@@ -367,6 +406,7 @@ export class GeminiClientService
       const raw = await this.client!.models();
       const models = (raw ?? []).map((m: RawAvailableModel) => this.toDomainModelName(m));
 
+      await this.persistRefreshedCookies();
       return models;
     } catch (e) {
       const err = this.translateError(e);
