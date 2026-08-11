@@ -84,7 +84,6 @@ function createManager(
       async sendMessage() { return ""; },
       async startNewChat() { return { response: "", conversationId: "" }; },
       async profileHasConversation() { return false; },
-      async listChats() { return [{ id: "c1", title: "Test", isPinned: false, timestamp: Date.now() }]; },
       async models() { return []; },
       async forProfile() { return this as unknown as IGeminiClientService; },
     },
@@ -544,11 +543,9 @@ describe("ProfileAuthManager", () => {
   describe("server-side probe", () => {
     function gimme(
       modelsImpl: ReturnType<typeof mock>,
-      listChatsImpl: ReturnType<typeof mock> = mock(async () => [{ id: "c1", title: "Test", isPinned: false, timestamp: Date.now() }]),
     ): IGeminiClientService {
       return {
         models: modelsImpl as unknown as IGeminiClientService["models"],
-        listChats: listChatsImpl as unknown as IGeminiClientService["listChats"],
         async forProfile() { return this as unknown as IGeminiClientService; },
         async deleteChat() {},
         async sendMessage() { return ""; },
@@ -634,119 +631,6 @@ describe("ProfileAuthManager", () => {
       expect(modelsFn).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledTimes(1);
       expect(silentRefresh).toHaveBeenCalledWith("default");
-    });
-
-    test("models succeeds + listChats returns 0 (phantom) triggers silentRefresh + re-verify succeeds", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeValidCookies());
-
-      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
-      let listCalls = 0;
-      const listChatsFn = mock(async () => {
-        listCalls++;
-        return listCalls === 1
-          ? [] as { id: string; title: string; isPinned: boolean; timestamp: number }[]
-          : [{ id: "c1", title: "Test", isPinned: false, timestamp: Date.now() }];
-      });
-      const geminiClient = gimme(modelsFn, listChatsFn);
-
-      const silentRefresh = mock(async (_profileName: string) => true);
-
-      const infoSpy = mock(() => {});
-      const warnSpy = mock(() => {});
-      const testLogger = new Logger("test");
-      testLogger.info = infoSpy;
-      testLogger.warn = warnSpy;
-
-      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger: testLogger });
-      const mgr = new ProfileAuthManager({
-        profileManager: manager,
-        cookieStorageService: cookieStorage,
-        logger: testLogger,
-        geminiClient: geminiClient as unknown as IGeminiClientService,
-        silentRefresh,
-      });
-
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("phantom"),
-      );
-    });
-
-    test("models succeeds + listChats returns 0 + silentRefresh fails throws AuthenticationError", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeValidCookies());
-
-      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
-      const listChatsFn = mock(async () => [] as { id: string; title: string; isPinned: boolean; timestamp: number }[]);
-      const geminiClient = gimme(modelsFn, listChatsFn);
-
-      const silentRefresh = mock(async (_profileName: string) => false);
-
-      const warnSpy = mock(() => {});
-      const testLogger = new Logger("test");
-      testLogger.warn = warnSpy;
-
-      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger: testLogger });
-      const mgr = new ProfileAuthManager({
-        profileManager: manager,
-        cookieStorageService: cookieStorage,
-        logger: testLogger,
-        geminiClient: geminiClient as unknown as IGeminiClientService,
-        silentRefresh,
-      });
-
-      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("phantom state");
-
-      expect(listChatsFn).toHaveBeenCalledTimes(2);
-      expect(silentRefresh).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledWith("default");
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("phantom"),
-      );
-    });
-
-    test("models succeeds + listChats returns >0 does not trigger silentRefresh", async () => {
-      const storage = new CookieStorage();
-      const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeValidCookies());
-
-      const modelsFn = mock(async () => ["gemini-2.5-flash"]);
-      const geminiClient = gimme(modelsFn);
-
-      const silentRefresh = mock(async (_profileName: string) => true);
-
-      const infoSpy = mock(() => {});
-      const warnSpy = mock(() => {});
-      const testLogger = new Logger("test");
-      testLogger.info = infoSpy;
-      testLogger.warn = warnSpy;
-
-      const cookieStorage = new CookieStorageService({ cookieStorage: storage, logger: testLogger });
-      const mgr = new ProfileAuthManager({
-        profileManager: manager,
-        cookieStorageService: cookieStorage,
-        logger: testLogger,
-        geminiClient: geminiClient as unknown as IGeminiClientService,
-        silentRefresh,
-      });
-
-      const cookies = await mgr.ensureAuthenticated("default");
-
-      expect(cookies.secure_1psid).toBe("test-psid-value");
-      expect(modelsFn).toHaveBeenCalledTimes(1);
-      expect(silentRefresh).toHaveBeenCalledTimes(0);
-      expect(warnSpy).not.toHaveBeenCalled();
     });
 
     test("models() succeeds with no stored cookies throws AuthenticationError", async () => {

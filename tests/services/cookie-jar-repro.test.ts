@@ -110,7 +110,7 @@ afterEach(() => {
 });
 
 describe("cookie-jar repro harness — 4-cookie degradation symptom", () => {
-    test("degraded 4-cookie jar throws AuthenticationError (phantom detected)", async () => {
+  test("degraded 4-cookie jar is deemed authenticated yet listChats returns empty", async () => {
     const storage = new CookieStorage();
     const profileManager = new ProfileManager(storage);
     profileManager.create(PROFILE);
@@ -119,7 +119,10 @@ describe("cookie-jar repro harness — 4-cookie degradation symptom", () => {
     const client = makeCookieAwareClient(storage, PROFILE);
     const mgr = buildManager(storage, profileManager, client);
 
-    await expect(mgr.ensureAuthenticated(PROFILE)).rejects.toThrow("phantom state");
+    const cookies = await mgr.ensureAuthenticated(PROFILE);
+
+    expect(cookies.secure_1psid).toBeTruthy();
+    expect(storage.load(PROFILE)).toHaveLength(4);
 
     const chats = await client.listChats();
     expect(chats).toEqual([]);

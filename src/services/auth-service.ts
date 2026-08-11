@@ -298,6 +298,12 @@ export class AuthService {
         }
         return c;
       });
+      for (const bc of browserCookies) {
+        if (!existing.some((ec) => ec.name === bc.name && ec.domain === bc.domain && ec.path === bc.path)) {
+          updated = true;
+          next.push(bc);
+        }
+      }
 
       if (!updated && !psidtsChanged && !psidChanged) {
         this.logger.debug(`silentRefresh: no cookie changed vs baseline`);
@@ -305,10 +311,7 @@ export class AuthService {
       }
 
       if (this.cookieJar) {
-        const browserMatchingCookies = browserCookies.filter((bc) =>
-          existing.some((ec) => ec.name === bc.name && ec.domain === bc.domain && ec.path === bc.path),
-        );
-        this.cookieJar.upsert(name, browserMatchingCookies);
+        this.cookieJar.upsert(name, browserCookies);
       } else {
         this.cookieStorageService.saveCookiesForProfile(name, next);
       }
