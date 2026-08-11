@@ -74,17 +74,40 @@ export class ProfileAuthManager {
       return this.cookieStorageService.loadCookiesForProfile(name);
     }
 
+    let phantom = false;
     try {
       const probed = await this.geminiClient.forProfile(name);
       await probed.models();
+      const chats = await probed.listChats({ limit: 1 });
+      if (chats.length === 0) {
+        phantom = true;
+      }
     } catch (err) {
       this.logger.warn(`Server-side session for profile '${name}' appears stale; forcing refresh`);
-      this.logger.debug(`probeServerSession: models failed for profile '${name}': ${err}`);
+      this.logger.debug(`probeServerSession: probe failed for profile '${name}': ${err}`);
       const refreshed = await this.silentRefresh(name);
       if (refreshed) {
         this.logger.info(`Profile '${name}' is authenticated`);
         return this.cookieStorageService.loadCookiesForProfile(name);
       }
+    }
+
+    if (phantom) {
+      this.logger.warn(`Server-side session for profile '${name}' appears phantom (models ok, no chats); forcing refresh`);
+      await this.silentRefresh(name);
+      try {
+        const reProbe = await this.geminiClient.forProfile(name);
+        const reChats = await reProbe.listChats({ limit: 1 });
+        if (reChats.length > 0) {
+          this.logger.info(`Profile '${name}' is authenticated`);
+          return this.cookieStorageService.loadCookiesForProfile(name);
+        }
+      } catch {
+        this.logger.debug(`Re-probe after phantom refresh failed for profile '${name}'`);
+      }
+      throw new AuthenticationError(
+        `Session for profile '${name}' is in phantom state. Run 'gemiterm login' to re-authenticate.`,
+      );
     }
 
     this.logger.info(`Profile '${name}' is authenticated`);
