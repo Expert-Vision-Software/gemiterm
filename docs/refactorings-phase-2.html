@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Architecture Review — GemiTerm v2.4 → v3.0</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+  </script>
+  <style>
+    .seam { stroke-dasharray: 6 3; stroke: #64748b; }
+    .leak { stroke: #dc2626; stroke-width: 2.5px; }
+    .deep-box { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    .shallow-box { background: #f1f5f9; border: 1.5px dashed #94a3b8; }
+    .badge-strong { background: #059669; }
+    .badge-explore { background: #d97706; }
+    .badge-spec { background: #475569; }
+    .assumed-tag { background: #2563eb; }
+  </style>
+</head>
+<body class="bg-stone-50 text-slate-800 font-sans selection:bg-emerald-200">
+
+<main class="max-w-4xl mx-auto px-6 py-10 space-y-10">
+
+  <!-- Header -->
+  <header class="space-y-4">
+    <div class="flex items-baseline gap-3">
+      <h1 class="text-3xl font-serif font-bold tracking-tight text-slate-900">GemiTerm v2.4 → v3.0</h1>
+      <span class="text-sm text-slate-400">Architecture review &middot; 2026-08-12</span>
+    </div>
+    <p class="text-sm text-slate-500 max-w-prose">
+      This review assumes refactorings <strong>#2–#5</strong> from <code>docs/refactorings-phase-1.html</code> have landed
+      (mediator removal, shared arg parsing, @inquirer/input, Gemini client factory).
+      <strong>#1 (Cookie Session)</strong> has <em>not</em> been done — it remains the top deepening candidate below.
+    </p>
+    <div class="flex flex-wrap gap-3 text-xs uppercase tracking-wider text-slate-500">
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-3.5 h-3.5 rounded-sm border-2 border-slate-700 bg-slate-800"></span> deep module
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-3.5 h-3.5 rounded-sm border-1.5 border-dashed border-slate-400 bg-stone-50"></span> seam
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-8 h-0.5 bg-red-600"></span> leakage
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-3.5 h-3.5 rounded-sm bg-slate-100 border border-slate-200"></span> shallow module
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="px-2 py-0.5 rounded text-[10px] text-white" style="background:#2563eb">assumed</span> already landed
+      </span>
+    </div>
+  </header>
+
+  <!-- Candidate 1: Cookie Session -->
+  <article id="cookie-session" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">1. Deepen the Cookie Session module</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-strong">Strong</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-4">
+          <code>src/services/auth-service.ts</code>
+          <code>src/services/cookie-storage-service.ts</code>
+          <code>src/services/cookie-monitor.ts</code>
+          <code>src/infrastructure/storage.ts</code>
+          <code>src/services/gemini-client-wrapper.ts</code>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed">The cookie lifecycle is scattered across <strong>five modules</strong> with <strong>triple-duplicated</strong> validation logic — the <code>COOKIE_EXPIRY_THRESHOLD_MS</code> constant (7 days) is defined identically in three files: <code>cookie-storage-service.ts:5</code>, <code>gemini-client-wrapper.ts:71</code>, and <code>storage.ts:14</code>. Validation (<code>validateCookies</code>) and expiry checking (<code>checkCookieFreshness</code>) are duplicated between <code>CookieStorageService</code> and module-level functions in <code>storage.ts</code>. Cookies are only refreshed <strong>passively</strong> after successful API calls — there is no proactive rotation. This is the architectural root of the recurring phantom auth bug ("models() works but listChats returns 0").</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">Collapse into a single <strong>CookieSession</strong> module behind one interface: <code>ensureSession(profile)</code>. It owns proactive <code>RotateCookies</code> POST, two-tier cookie validation (primary + secondary bindings), a typed recovery ladder, and an injectable clock for testability. The module hides all cookie-name magic strings, freshness thresholds, and persistence details.</p>
+        </div>
+      </div>
+
+      <div class="mt-4 grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">Before — 5 shallow modules, 3 copies of the same constant</p>
+          <pre class="mermaid text-xs">
+graph TD
+    A["CLI commands"] --> B[GeminiClientService]
+    B -->|"passive refresh only"| C[CookieStorageService]
+    B -->|"own COOKIE_EXPIRY const"| X1[ ]
+    C -->|"validate + freshness"| D[CookieStorage]
+    D -->|"validate + freshness + expiry"| X2[ ]
+    E[AuthService] -->|"bypasses CSS layer"| D
+    F[CookieMonitor] -->|"DOM probes; 2s poll"| G[PlaywrightCliDriver]
+    E -->|"own getCookieExpiry"| X3[ ]
+
+    classDef leak stroke:#dc2626,stroke-width:2px;
+    classDef dup fill:#fef3c7,stroke:#f59e0b;
+    class B,C,D,E dup
+  </pre>
+          <div class="mt-3 space-y-1.5">
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
+              <span class="text-red-700"><code>COOKIE_EXPIRY_THRESHOLD_MS</code> defined in 3 files — all 7 days. Conflates <code>*PSIDTS</code> (~600 s) with <code>*SID</code> (~months)</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+              <span class="text-amber-700">AuthService bypasses CookieStorageService — writes through raw CookieStorage, skipping service-layer validation</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+              <span class="text-amber-700">No active rotation. Cookies only snapshotted after API calls succeed</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">After — 1 deep module, 1 interface</p>
+          <pre class="mermaid text-xs">
+graph TD
+    subgraph SESSION["CookieSession — 1 interface"]
+        direction TB
+        ENSURE["ensureSession(profile)"]
+        ROTATE["RotateCookies POST"]
+        VALIDATE["two-tier validation"]
+        LADDER["recovery ladder (4 rungs)"]
+        CLOCK["injectable clock"]
+        PERSIST["persist"]
+        ENSURE --> ROTATE
+        ENSURE --> VALIDATE
+        ENSURE --> LADDER
+        ROTATE --> PERSIST
+        VALIDATE --> CLOCK
+    end
+
+    CMD["Every command"] -->|"ensureSession(profile)"| ENSURE
+    CMD2["GeminiClientFactory"] -->|"uses internally"| ENSURE
+
+    style SESSION fill:#0f172a,stroke:#1e293b,stroke-width:2px,color:#e2e8f0
+    style ENSURE fill:#059669,stroke:#059669,color:#fff
+  </pre>
+          <div class="mt-3 space-y-1.5">
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Locality</strong>: cookie rules live in one module — fix the phantom bug once, all callers get the fix</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Leverage</strong>: one <code>ensureSession</code> call replaces 4 scattered load-validate-construct-persist sequences</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Testability</strong>: injectable clock means rotation timing is testable without real timers; recovery ladder has a single test surface</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Wins</p>
+        <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 3 copies of <code>COOKIE_EXPIRY_THRESHOLD_MS</code></li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 4 copies of cookie-name magic strings</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Active RotateCookies replaces passive refresh</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Recovery ladder self-heals stale sessions</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> <code>CookieMonitor</code> tests drop real 2.1s timers</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> <code>CookieStorageService</code> (82 shallow lines) deleted</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <!-- Candidate 2: Profile Lifecycle -->
+  <article id="profile-lifecycle" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">2. Deepen the Profile Lifecycle module</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-4">
+          <code>src/cli/commands/auth-command.ts</code>
+          <code>src/cli/commands/status-command.ts</code>
+          <code>src/services/auth-service.ts</code>
+          <code>src/services/profile-service.ts</code>
+          <code>src/infrastructure/storage.ts</code>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed">After mediator removal and arg-parsing consolidation (refactorings #2, #3), most commands share a clean <code>CommandContext</code>. But <code>auth-command.ts</code> (443 lines) and <code>status-command.ts</code> (59 lines) still use the <strong>service locator</strong> pattern — they <code>new</code> their own <code>CookieStorage</code>, <code>ProfileManager</code>, <code>PlaywrightCliDriver</code>, and <code>AuthService</code> inline. Profile listing logic (<code>listProfiles</code> + table formatting) is duplicated between auth (lines 173–192) and status (lines 43–46). The <code>ProfileService</code> class is a thin pass-through delegating to <code>ProfileManager</code> — it's a shallow module that adds no depth. CRUD operations (create, list, rename, delete, set-default, show status) are spread across two command files with different instantiation patterns.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">Introduce a single <strong>ProfileLifecycle</strong> module behind the interface <code>manageProfiles(action, params)</code> — an action-dispatch pattern parameterized on a union type (<code>'list' | 'create' | 'delete' | 'rename' | 'set-default' | 'status'</code>). The module owns all profile I/O, cookie validation for auth status, default-profile marker management, and the login browser flow (delegating to <code>AuthService</code> internally). Both <code>auth-command.ts</code> and <code>status-command.ts</code> become thin adapters that call <code>context.profileLifecycle.manageProfiles(...)</code>.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6 items-end">
+        <div class="space-y-2">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 text-center">Before — 2 commands, each new-ing its own services</p>
+          <div class="flex justify-center items-end gap-4">
+            <div class="text-center space-y-1">
+              <div class="bg-slate-200 rounded-t border border-slate-300 px-2 py-8 text-[10px] text-slate-500 w-24">auth-command<br/><span class="text-red-500">443 lines</span></div>
+              <div class="flex flex-col gap-0.5 text-[8px] text-slate-400">
+                <span>new CookieStorage()</span>
+                <span>new ProfileManager()</span>
+                <span>new PlaywrightCliDriver()</span>
+                <span>new AuthService()</span>
+              </div>
+            </div>
+            <div class="text-center space-y-1">
+              <div class="bg-slate-200 rounded-t border border-slate-300 px-2 py-3 text-[10px] text-slate-500 w-24">status-command<br/><span class="text-amber-500">59 lines</span></div>
+              <div class="flex flex-col gap-0.5 text-[8px] text-slate-400">
+                <span>new CookieStorage()</span>
+                <span>new ProfileManager()</span>
+              </div>
+            </div>
+          </div>
+          <div class="flex justify-center gap-4 mt-2">
+            <div class="bg-amber-50 border border-amber-200 rounded px-2 py-1 text-[9px] text-amber-700">ProfileService<br/>shallow pass-through</div>
+            <div class="bg-amber-50 border border-amber-200 rounded px-2 py-1 text-[9px] text-amber-700">listProfiles<br/>duplicated logic</div>
+          </div>
+          <p class="text-xs text-center text-slate-500 mt-1">Interface area = sum of every command's profile management knowledge</p>
+        </div>
+        <div class="space-y-2">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 text-center">After — 1 deep module, 1 action-dispatch interface</p>
+          <div class="flex justify-center">
+            <div class="deep-box rounded-xl p-4 w-56 text-center space-y-1">
+              <p class="text-xs text-emerald-300 font-semibold tracking-wider">ProfileLifecycle</p>
+              <p class="text-[10px] text-emerald-200 font-mono">manageProfiles(action, params)</p>
+              <div class="border-t border-emerald-800 pt-2 mt-2 text-[9px] text-slate-400 space-y-0.5">
+                <div>list → profile table</div>
+                <div>create → browser auth flow</div>
+                <div>delete → confirm + remove</div>
+                <div>rename → validate + move</div>
+                <div>set-default → marker swap</div>
+                <div>status → auth check</div>
+              </div>
+            </div>
+          </div>
+          <div class="flex justify-center gap-3 mt-2">
+            <div class="bg-emerald-50 border border-emerald-200 rounded px-2 py-1 text-[9px] text-emerald-700">auth-command<br/>~20 lines</div>
+            <div class="bg-emerald-50 border border-emerald-200 rounded px-2 py-1 text-[9px] text-emerald-700">status-command<br/>~15 lines</div>
+          </div>
+          <p class="text-xs text-center text-slate-500 mt-1">Interface area = 1 union type + 1 method. Leverage: 6 operations behind 1 call.</p>
+        </div>
+      </div>
+
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Wins</p>
+        <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete ~400 lines from auth-command (becomes thin adapter)</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete ~45 lines from status-command</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete shallow <code>ProfileService</code> (~60 lines)</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Locality: profile CRUD in one module — adding "profile copy" hits one place</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Testability: single test surface for all profile operations</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Leverage: 6 operations behind <code>manageProfiles(action, params)</code></li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <!-- Candidate 3: Chat Output Pipeline -->
+  <article id="output-pipeline" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">3. Deepen the Chat Output Pipeline</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-3">
+          <code>src/cli/commands/list-command.ts</code>
+          <code>src/cli/commands/fetch-command.ts</code>
+          <code>src/cli/commands/export-command.ts</code>
+          <code>src/cli/commands/export-all-command.ts</code>
+          <code>src/infrastructure/formatters.ts</code>
+          <code>src/infrastructure/io.ts</code>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed">After mediator removal and arg-parsing consolidation, four commands (list, fetch, export, export-all) each implement the same <strong>"fetch data → format → write"</strong> pipeline. The <code>writeOutput</code> helper is duplicated verbatim between <code>list-command.ts:149-152</code> and <code>fetch-command.ts:126-129</code> (3 identical lines). Sort logic is duplicated between <code>list-command.ts:98-112</code> and <code>prompts.ts:306-325</code>. Date-filter logic is duplicated between <code>list-command.ts:114-129</code> and <code>export-all-command.ts:127-132</code>. The format-then-write sequence (<code>formatChatAsMarkdown(...)</code> + <code>writeTextFile</code> + <code>console.log</code>) is structurally identical across three commands. These are all shallow adapters — each command knows too much about how to transform and render data.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">Introduce a <strong>ChatOutput</strong> module with the interface <code>render(data, sink)</code> where <code>data</code> is a typed union (<code>ChatList | Conversation | BatchExport</code>) and <code>sink</code> is <code>{ format, out? }</code>. The module owns all formatting strategies (table rendering, markdown export, JSON export), sort/filter logic, and the "write to stdout or file" dispatch. Commands become thin adapters that fetch data then call <code>output.render(data, { format, out })</code>.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">Before — 4 commands, each knowing format + write details</p>
+          <pre class="mermaid text-xs">
+graph TD
+    L[list-command] -->|"writeOutput()"| O1["formatChatList() + write"]
+    L -->|"sort logic"| S1[sort by recent/oldest/alpha]
+    L -->|"date filter"| D1[filter by after/before]
+    F[fetch-command] -->|"writeOutput()"| O2["formatChatAsMarkdown() + write"]
+    E[export-command] -->|"inline format+write"| O3["format + writeTextFile + log"]
+    EA[export-all-command] -->|"inline format+write"| O4["format + sanitize + write + index"]
+    EA -->|"date filter"| D2[filter by since]
+    P[browserPrompt] -->|"sort logic"| S2[sort by recent/oldest/alpha]
+
+    classDef dup fill:#fef3c7,stroke:#f59e0b;
+    class O1,O2,S1,S2,D1,D2 dup
+  </pre>
+          <div class="mt-3 space-y-1.5">
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+              <span class="text-amber-700"><code>writeOutput()</code> duplicated in list-command and fetch-command</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+              <span class="text-amber-700">Sort logic duplicated in list-command and prompts.ts browser</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+              <span class="text-amber-700">Export-command and export-all each know how to format + sanitize + write independently</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">After — 1 deep module, 1 interface</p>
+          <pre class="mermaid text-xs">
+graph TD
+    subgraph OUTPUT["ChatOutput — render(data, sink)"]
+        direction TB
+        RENDER["render(data, sink)"]
+        TABLE["formatChatList → table"]
+        MD["formatAsMarkdown → string"]
+        JSON["formatAsJson → string"]
+        SORT_FN["sort(chats, order)"]
+        FILTER_FN["filter(chats, date)"]
+        WRITE["write(stdout | file)"]
+        RENDER --> TABLE
+        RENDER --> MD
+        RENDER --> JSON
+        RENDER --> SORT_FN
+        RENDER --> FILTER_FN
+        SORT_FN --> WRITE
+        TABLE --> WRITE
+        MD --> WRITE
+        JSON --> WRITE
+    end
+
+    CMD1[list] -->|"render(chatList, {format:'text'})"| RENDER
+    CMD2[fetch] -->|"render(conversation, {format:'text'})"| RENDER
+    CMD3[export] -->|"render(conversation, {format:'md', out})"| RENDER
+    CMD4[export-all] -->|"render(batch, {format:'md', out})"| RENDER
+
+    style OUTPUT fill:#0f172a,stroke:#1e293b,stroke-width:2px,color:#e2e8f0
+    style RENDER fill:#059669,stroke:#059669,color:#fff
+  </pre>
+          <div class="mt-3 space-y-1.5">
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Locality</strong>: sort, filter, format, and write live in one module — adding a new output format (e.g. CSV) needs one strategy, not edits to 4 commands</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Leverage</strong>: one <code>render(data, sink)</code> call replaces 4 different format-then-write patterns</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Wins</p>
+        <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 2 copies of <code>writeOutput</code></li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 2 copies of sort logic</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 2 copies of date-filter logic</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Locality: adding <code>--format csv</code> adds one formatter, not code in 4 commands</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Testability: format strategies testable independently of CLI surface</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Leverage: <code>render()</code> is the single seam for all output formatting</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <!-- Candidate 4: Interactive Chat Session -->
+  <article id="interactive-session" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">4. Deepen the Interactive Chat Session</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-spec">Speculative</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-4">
+          <code>src/cli/utils/interactive-prompt.ts</code>
+          <code>src/cli/utils/long-arg-guard.ts</code>
+          <code>src/cli/utils/prompt-file.ts</code>
+          <code>src/cli/commands/new-command.ts</code>
+          <code>src/cli/commands/continue-command.ts</code>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed">After #4's @inquirer/input replacement, <code>interactive-prompt.ts</code> is a clean 72-line REPL loop. But the <strong>split between interactive and non-interactive modes</strong> forces every chat command (new, continue) to implement the same "check for interactive flag, if so call interactive loop, else call a one-shot" branching pattern. The spillover-to-temp-file flow (<code>continue-command.ts:84-115</code> and <code>new-command.ts:61-93</code>) is a verbatim 30-line duplicate — it's the <strong>only remaining exact-duplicate code block</strong> after arg-parsing consolidation (#3). The <code>invokeListCommand</code> pattern (dynamic import + new CommandRegistry + execute) appears in 3 places. The interactive/non-interactive mode branch is structural duplication — both paths must handle the same concerns (arg-length guard, prompt-file, message extraction) but do so separately.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">Introduce an <strong>InteractiveSession</strong> module with the interface <code>startChat(params)</code> where <code>params</code> carries the initial message (if any), profile, conversation ID (for continue), prompt file, and mode (<code>'once' | 'repl'</code>). The module owns the spillover-to-temp-file flow, arg-length guard, prompt-file loading, and the REPL loop. <code>new-command.ts</code> and <code>continue-command.ts</code> become thin adapters — they extract params from their arg-specs and call <code>context.interactiveSession.startChat(params)</code>.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">Before — 2 commands, 2 identical spillover blocks, 2 mode branches</p>
+          <pre class="mermaid text-xs">
+graph TD
+    NC[new-command] -->|"checkArgLength()"| G1[arg guard]
+    NC -->|"spillOverToTempFile()"| SP1[spillover block]
+    NC -->|"loadPromptFromFile()"| PF1[prompt file load]
+    NC -->|"mode branch"| M1["if interactive: REPL<br/>else: one-shot"]
+    CC[continue-command] -->|"checkArgLength()"| G2[arg guard]
+    CC -->|"spillOverToTempFile()"| SP2[spillover block]
+    CC -->|"loadPromptFromFile()"| PF2[prompt file load]
+    CC -->|"mode branch"| M2["if interactive: REPL<br/>else: one-shot"]
+
+    classDef dup fill:#fef3c7,stroke:#f59e0b;
+    class SP1,SP2,PF1,PF2 dup
+  </pre>
+          <div class="mt-3 flex items-start gap-2 text-xs text-amber-700">
+            <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+            <span>The spillover block (30 lines) is verbatim between new and continue — the last exact-duplicate code block remaining after #3's arg-parsing consolidation</span>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">After — 1 deep module, 1 interface</p>
+          <pre class="mermaid text-xs">
+graph TD
+    subgraph SESSION["InteractiveSession — startChat(params)"]
+        direction TB
+        START["startChat(params)"]
+        SPILL["spillover guard"]
+        LOAD["prompt file load"]
+        ONCE["one-shot send"]
+        REPL["repl loop"]
+        START --> SPILL
+        SPILL --> LOAD
+        LOAD --> ONCE
+        LOAD --> REPL
+    end
+
+    NC2[new-command] -->|"startChat({message, profile, mode})"| START
+    CC2[continue-command] -->|"startChat({conversationId, message, profile, mode})"| START
+
+    style SESSION fill:#0f172a,stroke:#1e293b,stroke-width:2px,color:#e2e8f0
+    style START fill:#059669,stroke:#059669,color:#fff
+  </pre>
+          <div class="mt-3 space-y-1.5">
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Locality</strong>: spillover, arg-guard, and prompt-file logic lives in one module — fix a bug once, not in two commands</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Leverage</strong>: one <code>startChat(params)</code> call replaces the 30-line spillover block duplicated in two commands</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Wins</p>
+        <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 30-line spillover block (2nd copy)</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 2 copies of mode-branching logic</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Locality: arg-length guard lives in one place</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Testability: spillover + prompt-file tested separately from CLI commands</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Leverage: <code>startChat()</code> is the single seam for starting any chat interaction</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <!-- Candidate 5: Idempotent Export Strategy -->
+  <article id="export-strategy" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">5. Extract Idempotent Export as a strategy seam</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-spec">Speculative</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-3">
+          <code>src/cli/commands/export-command.ts</code>
+          <code>src/cli/commands/export-all-command.ts</code>
+          <code>src/infrastructure/formatters.ts</code>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed"><code>export-command.ts</code> and <code>export-all-command.ts</code> each independently implement the "format then write" pattern. <code>export-all</code> adds progress reporting, batch iteration, error collection, and index-file generation — all inside the command class. The format decision (<code>markdown</code> vs <code>json</code>) is hardcoded in <code>formatters.ts</code> as two functions with different signatures (<code>formatChatAsMarkdown</code> takes 4 params, <code>formatChatAsJson</code> takes 2). The filename sanitization logic (<code>export-all-command.ts:134-142</code>) and default filename logic (<code>export-command.ts:103-107</code>) are similar but not identical — each implements its own filename strategy. There is <strong>no seam</strong> for swapping export strategies; adding a new format would touch both command files and the formatters module.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">Introduce an <strong>ExportStrategy</strong> adapter interface: <code>export(conversation, format, options) → ExportResult</code>. Implement two adapters: <code>SingleExport</code> (one conversation → one file) and <code>BatchExport</code> (many conversations → directory with index). The formatters module becomes internal to the strategy — each adapter picks the right formatter by format type. <code>export-command.ts</code> and <code>export-all-command.ts</code> become thin adapters that inject the right strategy via <code>CommandContext</code>. This is the "two adapters = real seam" principle: SingleExport and BatchExport are real variant implementations behind the same interface.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">Before — 2 commands, each owning its export logic</p>
+          <pre class="mermaid text-xs">
+graph LR
+    EC[export-command] -->|"formatChatAsMarkdown()<br/>+ writeTextFile()"| F1[markdown output]
+    EC -->|"formatChatAsJson()<br/>+ writeTextFile()"| F2[json output]
+    EC -->|"defaultFilename()"| N1[filename logic]
+    EA[export-all-command] -->|"formatChatAsMarkdown()<br/>+ writeTextFile()<br/>+ writeIndex()"| F3[markdown output]
+    EA -->|"sanitizeFilename()"| N2[filename logic]
+    EA -->|"progress logging"| P1[stdout.write]
+    EA -->|"error collection"| E1[ExportResult array]
+
+    classDef dup fill:#fef3c7,stroke:#f59e0b;
+    class F1,F2,F3,N1,N2 dup
+  </pre>
+          <div class="mt-3 flex items-start gap-2 text-xs text-amber-700">
+            <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+            <span>No seam for swapping single vs batch export. Each command knows about formatting, filenames, progress, and error handling independently.</span>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">After — 1 seam, 2 adapters</p>
+          <pre class="mermaid text-xs">
+graph TD
+    subgraph STRAT["ExportStrategy interface"]
+        EXPORT["export(conversation, format, options) → ExportResult"]
+    end
+
+    SINGLE["SingleExport adapter"] -->|"implements"| EXPORT
+    BATCH["BatchExport adapter"] -->|"implements"| EXPORT
+
+    EC2[export-command] --> STRAT
+    EA2[export-all-command] --> STRAT
+
+    SINGLE -->|"MarkdownFormatter"| MD2[markdown]
+    SINGLE -->|"JsonFormatter"| JS2[json]
+    BATCH -->|"MarkdownFormatter"| MD3[markdown]
+    BATCH -->|"IndexWriter"| IDX[index.md]
+
+    style STRAT fill:#0f172a,stroke:#64748b,stroke-dasharray:6 3,color:#e2e8f0
+    style EXPORT fill:#059669,stroke:#059669,color:#fff
+    style SINGLE fill:#1e293b,color:#e2e8f0
+    style BATCH fill:#1e293b,color:#e2e8f0
+  </pre>
+          <div class="mt-3 space-y-1.5">
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Real seam</strong>: two adapters (SingleExport, BatchExport) behind one interface — the "two adapters = real seam" principle satisfied</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Leverage</strong>: adding CSV export means implementing one formatter behind the strategy — zero command-file edits</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Wins</p>
+        <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Locality: all export logic behind one seam — format, filename, progress, errors</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Testability: each adapter tested independently with mock conversations</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Leverage: new format (CSV, HTML) = one new formatter, zero command edits</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Depth: SingleExport and BatchExport are real implementations behind the same small interface</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <!-- Top Recommendation -->
+  <section id="top-recommendation" class="rounded-2xl border-2 border-emerald-400 bg-emerald-50/40 shadow-md p-6 space-y-3">
+    <p class="text-xs uppercase tracking-wider text-emerald-700 font-semibold">Top recommendation</p>
+    <a href="#cookie-session" class="block text-lg font-serif font-bold text-emerald-800 hover:text-emerald-900 hover:underline">
+      #1 — Deepen the Cookie Session module
+    </a>
+    <p class="text-sm text-slate-700 max-w-prose">
+      This directly addresses the recurring phantom auth bug. The scattered cookie lifecycle — with its 7-day threshold conflating different cookie timers, triplicate constants, duplicated validation, and no proactive rotation — is the root cause of "models() works but listChats returns 0." Introducing active RotateCookies POST, two-tier validation, and a recovery ladder into a single deep module pays off on <em>every caller</em>.
+    </p>
+    <p class="text-sm text-slate-500">
+      The other candidates compound CookieSession's leverage: ProfileLifecycle (#2) removes the last service-locator pattern from the codebase; ChatOutput (#3) and ExportStrategy (#5) consolidate the output pipeline into tested seams; InteractiveSession (#4) eliminates the last exact-duplicate code block. All four are <strong>independent</strong> of CookieSession and of each other — they can be tackled in any order, but CookieSession first gives the biggest payoff.
+    </p>
+  </section>
+
+</main>
+
+</body>
+</html>

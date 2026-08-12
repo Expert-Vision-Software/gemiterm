@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Architecture review — GemiTerm v2.4</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+  </script>
+  <style>
+    .seam { stroke-dasharray: 6 3; stroke: #64748b; }
+    .leak { stroke: #dc2626; stroke-width: 2.5px; }
+    .deep-box { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    .shallow-box { background: #f1f5f9; border: 1.5px dashed #94a3b8; }
+    .badge-strong { background: #059669; }
+    .badge-explore { background: #d97706; }
+    .badge-spec { background: #475569; }
+  </style>
+</head>
+<body class="bg-stone-50 text-slate-800 font-sans selection:bg-emerald-200">
+
+<main class="max-w-4xl mx-auto px-6 py-10 space-y-10">
+
+  <!-- Header -->
+  <header class="space-y-4">
+    <div class="flex items-baseline gap-3">
+      <h1 class="text-3xl font-serif font-bold tracking-tight text-slate-900">GemiTerm v2.4</h1>
+      <span class="text-sm text-slate-400">Architecture review &middot; 2026-08-12</span>
+    </div>
+    <div class="flex flex-wrap gap-3 text-xs uppercase tracking-wider text-slate-500">
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-3.5 h-3.5 rounded-sm border-2 border-slate-700 bg-slate-800"></span> deep module
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-3.5 h-3.5 rounded-sm border-1.5 border-dashed border-slate-400 bg-stone-50"></span> seam
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-8 h-0.5 bg-red-600"></span> leakage
+      </span>
+      <span class="flex items-center gap-1.5">
+        <span class="inline-block w-3.5 h-3.5 rounded-sm bg-slate-100 border border-slate-200"></span> shallow module
+      </span>
+    </div>
+  </header>
+
+  <!-- Candidate 1: Cookie Session -->
+  <article id="cookie-session" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">1. Deepen the Cookie Session module</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-strong">Strong</span>
+      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <!-- Files -->
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-4">
+          <code>src/services/auth-service.ts</code>
+          <code>src/services/cookie-storage-service.ts</code>
+          <code>src/services/cookie-monitor.ts</code>
+          <code>src/infrastructure/storage.ts</code>
+          <code>src/services/gemini-client-wrapper.ts</code>
+        </div>
+      </div>
+
+      <!-- Problem & Solution -->
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed">The cookie lifecycle is scattered across <strong>five modules</strong> with <strong>triple-duplicated</strong> validation logic, a <strong>7-day freshness threshold</strong> that conflates the months-long <code>__Secure-1PSID</code> clock with the ~600 s <code>__Secure-1PSIDTS</code> rotation cadence, and <strong>no active rotation</strong> — only passive refresh after API calls. This is the architectural root of the recurring phantom auth bug.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">Collapse into a single <strong>CookieSession</strong> module behind one interface: <code>ensureSession(profile)</code>. It owns proactive <code>RotateCookies</code> POST, two-tier cookie validation (primary + secondary bindings), a typed recovery ladder, and an injectable clock for testability.</p>
+        </div>
+      </div>
+
+      <!-- Before/After -->
+      <div class="mt-4 grid grid-cols-2 gap-4">
+        <!-- Before -->
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">Before — 5 shallow modules, 4 duplicated rules</p>
+          <pre class="mermaid text-xs">
+graph TD
+    A["cli/index.ts:56-75"] -->|factory| B[GeminiClientService]
+    B -->|"passive refresh (line 121)"| C[CookieStorageService]
+    B -->|"own COOKIE_EXPIRY const (line 71)"| X[ ]
+    C -->|"validate + freshness (lines 50-66)"| D[CookieStorage]
+    D -->|"validate + freshness (lines 20-49)"| Y[ ]
+    E[AuthService] -->|"bypasses CSS; own getCookieExpiry (line 187)"| D
+    F[CookieMonitor] -->|"probes DOM; 2s poll"| G[PlaywrightCliDriver]
+
+    classDef leak stroke:#dc2626,stroke-width:2px;
+    classDef dup fill:#fef3c7,stroke:#f59e0b;
+    class B,C,D,E dup
+  </pre>
+          <div class="mt-3 space-y-1.5">
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
+              <span class="text-red-700"><code>COOKIE_EXPIRY_THRESHOLD_MS</code> defined in 3 files, all set to 7 days — conflates <code>*PSIDTS</code> (~600 s) with <code>*SID</code> (~months)</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+              <span class="text-amber-700">AuthService bypasses CookieStorageService — writes through raw CookieStorage, skipping the service-layer validation</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+              <span class="text-amber-700">No active rotation — only opportunistic, post-API-call cookie snapshot saves</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- After -->
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">After — 1 deep module, 1 interface</p>
+          <pre class="mermaid text-xs">
+graph TD
+    subgraph SESSION["CookieSession — 1 interface"]
+        direction TB
+        ENSURE["ensureSession(profile)"]
+        ROTATE["RotateCookies POST"]
+        VALIDATE["two-tier validation"]
+        LADDER["recovery ladder (4 rungs)"]
+        CLOCK["injectable clock"]
+        PERSIST["persist"]
+        ENSURE --> ROTATE
+        ENSURE --> VALIDATE
+        ENSURE --> LADDER
+        ROTATE --> PERSIST
+        VALIDATE --> CLOCK
+    end
+
+    CALLER1["gemini list"] -->|"ensureSession('default')"| ENSURE
+    CALLER2["gemini fetch"] --> ENSURE
+    CALLER3["gemini new"] --> ENSURE
+    CALLER4["gemini auth"] --> ENSURE
+
+    style SESSION fill:#0f172a,stroke:#1e293b,stroke-width:2px,color:#e2e8f0
+    style ENSURE fill:#059669,stroke:#059669,color:#fff
+  </pre>
+          <div class="mt-3 space-y-1.5">
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Locality</strong>: cookie rules live in one module — fix the phantom bug once, all call sites get the fix</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Leverage</strong>: one <code>ensureSession</code> call replaces 4 scattered load-validate-construct-persist sequences</span>
+            </div>
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800"><strong>Testability</strong>: injectable clock means rotation timing is testable without real timers; recovery ladder has a single test surface</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wins -->
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Wins</p>
+        <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 3 copies of <code>COOKIE_EXPIRY_THRESHOLD_MS</code></li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 4 copies of cookie-name magic strings</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Active RotateCookies replaces passive refresh</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Recovery ladder self-heals stale sessions</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> <code>CookieMonitor</code> tests drop real 2.1s timers</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> <code>CookieStorageService</code> (82 shallow lines) deleted</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <!-- Candidate 2: Mediator -->
+  <article id="mediator" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">2. Remove the Mediator layer</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-4">
+          <code>src/core/mediator.ts</code>
+          <code>src/core/command-handlers.ts</code>
+          <code>src/core/query-handlers.ts</code>
+          <code>src/cli/index.ts</code>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed">A CQRS mediator with <strong>12 handler classes</strong>, ~20 payload/result interfaces, and <strong>93 lines of wiring</strong> serves a CLI with 13 commands. The <code>send()</code> method has no middleware pipeline, no logging, and no multiple transports. Four handlers receive <strong><code>null as any</code></strong> for their service dependencies — they are registered but broken. Two commands (auth, status) <strong>bypass the mediator entirely</strong> and instantiate services directly, confirming the abstraction earns no leverage.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">Delete the mediator, handlers, and message types (~410 lines). Commands call <code>GeminiClientService</code> and <code>ProfileManager</code> directly. A thin <strong>CommandContext</strong> holds the resolved services — passed to each command's <code>execute()</code> as a single typed object.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">Before — 6-file call chain for "list chats"</p>
+          <pre class="mermaid text-xs">
+sequenceDiagram
+    participant CMD as ListCommand
+    participant MED as Mediator.send()
+    participant QRY as ListChatsQueryHandler
+    participant XX as inline adapter<br/>(clone #1 of #5)
+    participant GC as getGeminiClient()<br/>lazy factory
+    participant GCS as GeminiClientService
+
+    CMD->>MED: send({type, payload})
+    MED->>QRY: handle(query)
+    QRY->>XX: listChats(options)
+    XX->>GC: getGeminiClient()
+    GC->>GCS: new GeminiClientService(...)
+    GCS-->>XX: result
+    XX-->>QRY: result
+    QRY-->>MED: result
+    MED-->>CMD: result
+  </pre>
+          <div class="mt-3 flex items-start gap-2 text-xs">
+            <span class="mt-0.5 w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
+            <span class="text-red-700">8 hops for a single method call. The inline adapter object (5 copies, <code>index.ts:84-123</code>) is pure boilerplate.</span>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">After — direct call, 1 hop</p>
+          <pre class="mermaid text-xs">
+sequenceDiagram
+    participant CMD as ListCommand
+    participant CTX as CommandContext
+    participant GCS as GeminiClientService
+
+    CMD->>CTX: ctx.geminiClient
+    CTX-->>CMD: instance
+    CMD->>GCS: listChats(options)
+    GCS-->>CMD: result
+  </pre>
+          <div class="mt-3 flex items-start gap-2 text-xs">
+            <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+            <span class="text-emerald-800">1 hop. Same test surface: mock <code>GeminiClientService</code> — just inject it directly instead of through the mediator.</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Wins</p>
+        <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete ~410 lines: mediator + handlers + interfaces</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 5 duplicate inline adapter objects</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Dead code elimination: 4 <code>null as any</code> handlers</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Interface shrinks: commands depend on 1 context, not mediator + PAA</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Testability unchanged: same mock points, fewer hops</li>
+        </ul>
+      </div>
+    </div>
+  </article>
+
+  <!-- Candidate 3: Command Arg Parsing -->
+  <article id="arg-parsing" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">3. Extract shared Command arg-parsing</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-3">
+          <code>src/cli/commands/list-command.ts</code>
+          <code>src/cli/commands/fetch-command.ts</code>
+          <code>src/cli/commands/new-command.ts</code>
+          <code>src/cli/commands/continue-command.ts</code>
+          <code>src/cli/commands/delete-command.ts</code>
+          <code>src/cli/commands/export-command.ts</code>
+          <code>src/cli/commands/export-all-command.ts</code>
+          <code>src/cli/commands/auth-command.ts</code>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed"><strong>~285 lines</strong> of copied <code>for</code>/<code>switch</code> arg-parsing loops across 8 command files. Every command reimplements the same manual iteration pattern. <code>showUsage()</code> is duplicated ~8 times with identical <code>chalk.bold</code>/<code>padEnd</code> formatting (~100+ lines). Spillover-to-temp-file logic is verbatim between <code>new-command</code> and <code>continue-command</code> (~25 lines).</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">Define a declarative <strong>ArgSpec</strong> per command (flag name, type, alias, description, validation) and feed it into a shared <code>parseCommandArgs(args, spec)</code>. A shared <code>formatUsage(spec, commandName)</code> renders help text. Commands get a typed <code>ParsedArgs</code> object back — no manual iteration.</p>
+        </div>
+      </div>
+
+      <!-- Mass diagram: interface width comparison -->
+      <div class="grid grid-cols-2 gap-6 items-end">
+        <div class="space-y-2">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 text-center">Before — 8 copies, ~285 lines of implementation</p>
+          <div class="flex justify-center gap-1">
+            <div class="w-8 bg-slate-200 rounded-t border border-slate-300" style="height:60px" title="list-command.ts: 65 lines"></div>
+            <div class="w-8 bg-slate-200 rounded-t border border-slate-300" style="height:52px" title="auth-command.ts: 52 lines"></div>
+            <div class="w-8 bg-slate-200 rounded-t border border-slate-300" style="height:30px" title="continue-command.ts: 30"></div>
+            <div class="w-8 bg-slate-200 rounded-t border border-slate-300" style="height:30px" title="export-command.ts: 30"></div>
+            <div class="w-8 bg-slate-200 rounded-t border border-slate-300" style="height:29px" title="export-all-command.ts"></div>
+            <div class="w-8 bg-slate-200 rounded-t border border-slate-300" style="height:29px" title="new-command.ts: 29"></div>
+            <div class="w-8 bg-slate-200 rounded-t border border-slate-300" style="height:27px" title="fetch-command.ts: 27"></div>
+            <div class="w-8 bg-slate-200 rounded-t border border-slate-300" style="height:23px" title="delete-command.ts: 23"></div>
+          </div>
+          <p class="text-xs text-center text-slate-500 mt-1">Interface area = sum of every command's parseArgs knowledge (~42 flags)</p>
+        </div>
+        <div class="space-y-2">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 text-center">After — 1 declarative spec per command, 1 parser</p>
+          <div class="flex justify-center gap-3">
+            <div class="flex flex-col items-center gap-1">
+              <div class="bg-emerald-100 rounded border border-emerald-300 px-1.5 py-1 text-[10px]">--profile</div>
+              <div class="bg-emerald-100 rounded border border-emerald-300 px-1.5 py-1 text-[10px]">--search</div>
+              <div class="bg-emerald-100 rounded border border-emerald-300 px-1.5 py-1 text-[10px]">--limit</div>
+              <span class="text-[9px] text-slate-400">x 8 specs</span>
+            </div>
+            <div class="flex items-center text-lg text-slate-300">&rarr;</div>
+            <div class="deep-box rounded-lg p-3 w-28 text-center">
+              <p class="text-[10px] text-emerald-300 font-semibold tracking-wider">parseCommandArgs</p>
+              <p class="text-[9px] text-slate-400 mt-1">~40 lines</p>
+            </div>
+          </div>
+          <p class="text-xs text-center text-slate-500 mt-1">Interface area = 1 function + per-command typed ArgSpec</p>
+        </div>
+      </div>
+
+      <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete ~285 lines of duplicated arg parsing</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete ~100 lines of duplicated showUsage</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 25 lines of duplicated spillover logic</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Locality: adding a --format flag hits 1 spec, not 8 parseArgs</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Testability: tests for arg parsing live in one suite</li>
+      </ul>
+    </div>
+  </article>
+
+  <!-- Candidate 4: Terminal Input -->
+  <article id="terminal-input" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">4. Replace hand-rolled terminal input with @inquirer/input</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-spec">Speculative</span>
+      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-4">
+          <code>src/cli/utils/prompts.ts</code>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed"><code>text()</code> (<code>prompts.ts:82-199</code>) is 118 lines of <strong>hand-rolled raw terminal input</strong> — manual ANSI escape handling, multi-byte UTF-8 decoding, backspace logic, a hardcoded Ctrl-C handler. It reimplements what <code>@inquirer/input</code> already provides. The raw ANSI parser handles Delete (<code>\x1b[3~</code>) but <strong>not Home, End, or arrow keys</strong> — making the input fragile. <code>@inquirer/prompts</code> is already in the codebase.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">Replace the 118-line <code>text()</code> with a thin wrapper around <code>@inquirer/input</code>, configured with the same shared theme and abort signal used by <code>confirm()</code> and <code>select()</code>. If the inquirer renderer can't match the inline validation rendering, keep a minimal decorate-validate layer on top — but the raw byte loop goes.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">Before — raw ANSI parsing (118 lines)</p>
+          <div class="space-y-1 font-mono text-[9px] text-slate-500 leading-relaxed bg-slate-100 rounded p-2 max-h-44 overflow-y-auto">
+            <div>if (byte === 0x03) { cancel(); return; } // Ctrl-C<br></div>
+            <div>if (byte === 0x0d || byte === 0x0a) { ... } // Enter<br></div>
+            <div>if (byte === 0x08 || byte === 0x7f) { ... } // Backspace<br></div>
+            <div>if (byte === 0x1b) { // escape sequence<br></div>
+            <div>&nbsp;&nbsp;if (next === 0x5b && next2 === 0x33) { // Delete<br></div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;i += 3; continue;<br></div>
+            <div>&nbsp;&nbsp;}<br></div>
+            <div>&nbsp;&nbsp;i += 1; continue;<br></div>
+            <div>}<br></div>
+            <div>// multi-byte UTF-8: 0xC0-0xFD range branches...<br></div>
+            <div>stdin.setRawMode(true); // manual TTY management<br></div>
+            <div>stdin.removeListener("data", onData); // manual cleanup<br></div>
+            <div class="text-red-500 font-semibold">No Home, End, &uarr;, &darr;, &larr;, &rarr; support</div>
+          </div>
+        </div>
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">After — @inquirer/input (~20 lines)</p>
+          <div class="space-y-1 font-mono text-[9px] text-slate-500 leading-relaxed bg-emerald-50 rounded p-2">
+            <div>import { input } from "@inquirer/prompts";<br></div>
+            <div><br></div>
+            <div>async text(opts: TextOptions): Promise&lt;string&gt; {<br></div>
+            <div>&nbsp;&nbsp;try {<br></div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;return await input({<br></div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;message: opts.message,<br></div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;default: opts.default,<br></div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;theme,<br></div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;validate: opts.validate,<br></div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;}, { signal });<br></div>
+            <div>&nbsp;&nbsp;} catch (e) {<br></div>
+            <div>&nbsp;&nbsp;&nbsp;&nbsp;throw mapCancellation(e);<br></div>
+            <div>&nbsp;&nbsp;}<br></div>
+            <div>}<br></div>
+          </div>
+          <div class="mt-3 flex items-start gap-2 text-xs">
+            <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+            <span class="text-emerald-800">Arrow keys, Home, End, paste, multi-line — all free with @inquirer/input</span>
+          </div>
+        </div>
+      </div>
+
+      <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete ~100 lines of manual byte parsing</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Leverage: cursor keys, Home, End free from @inquirer</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Locality: input behavior lives in @inquirer, not prompts.ts</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Risk: inline validation rendering may need a decorate layer</li>
+      </ul>
+    </div>
+  </article>
+
+  <!-- Candidate 5: Gemini Client Construction Consolidation -->
+  <article id="client-construction" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
+      <h2 class="text-lg font-serif font-semibold text-slate-900">5. Consolidate Gemini client construction</h2>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+    </div>
+
+    <div class="p-6 space-y-5">
+      <div>
+        <p class="text-xs uppercase tracking-wider text-slate-400 mb-1.5">Files</p>
+        <div class="font-mono text-sm text-slate-700 space-x-3">
+          <code>src/cli/index.ts</code>
+          <code>src/services/gemini-client-wrapper.ts</code>
+          <code>src/services/profile-auth-manager.ts</code>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
+          <p class="text-sm leading-relaxed">The client construction lifecycle is split across <strong>three modules</strong>: <code>setupMediator()</code> in <code>cli/index.ts:56-75</code> (lazy factory + cookie loading), <code>GeminiClientService.constructor</code> (<code>wrapper.ts:96-110</code>, SDK instantiation), and <code>forProfile()</code> (<code>wrapper.ts:209-222</code>, per-profile instantiation). The <code>setupMediator()</code> function creates a separate "factory client" with dummy credentials (<code>secure1psid: ""</code>) just to satisfy <code>ProfileAuthManager</code>'s dependency. The inline adapter objects (<code>index.ts:84-123</code>) clone the same delegation methods 5 times.</p>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
+          <p class="text-sm leading-relaxed">A single <strong>GeminiClientFactory</strong> module: <code>createClient(profile) &rarr; GeminiClient</code>. It owns cookie loading, SDK construction, init lifecycle, and metadata storage wiring. If the mediator stays, the factory replaces the lazy closure + inline adapters. If the mediator goes, commands call it directly.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">Before — 3 modules, 1 dummy instance</p>
+          <pre class="mermaid text-xs">
+graph LR
+    F["getGeminiClient()<br/>lazy closure<br/>(index.ts:56)"] -->|"loadCookiesForApi()"| PM[ProfileManager]
+    F -->|"new GeminiClientService(...)"| GCS[GeminiClientService]
+    F2["factoryClient<br/>(index.ts:77)<br/>secure1psid: ''"] -->|"satisfies PAA dep"| PAA[ProfileAuthManager]
+    P["forProfile(name)<br/>(wrapper.ts:209)"] -->|"load & construct"| GCS2["new GeminiClientService<br/>per-profile instance"]
+
+    style F2 fill:#fef3c7,stroke:#f59e0b
+  </pre>
+          <div class="mt-3 flex items-start gap-2 text-xs text-amber-700">
+            <span class="mt-0.5 w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></span>
+            <span>The factoryClient with <code>secure1psid: ""</code> exists solely to satisfy a type constraint — it's never used for API calls.</span>
+          </div>
+        </div>
+        <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-4">
+          <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-3">After — 1 module, 1 call site</p>
+          <pre class="mermaid text-xs">
+graph LR
+    F["GeminiClientFactory<br/>createClient(profile)"] -->|"loads cookies<br/>constructs SDK<br/>inits lifecycle<br/>wires metadata"| GCS[GeminiClientService]
+    CMD[Commands] --> F
+
+    style F fill:#0f172a,stroke:#059669,stroke-width:2px,color:#e2e8f0
+  </pre>
+          <div class="mt-3 space-y-1.5">
+            <div class="flex items-start gap-2 text-xs">
+              <span class="mt-0.5 w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+              <span class="text-emerald-800">No dummy instance — <code>ProfileAuthManager</code> gets cookies through the factory, not the client</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete the lazy closure in setupMediator</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete the dummy factoryClient with empty credentials</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Locality: construction lifecycle in one module</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> If mediator stays: delete 5 inline adapter copies</li>
+        <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Tests: factory is a clean seam for injecting test clients</li>
+      </ul>
+    </div>
+  </article>
+
+  <!-- Top Recommendation -->
+  <section id="top-recommendation" class="rounded-2xl border-2 border-emerald-400 bg-emerald-50/40 shadow-md p-6 space-y-3">
+    <p class="text-xs uppercase tracking-wider text-emerald-700 font-semibold">Top recommendation</p>
+    <a href="#cookie-session" class="block text-lg font-serif font-bold text-emerald-800 hover:text-emerald-900 hover:underline">
+      #1 — Deepen the Cookie Session module
+    </a>
+    <p class="text-sm text-slate-700 max-w-prose">
+      This directly addresses the recurring phantom auth bug. The scattered cookie lifecycle — with its 7-day threshold conflating different cookie timers, no proactive rotation, and duplicated validation — is the root cause of "models() works but listChats returns 0." Introducing active RotateCookies POST, two-tier validation, and a recovery ladder into a single deep module pays off on <em>every caller</em>. The other candidates (mediator removal, arg parsing, terminal input, client construction) are independent cleanups that compound the deepening's leverage.
+    </p>
+  </section>
+
+</main>
+
+</body>
+</html>
