@@ -11,7 +11,7 @@ import { formatChatList } from "../../infrastructure/formatters.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
 import { AuthenticationError, GemitermError } from "../../core/errors.ts";
-import { browser, select, text, confirm, type BrowserAction } from "../utils/prompts.ts";
+import { browser, select, text, confirm, NonInteractiveError, type BrowserAction } from "../utils/prompts.ts";
 import { runReauthFlow } from "../utils/reauth.ts";
 
 interface ListCommandOptions {
@@ -100,6 +100,10 @@ export class ListCommand implements CliCommand {
         }
       } catch (error) {
         if (error instanceof AuthenticationError) throw error;
+        if (error instanceof NonInteractiveError) {
+          console.log(chalk.yellow("Session may be stale. Run 'gemiterm login' to re-authenticate."));
+          return;
+        }
         if (error instanceof GemitermError) throw error;
         console.log(chalk.yellow("Session may be stale. Run 'gemiterm login' to re-authenticate."));
       }
