@@ -19,11 +19,12 @@ None.
 
 ### Modified Capabilities
 
-- `mediator`: The entire capability is removed — the mediator, its handler interfaces, and message types no longer exist. Every requirement is deleted.
 - `commands`: The `CommandRegistry` requirement's `CliCommandContext` shape changes (drop `mediator`, add `getGeminiClient` and `listProfiles`). Dispatch references in command requirements change from "sends X to the mediator" to "calls the `GeminiClientService` directly"; all user-visible flags and output remain byte-equivalent.
+
+The `mediator` capability is removed entirely: its spec file `openspec/specs/mediator/spec.md` is deleted (no delta — a capability that has every requirement removed cannot be represented as an empty spec).
 
 ## Impact
 
-- **Code:** delete 3 files in `src/core/` (~470 lines), rewrite `src/cli/index.ts` (drop `setupMediator` → `setupContext`), rewrite `src/cli/command-registry.ts`, touch 8 command files, `src/services/gemini-client-wrapper.ts` and `src/services/profile-auth-manager.ts`.
+- **Code:** delete 3 files in `src/core/` (~470 lines), rewrite `src/cli/index.ts` (drop `setupMediator` → `setupContext`), rewrite `src/cli/command-registry.ts`, touch 8 command files, `src/services/gemini-client-wrapper.ts` and `src/services/profile-auth-manager.ts`. Delete the `mediator` capability spec.
 - **Tests:** delete `tests/unit/mediator.test.ts` and `tests/core/query-handlers.test.ts`; rewrite `tests/cli/*.test.ts` (list, fetch, new, continue, delete, export, export-all, models) and `tests/integration/commands/*` to inject a mock `GeminiClientService` instead of registering mediator handlers.
 - **Dependencies:** none changed.

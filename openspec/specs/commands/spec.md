@@ -1,9 +1,7 @@
 ## Purpose
 
 The CLI command layer of the `gemiterm` application. It defines the 11 top-level user-facing commands (auth, profile, status, list, fetch, continue, new, delete, export, export-all, install-browser), each implemented as a `CliCommand` class registered by the `CommandRegistry`. The command layer is responsible for argument parsing, mediator dispatch (queries `ListChatsQuery` / `FetchChatQuery` and commands `SendMessageCommand` / `StartNewChatCommand` / `DeleteConversationCommand`), interactive REPL I/O for `new` and `continue`, and human-readable / JSON output formatting. This spec documents the as-built behavior of the command layer; any future conformance fixes are tracked separately in the `command-spec-conformance` change.
-
 ## Requirements
-
 ### Requirement: ListCommand
 
 The system MUST provide a `list` command implemented by `ListCommand` in `src/cli/commands/list-command.ts`. The command MUST be registered under the name `list` and MUST send a `ListChatsQuery` to the mediator with a payload of shape `{ limit?, offset?, search?, allProfiles }`. The command MUST support the flags `--limit/-n <N>` (no default; omitting `--limit` returns every conversation returned by the mediator), `--offset <N>` (default 0), `--all-profiles`, `--sort <recent|oldest|alpha>` (default `recent`), `--search/-s <query>`, `--after <date>`, `--before <date>`, `--format/-f <text|json>` (default `text`), and `--out/-o <path>`. When `--limit N` is supplied, the command MUST additionally slice the result set to `[offset, offset + N)`. When `--limit` is omitted, the command MUST NOT slice; the entire mediator result is rendered. When `--limit` is omitted and `--offset N` is supplied with `N > 0`, the command MUST slice the result set to `[N, ∞)`. The `--all-profiles` flag MUST be propagated into the mediator payload as `allProfiles: true`. The `list` command MUST NOT support a `--all` flag (omitting `--limit` is the canonical way to request every conversation). When `--out <path>` is supplied, the rendered output MUST be written to that file via `infrastructure/io.ts:writeTextFile` and the command MUST print `Output written to: <path>`; otherwise the output MUST be printed to stdout. The command MUST NOT recognize `--path` or `-p` as output flags.
@@ -426,7 +424,7 @@ The system MUST provide an `install-browser` command implemented by `InstallBrow
 
 ### Requirement: CommandRegistry
 
-The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all 11 commands by name: `auth`, `profile`, `status`, `list`, `fetch`, `continue`, `new`, `delete`, `export`, `export-all`, and `install-browser`. The `CliCommandContext` interface MUST carry `{ verbose: boolean, mediator: Mediator, profileAuthManager: ProfileAuthManager }`. The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
+The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all commands by name. The `CliCommandContext` interface MUST carry `{ verbose: boolean, profileAuthManager: ProfileAuthManager, getGeminiClient: () => GeminiClientService, listProfiles: () => string[] }` (no `mediator` field). The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
 
 #### Scenario: Registering the same name twice throws
 - **WHEN** `register("dup", handlerA)` is called and then `register("dup", handlerB)`
@@ -442,19 +440,23 @@ The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.t
 
 #### Scenario: registerAllCommands registers all 11 commands
 - **WHEN** `registerAllCommands()` is called
-- **THEN** `getRegisteredNames()` returns an array that includes `auth`, `profile`, `status`, `list`, `fetch`, `continue`, `new`, `delete`, `export`, `export-all`, and `install-browser` (11 entries total)
+- **THEN** `getRegisteredNames()` returns an array that includes `auth`, `login`, `status`, `list`, `fetch`, `continue`, `new`, `delete`, `export`, `export-all`, `install-browser`, `install-skills`, and `models`
+
+#### Scenario: Context carries services, not a mediator
+- **WHEN** a `CliCommandContext` is constructed for a command
+- **THEN** it exposes `verbose`, `profileAuthManager`, `getGeminiClient`, and `listProfiles`, and does NOT expose a `mediator` field
 
 ### Requirement: Command Help Output
 
-Every command in the registry MUST support `--help` and `-h`. When `--help` or `-h` is supplied, the command MUST print a usage block starting with `Usage: gemiterm <command> ...` and MUST NOT perform its primary mediator action. Each command's usage block MUST list that command's flags and positional arguments.
+Every command in the registry MUST support `--help` and `-h`. When `--help` or `-h` is supplied, the command MUST print a usage block starting with `Usage: gemiterm <command> ...` and MUST NOT perform its primary action (no `GeminiClientService` call is made). Each command's usage block MUST list that command's flags and positional arguments.
 
 #### Scenario: Every command has a --help that starts with Usage
-- **WHEN** any of `gemiterm <cmd> --help` or `gemiterm <cmd> -h` is invoked for `cmd` in `{list, fetch, continue, new, delete, export, export-all, status, auth, profile}`
+- **WHEN** any of `gemiterm <cmd> --help` or `gemiterm <cmd> -h` is invoked for a registered command
 - **THEN** the first line of the output is `Usage: gemiterm <cmd> ...`
 
 #### Scenario: --help does not perform the command's primary action
 - **WHEN** `gemiterm <cmd> --help` is invoked
-- **THEN** the command's primary mediator action is not executed (no `ListChatsQuery`, `FetchChatQuery`, `SendMessageCommand`, `StartNewChatCommand`, or `DeleteConversationCommand` is sent)
+- **THEN** the command's primary action is not executed (no `GeminiClientService` method is called)
 
 ### Requirement: Global Help and Version
 
@@ -521,3 +523,70 @@ layer.
 - **WHEN** the user enters a blank line in the continue REPL
 - **THEN** no `SendMessageCommand` is sent and the REPL continues
   prompting
+
+### Requirement: Commands Dispatch Directly to Services
+
+Command handlers MUST obtain the `GeminiClientService` via `context.getGeminiClient()` and call its methods directly; they MUST NOT send messages through a mediator. Profile-scoped operations MUST route to `client.forProfile(profileName)` when a profile is resolved, otherwise the default client. The user-visible behavior (flags, output formatting, exit codes, error messages) MUST remain byte-equivalent to the pre-mediator-removal baseline.
+
+#### Scenario: List dispatches directly
+- **WHEN** the user runs `gemiterm list --limit 5`
+- **THEN** the command calls `getGeminiClient()` and renders at most 5 chats via `formatChatList`; no mediator is involved
+
+#### Scenario: Profile-scoped fetch routes to forProfile
+- **WHEN** the user runs `gemiterm fetch <id> --profile work`
+- **THEN** the command calls `getGeminiClient().forProfile("work").fetchChat(id)`
+
+#### Scenario: Delete dispatches directly
+- **WHEN** the user runs `gemiterm delete <id> --force`
+- **THEN** the command calls `deleteChat(id)` on the resolved client and prints `deleted.` on success
+
+### Requirement: Shared Command Argument Parsing
+
+The system MUST provide a shared, declarative command-argument parser in `src/cli/utils/command-args.ts`. It MUST export a `parseCommandArgs(args: string[], flags: readonly ArgFlagSpec[])` function that returns a flat `Record<string, unknown>` seeded from each flag's `default`. A flag spec MUST carry `key`, `long`, optional `short`, `type` (one of `boolean`, `string`, `integer`, `enum`), `description`, `helpLabel`, optional `default`, `enum`, `required`, and `valueName`. `parseCommandArgs` MUST recognize both the `long` and `short` tokens. Boolean flags MUST set `true`. Tolerant string flags MUST consume the following token (or `""` when absent). Required string/integer/enum flags MUST print `Error: <long> requires a <valueName>` to stderr and exit with code 1 when the following token is missing or starts with `-`. Integer flags MUST parse via `parseInt(value, 10) || default`. Enum flags MUST accept only values in `enum` and silently fall back to `default` otherwise. Unknown tokens MUST be ignored.
+
+The system MUST also provide a `renderUsage(spec: UsageSpec)` function that renders a help block starting with the `usageLine`, an optional `Arguments:` section, an `Options:` section whose flag column is padded to `max(helpLabel length) + 2` using `chalk.cyan` for the flag and `chalk.dim` for the description, and optional footer lines.
+
+#### Scenario: Boolean flag sets true
+- **WHEN** `parseCommandArgs(["--force"], [{ key: "force", long: "--force", short: "-f", type: "boolean", default: false, description: "", helpLabel: "--force, -f" }])` is called
+- **THEN** the result has `force === true`
+
+#### Scenario: Tolerant string consumes the next token
+- **WHEN** `parseCommandArgs(["--profile", "work"], [...profile spec...])` is called
+- **THEN** the result has `profile === "work"`
+
+#### Scenario: Tolerant string with no value yields empty string
+- **WHEN** `parseCommandArgs(["--profile"], [...profile spec with type string, required false...])` is called
+- **THEN** the result has `profile === ""`
+
+#### Scenario: Required string with no value errors and exits 1
+- **WHEN** `parseCommandArgs(["--profile"], [...profile spec with required true, valueName "profile name"...])` is called
+- **THEN** stderr contains `Error: --profile requires a profile name` and the process exits with code 1
+
+#### Scenario: Enum falls back to default on invalid value
+- **WHEN** `parseCommandArgs(["--sort", "bogus"], [...sort spec enum ["recent","oldest","alpha"] default "recent"...])` is called
+- **THEN** the result has `sort === "recent"`
+
+#### Scenario: Integer parses via parseInt
+- **WHEN** `parseCommandArgs(["--limit", "5"], [...limit spec type integer default 0...])` is called
+- **THEN** the result has `limit === 5`
+
+#### Scenario: renderUsage produces the Options block
+- **WHEN** `renderUsage({ usageLine: "Usage: gemiterm list [options]", flags: [helpLabel "--limit, -n N" desc "Limit"], footer: [] })` is called
+- **THEN** the returned string starts with `Usage: gemiterm list [options]` and contains an `Options:` section including the `--limit, -n N` label and its description
+
+### Requirement: Shared Prompt Spillover
+
+The system MUST provide a `loadEffectivePrompt(message: string | null, promptFile: string | null): Promise<string | null>` helper in `src/cli/utils/prompt-file.ts` used by both the `new` and `continue` commands. When `promptFile` is set it MUST load that file. When only `message` is set and it exceeds the Windows arg limit, the helper MUST spill the message to a temp file, load it, and remove the temp file afterwards. When `message` is within the limit it MUST return it unchanged. When both inputs are null it MUST return `null`.
+
+#### Scenario: Prompt file takes precedence
+- **WHEN** `loadEffectivePrompt("hi", "file.txt")` is called
+- **THEN** the file content is read and returned
+
+#### Scenario: Long message is spilled and cleaned up
+- **WHEN** `loadEffectivePrompt(<message over the limit>, null)` is called
+- **THEN** the message is written to a temp file, loaded, returned, and the temp file is removed
+
+#### Scenario: No input returns null
+- **WHEN** `loadEffectivePrompt(null, null)` is called
+- **THEN** the result is `null`
+
