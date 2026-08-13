@@ -3,9 +3,8 @@ import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
-import { checkArgLength } from "../utils/long-arg-guard.ts";
-import { loadPromptFromFile, spillOverToTempFile } from "../utils/prompt-file.ts";
-import { removeFile } from "../../infrastructure/io.ts";
+import { loadEffectivePrompt } from "../utils/prompt-file.ts";
+import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 
 interface NewCommandOptions {
   help: boolean;
@@ -13,10 +12,20 @@ interface NewCommandOptions {
   promptFile: string | null;
 }
 
-const DEFAULT_OPTIONS: NewCommandOptions = {
-  help: false,
-  profile: null,
-  promptFile: null,
+const NEW_FLAGS: readonly ArgFlagSpec[] = [
+  { key: "profile", long: "--profile", short: "-p", type: "string", required: true, valueName: "profile name", description: "Use a specific profile (default profile used if omitted)", helpLabel: "--profile, -p <name>", default: null },
+  { key: "promptFile", long: "--prompt-file", short: "-f", type: "string", required: true, valueName: "path", description: "Read the message from a file (bypasses the 2048 code unit arg limit)", helpLabel: "--prompt-file, -f <path>", default: null },
+  { key: "help", long: "--help", short: "-h", type: "boolean", description: "Show this help message", helpLabel: "--help, -h", default: false },
+];
+
+const NEW_USAGE: UsageSpec = {
+  usageLine: "Usage: gemiterm new [message] [options]",
+  arguments: [{ name: "message", description: "Message to send (optional, starts interactive mode if omitted)" }],
+  flags: NEW_FLAGS,
+  footer: [
+    "If no message is provided, an interactive chat session will start.",
+    "In interactive mode, type /exit or /quit to exit.",
+  ],
 };
 
 export class NewCommand implements CliCommand {
@@ -53,39 +62,7 @@ export class NewCommand implements CliCommand {
       process.exit(1);
     }
 
-    let effectivePromptFile: string | null = null;
-    let isSpillover = false;
-    if (options.promptFile) {
-      effectivePromptFile = options.promptFile;
-    } else if (message) {
-      const guard = checkArgLength(message);
-      if (!guard.safe) {
-        const spilled = await spillOverToTempFile(message);
-        effectivePromptFile = spilled;
-        isSpillover = true;
-        console.log(
-          chalk.dim(
-            `[gemiterm] Message is ${guard.length} UTF-16 code units, exceeding the ${guard.limit} limit. ` +
-              `Spilled to temp file '${spilled}' and loading from there.`,
-          ),
-        );
-      }
-    }
-
-    if (effectivePromptFile) {
-      try {
-        message = await loadPromptFromFile(effectivePromptFile);
-      } catch (err) {
-        console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
-        process.exit(1);
-      }
-      if (isSpillover) {
-        try {
-          removeFile(effectivePromptFile);
-        } catch {
-        }
-      }
-    }
+    message = await loadEffectivePrompt(message, options.promptFile);
 
     if (message) {
       await this.sendNonInteractive(context.getGeminiClient, message, options.profile, logger);
@@ -135,54 +112,10 @@ export class NewCommand implements CliCommand {
   }
 
   private parseArgs(args: string[]): NewCommandOptions {
-    const options = { ...DEFAULT_OPTIONS };
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      if (arg === "--help" || arg === "-h") {
-        options.help = true;
-      } else if (arg === "--profile" || arg === "-p") {
-        const next = args[i + 1];
-        if (next && !next.startsWith("-")) {
-          options.profile = next;
-          i++;
-        } else {
-          console.error(chalk.red(`Error: --profile requires a profile name`));
-          process.exit(1);
-        }
-      } else if (arg === "--prompt-file" || arg === "-f") {
-        const next = args[i + 1];
-        if (next && !next.startsWith("-")) {
-          options.promptFile = next;
-          i++;
-        } else {
-          console.error(chalk.red(`Error: --prompt-file requires a path`));
-          process.exit(1);
-        }
-      }
-    }
-
-    return options;
+    return parseCommandArgs(args, NEW_FLAGS) as unknown as NewCommandOptions;
   }
 
   private showUsage(): void {
-    console.log(chalk.bold("Usage: gemiterm new [message] [options]"));
-    console.log("");
-    console.log(chalk.bold("Arguments:"));
-    console.log(
-      `  ${chalk.cyan("message".padEnd(20))}${chalk.dim("Message to send (optional, starts interactive mode if omitted)")}`,
-    );
-    console.log("");
-    console.log(chalk.bold("Options:"));
-    console.log(
-      `  ${chalk.cyan("--profile, -p <name>".padEnd(22))}${chalk.dim("Use a specific profile (default profile used if omitted)")}`,
-    );
-    console.log(
-      `  ${chalk.cyan("--prompt-file, -f <path>".padEnd(22))}${chalk.dim("Read the message from a file (bypasses the 2048 code unit arg limit)")}`,
-    );
-    console.log(`  ${chalk.cyan("--help, -h".padEnd(22))}${chalk.dim("Show this help message")}`);
-    console.log("");
-    console.log(chalk.dim("If no message is provided, an interactive chat session will start."));
-    console.log(chalk.dim("In interactive mode, type /exit or /quit to exit."));
+    console.log(renderUsage(NEW_USAGE));
   }
 }

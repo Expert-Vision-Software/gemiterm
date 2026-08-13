@@ -2,6 +2,7 @@ import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { fetchChatForRequest } from "../utils/gemini-queries.ts";
+import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 import type { Message } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
@@ -13,11 +14,18 @@ interface FetchCommandOptions {
   profile: string;
 }
 
-const DEFAULT_OPTIONS: FetchCommandOptions = {
-  help: false,
-  format: "text",
-  out: "",
-  profile: "",
+const FETCH_FLAGS: readonly ArgFlagSpec[] = [
+  { key: "format", long: "--format", short: "-f", type: "enum", enum: ["text", "json"], description: "Output format: text, json (default: text)", helpLabel: "--format, -f <fmt>", default: "text" },
+  { key: "out", long: "--out", short: "-o", type: "string", description: "Write output to file", helpLabel: "--out, -o <path>", default: "" },
+  { key: "profile", long: "--profile", short: "-p", type: "string", description: "Profile that owns the conversation (default: auto-discover)", helpLabel: "--profile, -p <name>", default: "" },
+  { key: "help", long: "--help", short: "-h", type: "boolean", description: "Show this help message", helpLabel: "--help, -h", default: false },
+];
+
+const FETCH_USAGE: UsageSpec = {
+  usageLine: "Usage: gemiterm fetch [conversation_id] [options]",
+  arguments: [{ name: "conversation_id", description: "ID of the conversation to fetch (optional)" }],
+  flags: FETCH_FLAGS,
+  footer: ["If no conversation_id is provided, the list command will be invoked."],
 };
 
 export class FetchCommand implements CliCommand {
@@ -115,60 +123,10 @@ export class FetchCommand implements CliCommand {
   }
 
   private parseArgs(args: string[]): FetchCommandOptions {
-    const options = { ...DEFAULT_OPTIONS };
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      switch (arg) {
-        case "--help":
-        case "-h":
-          options.help = true;
-          break;
-        case "--format":
-        case "-f":
-          options.format = this.parseFormat(args[++i]);
-          break;
-        case "--out":
-        case "-o":
-          options.out = args[++i] ?? "";
-          break;
-        case "--profile":
-        case "-p":
-          options.profile = args[++i] ?? "";
-          break;
-      }
-    }
-
-    return options;
-  }
-
-  private parseFormat(value: string | undefined): "text" | "json" {
-    if (value === "text" || value === "json") return value;
-    return DEFAULT_OPTIONS.format;
+    return parseCommandArgs(args, FETCH_FLAGS) as unknown as FetchCommandOptions;
   }
 
   private showUsage(): void {
-    console.log(chalk.bold("Usage: gemiterm fetch [conversation_id] [options]"));
-    console.log("");
-    console.log(chalk.bold("Arguments:"));
-    console.log(`  ${chalk.cyan("conversation_id".padEnd(20))}${chalk.dim("ID of the conversation to fetch (optional)")}`);
-    console.log("");
-    console.log(chalk.bold("Options:"));
-
-    const flags = [
-      { flag: "--format, -f <fmt>", desc: "Output format: text, json (default: text)" },
-      { flag: "--out, -o <path>", desc: "Write output to file" },
-      { flag: "--profile, -p <name>", desc: "Profile that owns the conversation (default: auto-discover)" },
-      { flag: "--help, -h", desc: "Show this help message" },
-    ];
-
-    const maxLen = Math.max(...flags.map((f) => f.flag.length));
-    for (const f of flags) {
-      const padded = f.flag.padEnd(maxLen + 2);
-      console.log(`  ${chalk.cyan(padded)}${chalk.dim(f.desc)}`);
-    }
-
-    console.log("");
-    console.log(chalk.dim("If no conversation_id is provided, the list command will be invoked."));
+    console.log(renderUsage(FETCH_USAGE));
   }
 }

@@ -2,6 +2,7 @@ import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { listChatsForRequest } from "../utils/gemini-queries.ts";
+import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 import { formatChatList } from "../../infrastructure/formatters.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
@@ -36,6 +37,26 @@ const DEFAULT_OPTIONS: ListCommandOptions = {
   format: "text",
   out: "",
   interactive: false,
+};
+
+const LIST_FLAGS: readonly ArgFlagSpec[] = [
+  { key: "limit", long: "--limit", short: "-n", type: "integer", description: "Limit number of results (no limit by default)", helpLabel: "--limit, -n N", default: 0 },
+  { key: "offset", long: "--offset", type: "integer", description: "Skip N results (default: 0)", helpLabel: "--offset N", default: 0 },
+  { key: "allProfiles", long: "--all-profiles", type: "boolean", description: "Show conversations from all profiles (with Profile column in text output)", helpLabel: "--all-profiles", default: false },
+  { key: "profile", long: "--profile", short: "-p", type: "string", description: "Filter conversations to a specific profile (non-interactive)", helpLabel: "--profile, -p <name>", default: "" },
+  { key: "sort", long: "--sort", type: "enum", enum: ["recent", "oldest", "alpha"], description: "Sort order: recent, oldest, alpha (default: recent)", helpLabel: "--sort <mode>", default: "recent" },
+  { key: "search", long: "--search", short: "-s", type: "string", description: "Filter by title search", helpLabel: "--search, -s <query>", default: "" },
+  { key: "after", long: "--after", type: "string", description: "Only show chats after this date", helpLabel: "--after <date>", default: "" },
+  { key: "before", long: "--before", type: "string", description: "Only show chats before this date", helpLabel: "--before <date>", default: "" },
+  { key: "format", long: "--format", short: "-f", type: "enum", enum: ["text", "json"], description: "Output format: text, json (default: text)", helpLabel: "--format, -f <fmt>", default: "text" },
+  { key: "out", long: "--out", short: "-o", type: "string", description: "Write output to file", helpLabel: "--out, -o <path>", default: "" },
+  { key: "interactive", long: "--interactive", short: "-i", type: "boolean", description: "Open interactive chat-list browser (TTY only; shows all profiles by default)", helpLabel: "--interactive, -i", default: false },
+  { key: "help", long: "--help", short: "-h", type: "boolean", description: "Show this help message", helpLabel: "--help, -h", default: false },
+];
+
+const LIST_USAGE: UsageSpec = {
+  usageLine: "Usage: gemiterm list [options]",
+  flags: LIST_FLAGS,
 };
 
 export class ListCommand implements CliCommand {
@@ -253,56 +274,7 @@ export class ListCommand implements CliCommand {
   }
 
   private parseArgs(args: string[]): ListCommandOptions {
-    const options = { ...DEFAULT_OPTIONS };
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      switch (arg) {
-        case "--help":
-        case "-h":
-          options.help = true;
-          break;
-        case "--limit":
-        case "-n":
-          options.limit = parseInt(args[++i], 10) || DEFAULT_OPTIONS.limit;
-          break;
-        case "--offset":
-          options.offset = parseInt(args[++i], 10) || 0;
-          break;
-        case "--all-profiles":
-          options.allProfiles = true;
-          break;
-        case "--profile":
-        case "-p":
-          options.profile = args[++i] ?? "";
-          break;
-        case "--sort":
-          options.sort = this.parseSort(args[++i]);
-          break;
-        case "--search":
-        case "-s":
-          options.search = args[++i] ?? "";
-          break;
-        case "--after":
-          options.after = args[++i] ?? "";
-          break;
-        case "--before":
-          options.before = args[++i] ?? "";
-          break;
-        case "--format":
-        case "-f":
-          options.format = this.parseFormat(args[++i]);
-          break;
-        case "--out":
-        case "-o":
-          options.out = args[++i] ?? "";
-          break;
-        case "--interactive":
-        case "-i":
-          options.interactive = true;
-          break;
-      }
-    }
+    const options = parseCommandArgs(args, LIST_FLAGS) as unknown as ListCommandOptions;
 
     if (options.interactive && !options.profile) {
       options.allProfiles = true;
@@ -318,40 +290,7 @@ export class ListCommand implements CliCommand {
     return options;
   }
 
-  private parseSort(value: string | undefined): "recent" | "oldest" | "alpha" {
-    if (value === "recent" || value === "oldest" || value === "alpha") return value;
-    return DEFAULT_OPTIONS.sort;
-  }
-
-  private parseFormat(value: string | undefined): "text" | "json" {
-    if (value === "text" || value === "json") return value;
-    return DEFAULT_OPTIONS.format;
-  }
-
   private showUsage(): void {
-    console.log(chalk.bold("Usage: gemiterm list [options]"));
-    console.log("");
-    console.log(chalk.bold("Options:"));
-
-    const flags = [
-      { flag: "--limit, -n N", desc: "Limit number of results (no limit by default)" },
-      { flag: "--offset N", desc: "Skip N results (default: 0)" },
-      { flag: "--all-profiles", desc: "Show conversations from all profiles (with Profile column in text output)" },
-      { flag: "--profile, -p <name>", desc: "Filter conversations to a specific profile (non-interactive)" },
-      { flag: "--sort <mode>", desc: "Sort order: recent, oldest, alpha (default: recent)" },
-      { flag: "--search, -s <query>", desc: "Filter by title search" },
-      { flag: "--after <date>", desc: "Only show chats after this date" },
-      { flag: "--before <date>", desc: "Only show chats before this date" },
-      { flag: "--format, -f <fmt>", desc: "Output format: text, json (default: text)" },
-      { flag: "--out, -o <path>", desc: "Write output to file" },
-      { flag: "--interactive, -i", desc: "Open interactive chat-list browser (TTY only; shows all profiles by default)" },
-      { flag: "--help, -h", desc: "Show this help message" },
-    ];
-
-    const maxLen = Math.max(...flags.map((f) => f.flag.length));
-    for (const f of flags) {
-      const padded = f.flag.padEnd(maxLen + 2);
-      console.log(`  ${chalk.cyan(padded)}${chalk.dim(f.desc)}`);
-    }
+    console.log(renderUsage(LIST_USAGE));
   }
 }
