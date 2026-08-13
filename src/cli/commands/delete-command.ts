@@ -1,13 +1,7 @@
 import chalk from "chalk";
 import { confirm } from "../utils/prompts.ts";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import {
-  COMMAND_TYPES,
-  type DeleteConversationCommandPayload,
-  type DeleteConversationCommandResult,
-} from "../../core/command-handlers.ts";
 import { validateConversationId } from "../../infrastructure/validators.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
 
@@ -61,24 +55,16 @@ export class DeleteCommand implements CliCommand {
       }
     }
 
-    const mediator: Mediator = context.mediator;
-    const payload: DeleteConversationCommandPayload = { conversationId, profileName: profileName ?? undefined };
-
-    logger.debug(`Sending delete-conversation command: ${JSON.stringify(payload)}`);
+    logger.debug(`Deleting conversation: ${conversationId}`);
 
     try {
-      const result = await mediator.send<DeleteConversationCommandResult>({
-        type: COMMAND_TYPES.DELETE_CONVERSATION,
-        payload,
-      } as Command<DeleteConversationCommandPayload>);
+      const client = profileName
+        ? context.getGeminiClient().forProfile(profileName)
+        : context.getGeminiClient();
+      await client.deleteChat(conversationId);
 
-      if (result.success) {
-        console.log(chalk.green(`Conversation '${chalk.cyan(conversationId)}' deleted.`));
-        logger.info(`Deleted conversation: ${conversationId}`);
-      } else {
-        console.error(chalk.red("Failed to delete conversation."));
-        process.exit(1);
-      }
+      console.log(chalk.green(`Conversation '${chalk.cyan(conversationId)}' deleted.`));
+      logger.info(`Deleted conversation: ${conversationId}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Error: ${message}`));

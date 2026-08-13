@@ -1,12 +1,18 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { DeleteCommand } from "../../src/cli/commands/delete-command.ts";
-import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
-import { COMMAND_TYPES } from "../../src/core/command-handlers.ts";
+
+function makeClient() {
+  const client: any = {
+    deleteChat: mock(async (_id: string): Promise<void> => {}),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
 
 describe("DeleteCommand", () => {
   let command: DeleteCommand;
-  let mediator: Mediator;
+  let client: ReturnType<typeof makeClient>;
   let context: CliCommandContext;
   let logSpy: ReturnType<typeof spyOn>;
   let errorSpy: ReturnType<typeof spyOn>;
@@ -14,15 +20,16 @@ describe("DeleteCommand", () => {
 
   beforeEach(() => {
     command = new DeleteCommand();
-    mediator = new Mediator();
+    client = makeClient();
     context = {
       verbose: false,
-      mediator,
       profileAuthManager: {
         getActiveProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => null),
         ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       } as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
@@ -59,19 +66,9 @@ describe("DeleteCommand", () => {
   });
 
   test("sends delete-conversation command with --force flag", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.DELETE_CONVERSATION,
-      handle: mock(async () => ({ success: true })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
-
     await command.execute(["abc123", "--force"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ conversationId: "abc123" }),
-      }),
-    );
+    expect(client.deleteChat).toHaveBeenCalledWith("abc123");
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("abc123");
@@ -79,27 +76,15 @@ describe("DeleteCommand", () => {
   });
 
   test("sends delete-conversation command with -f short flag", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.DELETE_CONVERSATION,
-      handle: mock(async () => ({ success: true })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
-
     await command.execute(["abc123", "-f"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ conversationId: "abc123" }),
-      }),
-    );
+    expect(client.deleteChat).toHaveBeenCalledWith("abc123");
   });
 
   test("handles failed deletion", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.DELETE_CONVERSATION,
-      handle: mock(async () => ({ success: false })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
+    client.deleteChat = mock(async () => {
+      throw new Error("Failed to delete conversation");
+    });
 
     await expect(command.execute(["abc123", "--force"], context)).rejects.toThrow(
       "process.exit called",
@@ -110,13 +95,9 @@ describe("DeleteCommand", () => {
   });
 
   test("handles error from handler", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.DELETE_CONVERSATION,
-      handle: mock(async () => {
-        throw new Error("Network error");
-      }),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
+    client.deleteChat = mock(async () => {
+      throw new Error("Network error");
+    });
 
     await expect(command.execute(["abc123", "--force"], context)).rejects.toThrow(
       "process.exit called",
@@ -129,44 +110,20 @@ describe("DeleteCommand", () => {
   test("--profile forwards the profile name into DELETE_CONVERSATION payload", async () => {
     (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["evs-diegohb"]);
 
-    const mockHandler = {
-      commandType: COMMAND_TYPES.DELETE_CONVERSATION,
-      handle: mock(async () => ({ success: true })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
-
     await command.execute(["abc123", "--force", "--profile", "evs-diegohb"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          conversationId: "abc123",
-          profileName: "evs-diegohb",
-        }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
+    expect(client.deleteChat).toHaveBeenCalledWith("abc123");
   });
 
   test("auto-discovers owning profile and forwards it into DELETE_CONVERSATION payload", async () => {
     (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
     (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
 
-    const mockHandler = {
-      commandType: COMMAND_TYPES.DELETE_CONVERSATION,
-      handle: mock(async () => ({ success: true })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
-
     await command.execute(["abc123", "--force"], context);
 
     expect((context.profileAuthManager as any).findProfileForConversation).toHaveBeenCalledWith("abc123");
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          conversationId: "abc123",
-          profileName: "evs-diegohb",
-        }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
+    expect(client.deleteChat).toHaveBeenCalledWith("abc123");
   });
 });

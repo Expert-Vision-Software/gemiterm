@@ -1,15 +1,8 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import type { ChatInfo } from "../../core/types.ts";
-import {
-  QUERY_TYPES,
-  type ListChatsQueryPayload,
-  type ListChatsQueryResult,
-  type FetchChatQueryPayload,
-  type FetchChatQueryResult,
-} from "../../core/query-handlers.ts";
+import { listChatsForRequest, fetchChatForRequest } from "../utils/gemini-queries.ts";
 import { formatChatAsMarkdown } from "../../infrastructure/formatters.ts";
 import { ensureDir, writeTextFile } from "../../infrastructure/io.ts";
 import { joinPath, resolvePath } from "../../infrastructure/path-utils.ts";
@@ -51,19 +44,12 @@ export class ExportAllCommand implements CliCommand {
       return;
     }
 
-    const mediator: Mediator = context.mediator;
-
-    logger.debug("Sending list-chats query for export-all");
+    logger.debug("Listing chats for export-all");
 
     try {
-      const listResult = await mediator.send<ListChatsQueryResult>({
-        type: QUERY_TYPES.LIST_CHATS,
-        payload: {
-          allProfiles: options.allProfiles,
-        } as ListChatsQueryPayload,
-      } as Query<ListChatsQueryPayload>);
-
-      let chats = listResult.chats;
+      let chats = await listChatsForRequest(context.getGeminiClient, context.listProfiles, {
+        allProfiles: options.allProfiles,
+      });
 
       chats = this.applyDateFilter(chats, options.since);
 
@@ -86,18 +72,12 @@ export class ExportAllCommand implements CliCommand {
         process.stdout.write(`  ${chalk.dim(progress)} Exporting ${chalk.cyan(chat.id)}...`);
 
         try {
-          const fetchResult = await mediator.send<FetchChatQueryResult>({
-            type: QUERY_TYPES.FETCH_CHAT,
-            payload: {
-              conversationId: chat.id,
-              profileName: chat.profile,
-            } as FetchChatQueryPayload,
-          } as Query<FetchChatQueryPayload>);
+          const messages = await fetchChatForRequest(context.getGeminiClient, chat.id, chat.profile);
 
           const filename = this.sanitizeFilename(chat.title || chat.id);
           const filePath = joinPath(outDir, `${filename}.md`);
           const content = formatChatAsMarkdown(
-            fetchResult.messages,
+            messages,
             chat.title,
             chat.id,
             options.includeMetadata,

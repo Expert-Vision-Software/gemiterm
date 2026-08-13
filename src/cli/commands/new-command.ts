@@ -1,12 +1,7 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import {
-  COMMAND_TYPES,
-  type StartNewChatCommandPayload,
-  type StartNewChatCommandResult,
-} from "../../core/command-handlers.ts";
+import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 import { checkArgLength } from "../utils/long-arg-guard.ts";
 import { loadPromptFromFile, spillOverToTempFile } from "../utils/prompt-file.ts";
@@ -92,31 +87,22 @@ export class NewCommand implements CliCommand {
       }
     }
 
-    const mediator: Mediator = context.mediator;
-
     if (message) {
-      await this.sendNonInteractive(mediator, message, options.profile, logger);
+      await this.sendNonInteractive(context.getGeminiClient, message, options.profile, logger);
     } else {
-      await this.startInteractive(mediator, options.profile, logger);
+      await this.startInteractive(context.getGeminiClient, options.profile, logger);
     }
   }
 
   private async sendNonInteractive(
-    mediator: Mediator,
+    getGeminiClient: () => GeminiClientService,
     message: string,
     profileName: string | null,
     logger: Logger,
   ): Promise<void> {
     logger.debug("Starting new chat with message");
-    const payload: StartNewChatCommandPayload = { message };
-    if (profileName) {
-      payload.profileName = profileName;
-    }
-
-    const result = await mediator.send<StartNewChatCommandResult>({
-      type: COMMAND_TYPES.START_NEW_CHAT,
-      payload,
-    } as Command<StartNewChatCommandPayload>);
+    const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
+    const result = await client.startNewChat(message);
 
     console.log(chalk.cyan(`Conversation ID: ${result.conversationId}`));
     console.log(chalk.blue.bold("Model:"));
@@ -124,22 +110,15 @@ export class NewCommand implements CliCommand {
   }
 
   private async startInteractive(
-    mediator: Mediator,
+    getGeminiClient: () => GeminiClientService,
     profileName: string | null,
     logger: Logger,
   ): Promise<void> {
     let conversationId: string | null = null;
 
     const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
-      const payload: StartNewChatCommandPayload = { message };
-      if (profileName) {
-        payload.profileName = profileName;
-      }
-
-      const result = await mediator.send<StartNewChatCommandResult>({
-        type: COMMAND_TYPES.START_NEW_CHAT,
-        payload,
-      } as Command<StartNewChatCommandPayload>);
+      const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
+      const result = await client.startNewChat(message);
 
       const isFirst = !conversationId;
       if (isFirst) {

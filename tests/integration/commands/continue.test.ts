@@ -1,32 +1,41 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { ContinueCommand } from "../../../src/cli/commands/continue-command.ts";
-import { Mediator } from "../../../src/core/mediator.ts";
-import { COMMAND_TYPES, type SendMessageCommandPayload, type SendMessageCommandResult } from "../../../src/core/command-handlers.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
 import { AuthenticationError } from "../../../src/core/errors.ts";
 
+function makeClient() {
+  const client: any = {
+    sendMessage: mock(async (_id: string, _msg: string): Promise<string> => "Hello!"),
+    fetchChat: mock(async (_id: string): Promise<any[]> => []),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
+
 describe("continue command integration", () => {
   let command: ContinueCommand;
   let context: CliCommandContext;
+  let client: ReturnType<typeof makeClient>;
   let logSpy: ReturnType<typeof spyOn>;
   let errorSpy: ReturnType<typeof spyOn>;
   let originalEnv: Record<string, string | undefined>;
-  let mediatorSendSpy: ReturnType<typeof spyOn>;
   let findProfileSpy: ReturnType<typeof mock>;
   let getActiveProfilesSpy: ReturnType<typeof mock>;
 
   beforeEach(() => {
     command = new ContinueCommand();
+    client = makeClient();
     context = {
       verbose: false,
-      mediator: new Mediator(),
       profileAuthManager: {
         getActiveProfiles: mock(() => ["work", "personal"]),
         findProfileForConversation: mock(() => "work"),
         ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       } as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
@@ -36,8 +45,6 @@ describe("continue command integration", () => {
     const configDir = setupTestConfig("continue-integration");
     spyOn(configModule, "getConfigDir").mockReturnValue(configDir);
     spyOn(configModule, "ensureConfigDir").mockImplementation(() => {});
-
-    mediatorSendSpy = spyOn(context.mediator, "send").mockResolvedValue({ response: "Hello!" } as SendMessageCommandResult);
   });
 
   afterEach(() => {
@@ -62,10 +69,10 @@ describe("continue command integration", () => {
       expect(output).toContain("Usage: gemiterm continue");
     });
 
-    test("help does not send command to mediator", async () => {
+    test("help does not send message to client", async () => {
       await command.execute(["--help"], context);
 
-      expect(mediatorSendSpy).not.toHaveBeenCalled();
+      expect(client.sendMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -73,10 +80,9 @@ describe("continue command integration", () => {
     test("resolves the profile that owns the conversation", async () => {
       await command.execute(["conv-123", "hello"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentCommand = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentCommand.type).toBe(COMMAND_TYPES.SEND_MESSAGE);
-      expect(sentCommand.payload.profileName).toBe("work");
+      expect(client.sendMessage).toHaveBeenCalledTimes(1);
+      expect(client.forProfile).toHaveBeenCalledWith("work");
+      expect(client.sendMessage).toHaveBeenCalledWith("conv-123", "hello");
     });
 
     test("throws AuthenticationError when no profile owns the conversation", async () => {
@@ -102,21 +108,18 @@ describe("continue command integration", () => {
 
       await command.execute(["conv-123", "hello"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentCommand = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentCommand.payload.profileName).toBeUndefined();
+      expect(client.sendMessage).toHaveBeenCalledTimes(1);
+      expect(client.sendMessage).toHaveBeenCalledWith("conv-123", "hello");
+      expect(client.forProfile).not.toHaveBeenCalled();
     });
   });
 
   describe("non-interactive mode", () => {
-    test("sends message to mediator", async () => {
+    test("sends message to client", async () => {
       await command.execute(["conv-123", "hello world"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentCommand = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentCommand.type).toBe(COMMAND_TYPES.SEND_MESSAGE);
-      expect(sentCommand.payload.conversationId).toBe("conv-123");
-      expect(sentCommand.payload.message).toBe("hello world");
+      expect(client.sendMessage).toHaveBeenCalledTimes(1);
+      expect(client.sendMessage).toHaveBeenCalledWith("conv-123", "hello world");
     });
 
     test("prints model response", async () => {

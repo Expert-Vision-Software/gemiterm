@@ -1,8 +1,6 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import { QUERY_TYPES, type ListModelsQueryResult } from "../../core/query-handlers.ts";
 
 export class ModelsCommand implements CliCommand {
   readonly name = "models";
@@ -22,16 +20,12 @@ export class ModelsCommand implements CliCommand {
       return;
     }
 
-    const mediator: Mediator = context.mediator;
-    const result = await mediator.send<ListModelsQueryResult>({
-      type: QUERY_TYPES.LIST_MODELS,
-      payload: {},
-    });
+    const models = await context.getGeminiClient().listModels();
 
     console.log("Available Gemini models:");
-    for (const model of result.models) {
+    for (const model of models) {
       console.log(`  ${chalk.cyan(model)}`);
     }
-    logger.info(`${result.models.length} model(s) available`);
+    logger.info(`${models.length} model(s) available`);
   }
 }

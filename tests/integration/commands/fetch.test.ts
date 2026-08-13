@@ -1,25 +1,32 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { FetchCommand } from "../../../src/cli/commands/fetch-command.ts";
-import { Mediator } from "../../../src/core/mediator.ts";
-import { QUERY_TYPES, type FetchChatQueryResult } from "../../../src/core/query-handlers.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
+import type { Message } from "../../../src/core/types.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import { createMockMessageHistory } from "../../fixtures/chat-fixtures.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
 import { existsSync, unlinkSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+function makeClient() {
+  const client: any = {
+    fetchChat: mock(async (_id: string): Promise<Message[]> => []),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
 
 describe("fetch command integration", () => {
   let command: FetchCommand;
   let context: CliCommandContext;
+  let client: ReturnType<typeof makeClient>;
   let logSpy: ReturnType<typeof spyOn>;
   let originalEnv: Record<string, string | undefined>;
-  let mediatorSendSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new FetchCommand();
+    client = makeClient();
     const profileAuthManager = {
       getActiveProfiles: mock(() => ["default"]),
       findProfileForConversation: mock(() => Promise.resolve(null)),
@@ -27,7 +34,12 @@ describe("fetch command integration", () => {
         throw new Error("not used");
       }),
     };
-    context = { verbose: false, mediator: new Mediator(), profileAuthManager: profileAuthManager as any };
+    context = {
+      verbose: false,
+      profileAuthManager: profileAuthManager as any,
+      getGeminiClient: () => client,
+      listProfiles: () => [],
+    };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     originalEnv = {
       GEMITERM_CONFIG_DIR: process.env.GEMITERM_CONFIG_DIR,
@@ -37,7 +49,7 @@ describe("fetch command integration", () => {
     spyOn(configModule, "ensureConfigDir").mockImplementation(() => {});
 
     const mockMessages = createMockMessageHistory({ count: 4 });
-    mediatorSendSpy = spyOn(context.mediator, "send").mockResolvedValue({ messages: mockMessages });
+    client.fetchChat = mock(async () => mockMessages);
   });
 
   afterEach(() => {
@@ -71,21 +83,19 @@ describe("fetch command integration", () => {
       expect(output).toContain("Usage: gemiterm fetch");
     });
 
-    test("help does not send query to mediator", async () => {
+    test("help does not call the client", async () => {
       await command.execute(["--help"], context);
 
-      expect(mediatorSendSpy).not.toHaveBeenCalled();
+      expect(client.fetchChat).not.toHaveBeenCalled();
     });
   });
 
   describe("fetch with conversation id", () => {
-    test("sends fetch-chat query to mediator with correct id", async () => {
+    test("fetches the conversation with the correct id", async () => {
       await command.execute(["conv-abc123"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.type).toBe(QUERY_TYPES.FETCH_CHAT);
-      expect(sentQuery.payload.conversationId).toBe("conv-abc123");
+      expect(client.fetchChat).toHaveBeenCalledTimes(1);
+      expect(client.fetchChat).toHaveBeenCalledWith("conv-abc123");
     });
 
     test("returns formatted text output by default", async () => {
@@ -103,7 +113,7 @@ describe("fetch command integration", () => {
         count: 2,
         contents: ["Hello!", "Hi there!"],
       });
-      mediatorSendSpy.mockResolvedValue({ messages: mockMessages });
+      client.fetchChat = mock(async () => mockMessages);
 
       await command.execute(["conv-xyz"], context);
 
@@ -113,7 +123,7 @@ describe("fetch command integration", () => {
     });
 
     test("shows 'No messages found' when conversation has no messages", async () => {
-      mediatorSendSpy.mockResolvedValue({ messages: [] });
+      client.fetchChat = mock(async () => []);
 
       await command.execute(["conv-empty"], context);
 
@@ -125,7 +135,7 @@ describe("fetch command integration", () => {
   describe("--format json option", () => {
     test("outputs valid JSON when --format json", async () => {
       const mockMessages = createMockMessageHistory({ count: 2 });
-      mediatorSendSpy.mockResolvedValue({ messages: mockMessages });
+      client.fetchChat = mock(async () => mockMessages);
 
       await command.execute(["conv-abc123", "--format", "json"], context);
 
@@ -138,7 +148,7 @@ describe("fetch command integration", () => {
 
     test("-f json also outputs valid JSON", async () => {
       const mockMessages = createMockMessageHistory({ count: 3 });
-      mediatorSendSpy.mockResolvedValue({ messages: mockMessages });
+      client.fetchChat = mock(async () => mockMessages);
 
       await command.execute(["conv-abc123", "-f", "json"], context);
 
@@ -153,7 +163,7 @@ describe("fetch command integration", () => {
         roles: ["user", "model"],
         contents: ["What is TypeScript?", "TypeScript is a typed superset of JavaScript."],
       });
-      mediatorSendSpy.mockResolvedValue({ messages: mockMessages });
+      client.fetchChat = mock(async () => mockMessages);
 
       await command.execute(["conv-abc123", "--format", "json"], context);
 
@@ -213,48 +223,39 @@ describe("fetch command integration", () => {
   });
 
   describe("no conversation id", () => {
-    test("does not send fetch-chat query when no id is provided", async () => {
-      const mockListExecute = mock(() => Promise.resolve());
-      const mockListHandler = { name: "list", description: "", execute: mockListExecute };
-      const mockRegistry = {
-        registerAllCommands: mock(() => {}),
-        getHandler: mock(() => mockListHandler),
-      };
+    test("does not fetch when no id is provided", async () => {
       spyOn(command as any, "invokeListCommand").mockImplementation(() => {});
 
       await command.execute([], context);
 
-      expect(mediatorSendSpy).not.toHaveBeenCalled();
+      expect(client.fetchChat).not.toHaveBeenCalled();
       expect((command as any).invokeListCommand).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("error handling", () => {
-    test("propagates mediator errors", async () => {
-      mediatorSendSpy.mockRejectedValue(new Error("Conversation not found"));
+    test("propagates client errors", async () => {
+      client.fetchChat.mockRejectedValue(new Error("Conversation not found"));
 
       await expect(command.execute(["conv-invalid"], context)).rejects.toThrow("Conversation not found");
     });
 
     test("propagates network errors", async () => {
-      mediatorSendSpy.mockRejectedValue(new Error("Network error"));
+      client.fetchChat.mockRejectedValue(new Error("Network error"));
 
       await expect(command.execute(["conv-abc123"], context)).rejects.toThrow("Network error");
     });
   });
 
   describe("multi-profile routing", () => {
-    test("auto-discovers owning profile and forwards profileName when multiple profiles are active", async () => {
+    test("auto-discovers owning profile and forwards it to forProfile", async () => {
       (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
       (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
 
       await command.execute(["conv-evs"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.type).toBe(QUERY_TYPES.FETCH_CHAT);
-      expect(sentQuery.payload.conversationId).toBe("conv-evs");
-      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+      expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
+      expect(client.fetchChat).toHaveBeenCalledWith("conv-evs");
       expect((context.profileAuthManager as any).findProfileForConversation).toHaveBeenCalledWith("conv-evs");
     });
 
@@ -264,8 +265,7 @@ describe("fetch command integration", () => {
 
       await command.execute(["conv-x", "--profile", "evs-diegohb"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+      expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
       expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
     });
 
@@ -274,18 +274,17 @@ describe("fetch command integration", () => {
 
       await command.execute(["conv-x", "-p", "evs-diegohb"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.profileName).toBe("evs-diegohb");
+      expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
     });
 
-    test("omits profileName from payload when only one profile is active", async () => {
+    test("omits forProfile when only one profile is active", async () => {
       (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["default"]);
       (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue(null);
 
       await command.execute(["conv-1"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.profileName).toBeUndefined();
+      expect(client.fetchChat).toHaveBeenCalledWith("conv-1");
+      expect(client.forProfile).not.toHaveBeenCalled();
       expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
     });
 

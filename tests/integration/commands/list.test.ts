@@ -1,22 +1,35 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { ListCommand } from "../../../src/cli/commands/list-command.ts";
-import { Mediator } from "../../../src/core/mediator.ts";
-import { QUERY_TYPES, type ListChatsQueryPayload, type ListChatsQueryResult } from "../../../src/core/query-handlers.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
+import type { ChatInfo } from "../../../src/core/types.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import { createMockChatList } from "../../fixtures/chat-fixtures.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
 
+function makeClient() {
+  const client: any = {
+    listChats: mock(async (_opts?: any): Promise<ChatInfo[]> => []),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
+
 describe("list command integration", () => {
   let command: ListCommand;
   let context: CliCommandContext;
+  let client: ReturnType<typeof makeClient>;
   let logSpy: ReturnType<typeof spyOn>;
   let originalEnv: Record<string, string | undefined>;
-  let mediatorSendSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new ListCommand();
-    context = { verbose: false, mediator: new Mediator() };
+    client = makeClient();
+    context = {
+      verbose: false,
+      profileAuthManager: {} as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
+    };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     originalEnv = {
       GEMITERM_CONFIG_DIR: process.env.GEMITERM_CONFIG_DIR,
@@ -26,7 +39,7 @@ describe("list command integration", () => {
     spyOn(configModule, "ensureConfigDir").mockImplementation(() => {});
 
     const mockChats = createMockChatList({ count: 5 });
-    mediatorSendSpy = spyOn(context.mediator, "send").mockResolvedValue({ chats: mockChats });
+    client.listChats = mock(async () => mockChats);
   });
 
   afterEach(() => {
@@ -60,20 +73,18 @@ describe("list command integration", () => {
       expect(output).toContain("Usage: gemiterm list");
     });
 
-    test("help does not send query to mediator", async () => {
+    test("help does not call the client", async () => {
       await command.execute(["--help"], context);
 
-      expect(mediatorSendSpy).not.toHaveBeenCalled();
+      expect(client.listChats).not.toHaveBeenCalled();
     });
   });
 
   describe("list with mock data", () => {
-    test("sends list-chats query to mediator", async () => {
+    test("calls listChats once", async () => {
       await command.execute([], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.type).toBe(QUERY_TYPES.LIST_CHATS);
+      expect(client.listChats).toHaveBeenCalledTimes(1);
     });
 
     test("returns formatted table output by default", async () => {
@@ -88,7 +99,7 @@ describe("list command integration", () => {
 
     test("displays chat IDs in output", async () => {
       const mockChats = createMockChatList({ count: 3 });
-      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+      client.listChats = mock(async () => mockChats);
 
       await command.execute([], context);
 
@@ -99,7 +110,7 @@ describe("list command integration", () => {
     });
 
     test("displays empty message when no chats", async () => {
-      mediatorSendSpy.mockResolvedValue({ chats: [] });
+      client.listChats = mock(async () => []);
 
       await command.execute([], context);
 
@@ -109,23 +120,23 @@ describe("list command integration", () => {
   });
 
   describe("--limit option", () => {
-    test("--limit 2 passes limit to mediator query", async () => {
+    test("--limit 2 passes limit to listChats", async () => {
       await command.execute(["--limit", "2"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.limit).toBe(2);
+      const opts = client.listChats.mock.calls[0][0] as any;
+      expect(opts.limit).toBe(2);
     });
 
-    test("-n 5 passes limit to mediator query", async () => {
+    test("-n 5 passes limit to listChats", async () => {
       await command.execute(["-n", "5"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.limit).toBe(5);
+      const opts = client.listChats.mock.calls[0][0] as any;
+      expect(opts.limit).toBe(5);
     });
 
     test("limits output to specified number of results", async () => {
       const mockChats = createMockChatList({ count: 10 });
-      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+      client.listChats = mock(async () => mockChats);
 
       await command.execute(["--limit", "3"], context);
 
@@ -139,7 +150,7 @@ describe("list command integration", () => {
   describe("--format json option", () => {
     test("outputs valid JSON when --format json", async () => {
       const mockChats = createMockChatList({ count: 3 });
-      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+      client.listChats = mock(async () => mockChats);
 
       await command.execute(["--format", "json"], context);
 
@@ -151,7 +162,7 @@ describe("list command integration", () => {
 
     test("-f json also outputs valid JSON", async () => {
       const mockChats = createMockChatList({ count: 2 });
-      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+      client.listChats = mock(async () => mockChats);
 
       await command.execute(["-f", "json"], context);
 
@@ -162,7 +173,7 @@ describe("list command integration", () => {
 
     test("JSON output contains chat ids and titles", async () => {
       const mockChats = createMockChatList({ count: 2, ids: ["id-one", "id-two"], titles: ["First", "Second"] });
-      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+      client.listChats = mock(async () => mockChats);
 
       await command.execute(["--format", "json"], context);
 
@@ -174,34 +185,34 @@ describe("list command integration", () => {
   });
 
   describe("--search option", () => {
-    test("--search passes search term to mediator query", async () => {
+    test("--search passes search term to listChats", async () => {
       await command.execute(["--search", "TypeScript"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.search).toBe("TypeScript");
+      const opts = client.listChats.mock.calls[0][0] as any;
+      expect(opts.search).toBe("TypeScript");
     });
 
-    test("-s passes search term to mediator query", async () => {
+    test("-s passes search term to listChats", async () => {
       await command.execute(["-s", "Bun"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.search).toBe("Bun");
+      const opts = client.listChats.mock.calls[0][0] as any;
+      expect(opts.search).toBe("Bun");
     });
   });
 
   describe("default limit behaviour", () => {
-    test("omitting --limit sends query without limit", async () => {
+    test("omitting --limit calls listChats without limit", async () => {
       await command.execute([], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.limit).toBeUndefined();
+      const opts = client.listChats.mock.calls[0][0] as any;
+      expect(opts.limit).toBeUndefined();
     });
 
-    test("--limit N sends N as limit", async () => {
+    test("--limit N passes N as limit", async () => {
       await command.execute(["--limit", "7"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.limit).toBe(7);
+      const opts = client.listChats.mock.calls[0][0] as any;
+      expect(opts.limit).toBe(7);
     });
   });
 
@@ -216,23 +227,26 @@ describe("list command integration", () => {
     test("--sort oldest is accepted", async () => {
       await command.execute(["--sort", "oldest"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+      expect(client.listChats).toHaveBeenCalledTimes(1);
     });
 
     test("--sort alpha is accepted", async () => {
       await command.execute(["--sort", "alpha"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+      expect(client.listChats).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("--all-profiles flag", () => {
     test("renders Profile column when --all-profiles is set", async () => {
-      const mockChats = [
-        { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
-        { id: "conv-2", title: "Chat 2", isPinned: false, timestamp: Date.now(), profile: "personal" },
-      ];
-      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+      const profileChats: Record<string, ChatInfo[]> = {
+        work: [{ id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" }],
+        personal: [{ id: "conv-2", title: "Chat 2", isPinned: false, timestamp: Date.now(), profile: "personal" }],
+      };
+      context.listProfiles = () => Object.keys(profileChats);
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => profileChats[name] ?? []),
+      }));
 
       await command.execute(["--all-profiles"], context);
 
@@ -246,7 +260,7 @@ describe("list command integration", () => {
       const mockChats = [
         { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
       ];
-      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+      client.listChats = mock(async () => mockChats);
 
       await command.execute([], context);
 
@@ -258,7 +272,10 @@ describe("list command integration", () => {
       const mockChatsWithProfile = [
         { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
       ];
-      mediatorSendSpy.mockResolvedValue({ chats: mockChatsWithProfile });
+      context.listProfiles = () => ["work"];
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => (name === "work" ? mockChatsWithProfile : [])),
+      }));
 
       await command.execute(["--all-profiles", "--format", "json"], context);
       const outputWithFlag = logSpy.mock.calls.map((c) => c[0]).join("\n");
@@ -270,7 +287,7 @@ describe("list command integration", () => {
         { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now() },
       ];
       logSpy.mockClear();
-      mediatorSendSpy.mockResolvedValue({ chats: mockChatsWithoutProfile });
+      client.listChats = mock(async () => mockChatsWithoutProfile);
       await command.execute(["--format", "json"], context);
       const outputWithoutFlag = logSpy.mock.calls.map((c) => c[0]).join("\n");
       const parsedWithoutFlag = JSON.parse(outputWithoutFlag);
@@ -287,32 +304,29 @@ describe("list command integration", () => {
       expect(output).toContain("-p");
     });
 
-    test("--profile work sends profile in query payload", async () => {
+    test("--profile work routes to forProfile", async () => {
       await command.execute(["--profile", "work"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.profile).toBe("work");
+      expect(client.forProfile).toHaveBeenCalledWith("work");
     });
 
-    test("-p short flag sends profile in query payload", async () => {
+    test("-p short flag routes to forProfile", async () => {
       await command.execute(["-p", "personal"], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.profile).toBe("personal");
+      expect(client.forProfile).toHaveBeenCalledWith("personal");
     });
 
-    test("without --profile, payload.profile is undefined", async () => {
+    test("without --profile, forProfile is not called", async () => {
       await command.execute([], context);
 
-      const sentQuery = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentQuery.payload.profile).toBeUndefined();
+      expect(client.forProfile).not.toHaveBeenCalled();
     });
 
     test("--profile renders Profile column in text output", async () => {
       const mockChats = [
         { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
       ];
-      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+      client.listChats = mock(async () => mockChats);
 
       await command.execute(["--profile", "work"], context);
 
@@ -325,7 +339,7 @@ describe("list command integration", () => {
       const mockChats = [
         { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
       ];
-      mediatorSendSpy.mockResolvedValue({ chats: mockChats });
+      client.listChats = mock(async () => mockChats);
 
       await command.execute(["--profile", "work", "--format", "json"], context);
 
@@ -337,8 +351,8 @@ describe("list command integration", () => {
   });
 
   describe("error handling", () => {
-    test("propagates mediator errors", async () => {
-      mediatorSendSpy.mockRejectedValue(new Error("Network error"));
+    test("propagates client errors", async () => {
+      client.listChats.mockRejectedValue(new Error("Network error"));
 
       await expect(command.execute([], context)).rejects.toThrow("Network error");
     });

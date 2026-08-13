@@ -3,23 +3,26 @@ import type { Logger } from "../infrastructure/logger.ts";
 import type { ProfileManager } from "../infrastructure/storage.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import type { LoadedCookies } from "./cookie-storage-service.ts";
-import type { IGeminiClientService } from "../core/command-handlers.ts";
 import { AuthenticationError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
+
+interface ProfileConversationLookup {
+  profileHasConversation(profileName: string, conversationId: string): Promise<boolean>;
+}
 
 export interface ProfileAuthManagerDeps {
   profileManager: ProfileManager;
   cookieStorageService: CookieStorageService;
   logger: Logger;
-  geminiClient: IGeminiClientService;
+  geminiClient: ProfileConversationLookup;
 }
 
 export class ProfileAuthManager {
   private readonly profileManager: ProfileManager;
   private readonly cookieStorageService: CookieStorageService;
   private readonly logger: Logger;
-  private readonly geminiClient: IGeminiClientService;
+  private readonly geminiClient: ProfileConversationLookup;
 
   constructor(deps: ProfileAuthManagerDeps) {
     this.profileManager = deps.profileManager;

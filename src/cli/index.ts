@@ -2,7 +2,6 @@
 
 import { CommandRegistry } from "./command-registry.ts";
 import { Logger } from "../infrastructure/logger.ts";
-import { Mediator } from "../core/mediator.ts";
 import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import { CookieStorageService } from "../services/cookie-storage-service.ts";
 import { ProfileAuthManager } from "../services/profile-auth-manager.ts";
@@ -11,46 +10,21 @@ import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts
 import { getPackageJson } from "../infrastructure/path-utils.ts";
 import { parseGlobalArgs, printVersion, printHelp } from "../infrastructure/cli-parser.ts";
 import { AuthenticationError } from "../core/errors.ts";
-import {
-  AuthenticateCommandHandler,
-  DeleteProfileCommandHandler,
-  RenameProfileCommandHandler,
-  SetDefaultProfileCommandHandler,
-  DeleteConversationCommandHandler,
-  SendMessageCommandHandler,
-  StartNewChatCommandHandler,
-} from "../core/command-handlers.ts";
-import {
-  ListChatsQueryHandler,
-  FetchChatQueryHandler,
-  GetProfileStatusesQueryHandler,
-  GetAuthStatusQueryHandler,
-  ListModelsQueryHandler,
-} from "../core/query-handlers.ts";
 
 const pkg = getPackageJson(import.meta.url);
 
-async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
-  const logger = new Logger("mediator");
+interface CliServices {
+  profileAuthManager: ProfileAuthManager;
+  getGeminiClient: () => GeminiClientService;
+  listProfiles: () => string[];
+}
+
+async function setupServices(): Promise<CliServices> {
+  const logger = new Logger("cli");
   const cookieStorage = new CookieStorage();
   const profileManager = new ProfileManager(cookieStorage);
-
-  const profileQueryService = {
-    async getProfileStatuses() {
-      return profileManager.getAllStatuses();
-    },
-    async getAuthStatus() {
-      const profiles = listProfiles();
-      if (profiles.length === 0) {
-        return { authenticated: false, profileName: null };
-      }
-      const defaultName = getDefaultProfileName();
-      const isValid = profileManager.hasValidCookies(defaultName);
-      return { authenticated: isValid, profileName: defaultName };
-    },
-  };
-
   const cookieStorageService = new CookieStorageService({ cookieStorage, logger });
+
   let geminiClient: GeminiClientService | null = null;
 
   function getGeminiClient(): GeminiClientService {
@@ -78,51 +52,7 @@ async function setupMediator(mediator: Mediator): Promise<ProfileAuthManager> {
   try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
   const profileAuthManager = new ProfileAuthManager({ profileManager, cookieStorageService, logger, geminiClient: factoryClient });
 
-  mediator.registerQueryHandler(new GetAuthStatusQueryHandler(profileQueryService));
-  mediator.registerQueryHandler(new GetProfileStatusesQueryHandler(profileQueryService));
-  mediator.registerQueryHandler(new ListChatsQueryHandler(getGeminiClient, listProfiles));
-  mediator.registerQueryHandler(new FetchChatQueryHandler({
-    async listChats(options) { return getGeminiClient().listChats(options); },
-    async fetchChat(id) { return getGeminiClient().fetchChat(id); },
-    async listModels() { return getGeminiClient().listModels(); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-  }));
-  mediator.registerQueryHandler(new ListModelsQueryHandler({
-    async listChats(options) { return getGeminiClient().listChats(options); },
-    async fetchChat(id) { return getGeminiClient().fetchChat(id); },
-    async listModels() { return getGeminiClient().listModels(); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-  }));
-  mediator.registerCommandHandler(new AuthenticateCommandHandler(null as any));
-  mediator.registerCommandHandler(new DeleteProfileCommandHandler(null as any));
-  mediator.registerCommandHandler(new RenameProfileCommandHandler(null as any));
-  mediator.registerCommandHandler(new SetDefaultProfileCommandHandler(null as any));
-  mediator.registerCommandHandler(new DeleteConversationCommandHandler({
-    async deleteChat(id) { return getGeminiClient().deleteChat(id); },
-    async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
-    async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
-    async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-    async listChats(options) { return getGeminiClient().listChats(options); },
-  }));
-  mediator.registerCommandHandler(new SendMessageCommandHandler({
-    async deleteChat(id) { return getGeminiClient().deleteChat(id); },
-    async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
-    async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
-    async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-    async listChats(options) { return getGeminiClient().listChats(options); },
-  }));
-  mediator.registerCommandHandler(new StartNewChatCommandHandler({
-    async deleteChat(id) { return getGeminiClient().deleteChat(id); },
-    async sendMessage(id, msg) { return getGeminiClient().sendMessage(id, msg); },
-    async startNewChat(msg) { return getGeminiClient().startNewChat(msg); },
-    async profileHasConversation(name, id) { return getGeminiClient().profileHasConversation(name, id); },
-    forProfile(name) { return getGeminiClient().forProfile(name); },
-    async listChats(options) { return getGeminiClient().listChats(options); },
-  }));
-
-  return profileAuthManager;
+  return { profileAuthManager, getGeminiClient, listProfiles };
 }
 
 async function main(): Promise<void> {
@@ -158,8 +88,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const mediator = new Mediator();
-  const profileAuthManager = await setupMediator(mediator);
+  const services = await setupServices();
 
   const handler = registry.getHandler(subcommand);
   if (!handler) {
@@ -175,7 +104,12 @@ async function main(): Promise<void> {
   }
 
   try {
-    await handler.execute(subcommandArgs, { verbose, mediator, profileAuthManager });
+    await handler.execute(subcommandArgs, {
+      verbose,
+      profileAuthManager: services.profileAuthManager,
+      getGeminiClient: services.getGeminiClient,
+      listProfiles: services.listProfiles,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Command '${subcommand}' failed: ${message}`);

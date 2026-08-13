@@ -1,13 +1,8 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import {
-  COMMAND_TYPES,
-  type SendMessageCommandPayload,
-  type SendMessageCommandResult,
-} from "../../core/command-handlers.ts";
-import { QUERY_TYPES, type FetchChatQueryResult } from "../../core/query-handlers.ts";
+import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
+import { fetchChatForRequest } from "../utils/gemini-queries.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 import { checkArgLength } from "../utils/long-arg-guard.ts";
 import { loadPromptFromFile, spillOverToTempFile } from "../utils/prompt-file.ts";
@@ -114,66 +109,54 @@ export class ContinueCommand implements CliCommand {
       }
     }
 
-    const mediator: Mediator = context.mediator;
-
     if (message) {
-      await this.sendNonInteractive(mediator, conversationId, message, logger, context, profileName);
+      await this.sendNonInteractive(context.getGeminiClient, conversationId, message, logger, profileName);
     } else {
-      await this.startInteractive(mediator, conversationId, logger, context, profileName);
+      await this.startInteractive(context.getGeminiClient, conversationId, logger, profileName);
     }
   }
 
   private async sendNonInteractive(
-    mediator: Mediator,
+    getGeminiClient: () => GeminiClientService,
     conversationId: string,
     message: string,
     logger: Logger,
-    _context: CliCommandContext,
     profileName: string | null,
   ): Promise<void> {
     logger.debug(`Sending message to ${conversationId}`);
-    const result = await mediator.send<SendMessageCommandResult>({
-      type: COMMAND_TYPES.SEND_MESSAGE,
-      payload: { conversationId, message, profileName: profileName ?? undefined },
-    } as Command<SendMessageCommandPayload>);
+    const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
+    const response = await client.sendMessage(conversationId, message);
 
     console.log(chalk.blue.bold("Model:"));
-    console.log(result.response);
+    console.log(response);
   }
 
   private async startInteractive(
-    mediator: Mediator,
+    getGeminiClient: () => GeminiClientService,
     conversationId: string,
     logger: Logger,
-    _context: CliCommandContext,
     profileName: string | null,
   ): Promise<void> {
-    await this.printLastMessage(mediator, conversationId, profileName);
+    await this.printLastMessage(getGeminiClient, conversationId, profileName);
 
     const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
       logger.debug(`Sending message to ${conversationId}`);
-      const result = await mediator.send<SendMessageCommandResult>({
-        type: COMMAND_TYPES.SEND_MESSAGE,
-        payload: { conversationId, message, profileName: profileName ?? undefined },
-      } as Command<SendMessageCommandPayload>);
+      const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
+      const response = await client.sendMessage(conversationId, message);
 
-      return { response: result.response };
+      return { response };
     };
 
     await runInteractiveLoop(messageHandler, { profileName });
   }
 
   private async printLastMessage(
-    mediator: Mediator,
+    getGeminiClient: () => GeminiClientService,
     conversationId: string,
     profileName: string | null,
   ): Promise<void> {
-    const chatResult = await mediator.send<FetchChatQueryResult>({
-      type: QUERY_TYPES.FETCH_CHAT,
-      payload: { conversationId, profileName: profileName ?? undefined },
-    });
+    const messages = await fetchChatForRequest(getGeminiClient, conversationId, profileName ?? undefined);
 
-    const messages = chatResult.messages ?? [];
     const lastModelMessage = [...messages].reverse().find((m) => m.role === "model");
     if (lastModelMessage) {
       console.log(chalk.blue.bold("Last response:"));

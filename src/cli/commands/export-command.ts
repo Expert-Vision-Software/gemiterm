@@ -1,12 +1,7 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import {
-  QUERY_TYPES,
-  type FetchChatQueryPayload,
-  type FetchChatQueryResult,
-} from "../../core/query-handlers.ts";
+import { fetchChatForRequest } from "../utils/gemini-queries.ts";
 import {
   formatChatAsMarkdown,
   formatChatAsJson,
@@ -59,28 +54,18 @@ export class ExportCommand implements CliCommand {
       process.exit(1);
     }
 
-    const mediator: Mediator = context.mediator;
-
     try {
       const profileName = await resolveProfile(context, conversationId, options.profile || undefined);
-      const query: FetchChatQueryPayload = {
-        conversationId,
-        profileName: profileName ?? undefined,
-      };
 
-      logger.debug(`Sending fetch-chat query for export: ${JSON.stringify(query)}`);
-
-      const result = await mediator.send<FetchChatQueryResult>({
-        type: QUERY_TYPES.FETCH_CHAT,
-        payload: query,
-      } as Query<FetchChatQueryPayload>);
+      logger.debug(`Fetching chat for export: ${conversationId}`);
+      const messages = await fetchChatForRequest(context.getGeminiClient, conversationId, profileName ?? undefined);
 
       const outputPath = options.out || this.defaultFilename(conversationId, options.format);
 
       const content =
         options.format === "json"
-          ? formatChatAsJson(result.messages, conversationId)
-          : formatChatAsMarkdown(result.messages, conversationId, conversationId, options.includeMetadata);
+          ? formatChatAsJson(messages, conversationId)
+          : formatChatAsMarkdown(messages, conversationId, conversationId, options.includeMetadata);
 
       writeTextFile(outputPath, content);
       console.log(chalk.green(`Exported conversation '${chalk.cyan(conversationId)}' to: ${outputPath}`));

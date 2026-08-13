@@ -1,12 +1,7 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import {
-  QUERY_TYPES,
-  type FetchChatQueryPayload,
-  type FetchChatQueryResult,
-} from "../../core/query-handlers.ts";
+import { fetchChatForRequest } from "../utils/gemini-queries.ts";
 import type { Message } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
@@ -47,22 +42,13 @@ export class FetchCommand implements CliCommand {
 
     const profileName = await resolveProfile(context, conversationId, options.profile || undefined);
 
-    const mediator: Mediator = context.mediator;
-    const query: FetchChatQueryPayload = {
-      conversationId,
-      profileName: profileName ?? undefined,
-    };
-
-    logger.debug(`Sending fetch-chat query: ${JSON.stringify(query)}`);
-    const result = await mediator.send<FetchChatQueryResult>({
-      type: QUERY_TYPES.FETCH_CHAT,
-      payload: query,
-    } as Query<FetchChatQueryPayload>);
+    logger.debug(`Fetching chat: ${conversationId}`);
+    const messages = await fetchChatForRequest(context.getGeminiClient, conversationId, profileName ?? undefined);
 
     if (options.format === "json") {
-      this.outputJson(result.messages, conversationId, options.out);
+      this.outputJson(messages, conversationId, options.out);
     } else {
-      this.outputText(result.messages, conversationId, options.out);
+      this.outputText(messages, conversationId, options.out);
     }
   }
 

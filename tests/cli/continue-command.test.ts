@@ -1,27 +1,40 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { ContinueCommand } from "../../src/cli/commands/continue-command.ts";
-import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
-import { COMMAND_TYPES } from "../../src/core/command-handlers.ts";
-import { QUERY_TYPES } from "../../src/core/query-handlers.ts";
+import type { ChatInfo, Message } from "../../src/core/types.ts";
+
+function makeClient() {
+  const client: any = {
+    listChats: mock(async (_opts?: any): Promise<ChatInfo[]> => []),
+    fetchChat: mock(async (_id: string): Promise<Message[]> => []),
+    deleteChat: mock(async (_id: string): Promise<void> => {}),
+    sendMessage: mock(async (_id: string, _msg: string): Promise<string> => ""),
+    startNewChat: mock(async (_msg: string): Promise<{ response: string; conversationId: string }> => ({ response: "", conversationId: "" })),
+    listModels: mock(async (): Promise<string[]> => []),
+    profileHasConversation: mock(async (_name: string, _id: string): Promise<boolean> => false),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
 
 describe("ContinueCommand", () => {
   let command: ContinueCommand;
-  let mediator: Mediator;
+  let client: any;
   let context: CliCommandContext;
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new ContinueCommand();
-    mediator = new Mediator();
+    client = makeClient();
     context = {
       verbose: false,
-      mediator,
       profileAuthManager: {
         getActiveProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => null),
         ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       } as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
   });
@@ -51,46 +64,26 @@ describe("ContinueCommand", () => {
   });
 
   test("sends message in non-interactive mode with conversation_id and message", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.SEND_MESSAGE,
-      handle: mock(async () => ({ response: "Hello from Gemini!" })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
+    client.sendMessage = mock(async () => "Hello from Gemini!");
 
     await command.execute(["conv123", "Hello there"], context);
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("Model:");
     expect(output).toContain("Hello from Gemini!");
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: COMMAND_TYPES.SEND_MESSAGE,
-        payload: expect.objectContaining({
-          conversationId: "conv123",
-          message: "Hello there",
-        }),
-      }),
-    );
+    expect(client.sendMessage).toHaveBeenCalledWith("conv123", "Hello there");
   });
 
   test("sends correct command type via mediator", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.SEND_MESSAGE,
-      handle: mock(async () => ({ response: "ok" })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
+    client.sendMessage = mock(async () => "ok");
 
     await command.execute(["conv-id", "test message"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
   });
 
   test("invokes list command when no conversation_id provided", async () => {
-    const mockListHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [] })),
-    };
-    mediator.registerQueryHandler(mockListHandler as any);
+    client.listChats = mock(async () => []);
 
     await command.execute([], context);
 
@@ -99,68 +92,41 @@ describe("ContinueCommand", () => {
   });
 
   test("printLastMessage outputs last model message content", async () => {
-    const mockFetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({
-        messages: [
-          { role: "user" as const, content: "Hello" },
-          { role: "model" as const, content: "Hi there! How can I help?" },
-        ],
-      })),
-    };
-    mediator.registerQueryHandler(mockFetchHandler as any);
+    client.fetchChat = mock(async () => [
+      { role: "user" as const, content: "Hello" },
+      { role: "model" as const, content: "Hi there! How can I help?" },
+    ]);
 
-    await command.printLastMessage(mediator, "conv123", null);
+    await command.printLastMessage(() => client, "conv123", null);
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("Last response:");
     expect(output).toContain("Hi there! How can I help?");
+    expect(client.fetchChat).toHaveBeenCalledWith("conv123");
   });
 
   test("--profile forwards the resolved profile into SEND_MESSAGE payload", async () => {
     (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["default"]);
 
-    const mockHandler = {
-      commandType: COMMAND_TYPES.SEND_MESSAGE,
-      handle: mock(async () => ({ response: "ok" })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
+    client.sendMessage = mock(async () => "ok");
 
     await command.execute(["conv123", "hi", "--profile", "default"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          conversationId: "conv123",
-          profileName: "default",
-        }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("default");
+    expect(client.sendMessage).toHaveBeenCalledWith("conv123", "hi");
   });
 
   test("interactive mode forwards resolved profileName into FETCH_CHAT (printLastMessage)", async () => {
     (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["evs-diegohb"]);
 
-    const mockFetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({
-        messages: [
-          { role: "user" as const, content: "old q" },
-          { role: "model" as const, content: "old a" },
-        ],
-      })),
-    };
-    mediator.registerQueryHandler(mockFetchHandler as any);
+    client.fetchChat = mock(async () => [
+      { role: "user" as const, content: "old q" },
+      { role: "model" as const, content: "old a" },
+    ]);
 
-    await command.printLastMessage(mediator, "conv-evs", "evs-diegohb");
+    await command.printLastMessage(() => client, "conv-evs", "evs-diegohb");
 
-    expect(mockFetchHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          conversationId: "conv-evs",
-          profileName: "evs-diegohb",
-        }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
+    expect(client.fetchChat).toHaveBeenCalledWith("conv-evs");
   });
 });

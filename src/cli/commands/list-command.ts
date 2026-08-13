@@ -1,12 +1,7 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import {
-  QUERY_TYPES,
-  type ListChatsQueryPayload,
-  type ListChatsQueryResult,
-} from "../../core/query-handlers.ts";
+import { listChatsForRequest } from "../utils/gemini-queries.ts";
 import { formatChatList } from "../../infrastructure/formatters.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
@@ -56,9 +51,8 @@ export class ListCommand implements CliCommand {
       return;
     }
 
-    const mediator: Mediator = context.mediator;
     const hasLimit = options.limit > 0;
-    const query: ListChatsQueryPayload = {
+    const request = {
       limit: hasLimit ? options.limit : undefined,
       offset: options.offset || undefined,
       search: options.search || undefined,
@@ -66,13 +60,8 @@ export class ListCommand implements CliCommand {
       profile: options.profile || undefined,
     };
 
-    logger.debug(`Sending list-chats query: ${JSON.stringify(query)}`);
-    const result = await mediator.send<ListChatsQueryResult>({
-      type: QUERY_TYPES.LIST_CHATS,
-      payload: query,
-    } as Query<ListChatsQueryPayload>);
-
-    let chats = result.chats;
+    logger.debug(`Listing chats: ${JSON.stringify(request)}`);
+    let chats = await listChatsForRequest(context.getGeminiClient, context.listProfiles, request);
 
     if (options.interactive) {
       await this.runInteractiveBrowser(chats, options, context);

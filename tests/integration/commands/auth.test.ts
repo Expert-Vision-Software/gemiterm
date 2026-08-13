@@ -1,6 +1,5 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { AuthCommand } from "../../../src/cli/commands/auth-command.ts";
-import { Mediator } from "../../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import { createMockCookies, mockProfileDir } from "../../fixtures/auth-fixtures.ts";
@@ -14,7 +13,7 @@ describe("auth command integration", () => {
 
   beforeEach(() => {
     command = new AuthCommand();
-    context = { verbose: false, mediator: new Mediator() };
+    context = { verbose: false } as unknown as CliCommandContext;
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     originalEnv = {
       GEMITERM_CONFIG_DIR: process.env.GEMITERM_CONFIG_DIR,

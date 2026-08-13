@@ -9,7 +9,6 @@ function makeContext(
 ): CliCommandContext {
   return {
     verbose: false,
-    mediator: undefined as any,
     profileAuthManager: {
       getActiveProfiles: mock(() => activeProfiles),
       findProfileForConversation: mock(findProfileForConversation),
