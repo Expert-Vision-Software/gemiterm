@@ -75,13 +75,13 @@ async function setupServices(): Promise<CliServices> {
   const exportStrategies = {
     single: new SingleExport({
       fetchChat: (id, profile) => fetchChatForRequest(getGeminiClient, id, profile),
-      logger: new Logger("export-strategy"),
+      logger: new Logger("export-command"),
     }),
     batch: new BatchExport({
       fetchChat: (id, profile) => fetchChatForRequest(getGeminiClient, id, profile),
       listChatsForProfile: (name, options) => getGeminiClient().forProfile(name).listChats(options),
       listProfiles,
-      logger: new Logger("export-strategy"),
+      logger: new Logger("export-all-command"),
     }),
   };
 
