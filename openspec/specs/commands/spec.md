@@ -308,7 +308,7 @@ The system MUST provide an `export-all` command implemented by `ExportAllCommand
 
 ### Requirement: AuthCommand
 
-The system MUST provide an `auth` command implemented by `AuthCommand` in `src/cli/commands/auth-command.ts`. The command MUST be registered under the name `auth` (NOT `login`) and MUST take no positional arguments. The command MUST delegate the actual browser-driven authentication to `AuthService.authenticate(profileName)`. When zero profiles exist, the command MUST create the default profile and authenticate against it. When exactly one profile exists, the command MUST authenticate against that profile directly. When more than one profile exists, the command MUST display a profile management menu using `formatProfileTable` and the options `[A] Add new profile`, `[D] Delete profile`, `[S] Set default`, `[R] Rename profile`, `[X] Exit and continue with current default`. The `A` and `R` options MUST trigger authentication against the resulting profile; `D`, `S`, and `X` MUST NOT trigger authentication. The `D` option MUST require a `[y/N]` confirmation before deletion. The `S` option MUST call both `ProfileManager.setDefault` and `setDefaultProfileName`. Profile names MUST be validated via `validateProfileName`.
+The system MUST provide an `auth` command implemented by `AuthCommand` in `src/cli/commands/auth-command.ts`. The command MUST be registered under the name `auth` (NOT `login`) and MUST take no positional arguments. The command MUST be a thin adapter: it MUST delegate all profile-lifecycle work to `context.profileLifecycle.manageProfiles(action, params)`, which forwards the actual browser-driven authentication to `AuthService.authenticate(profileName)`. The command MUST NOT construct `CookieStorage`, `ProfileManager`, `PlaywrightCliDriver`, `CookieMonitor`, or `AuthService` itself. When zero profiles exist, the command MUST create the default profile and authenticate against it. When exactly one profile exists, the command MUST authenticate against that profile directly. When more than one profile exists, the command MUST display a profile management menu using `formatProfileTable` and the options `[A] Add new profile`, `[D] Delete profile`, `[S] Set default`, `[R] Rename profile`, `[X] Exit and continue with current default`. The `A` and `R` options MUST trigger authentication against the resulting profile; `D`, `S`, and `X` MUST NOT trigger authentication. The `D` option MUST require a `[y/N]` confirmation before deletion. The `S` option MUST set the default profile through the module (which calls both `ProfileManager.setDefault` and `setDefaultProfileName`). Profile names MUST be validated via `validateProfileName`. All menu text, prompts, and error messages MUST be byte-equivalent to the pre-change baseline.
 
 #### Scenario: Auth with no profiles creates and authenticates the default profile
 - **WHEN** the user runs `gemiterm auth` and no profiles exist
@@ -349,6 +349,10 @@ The system MUST provide an `auth` command implemented by `AuthCommand` in `src/c
 #### Scenario: Auth --help shows usage
 - **WHEN** the user runs `gemiterm auth --help`
 - **THEN** the output contains `Usage: gemiterm auth` and documents `-h, --help`
+
+#### Scenario: Auth delegates through the context
+- **WHEN** `AuthCommand.execute` runs
+- **THEN** every profile-lifecycle operation is dispatched via `context.profileLifecycle.manageProfiles(...)` and the command file contains no inline service construction
 
 ### Requirement: ProfileCommand
 
@@ -396,7 +400,7 @@ The system MUST provide a `profile` command implemented by `ProfileCommand` in `
 
 ### Requirement: StatusCommand
 
-The system MUST provide a `status` command implemented by `StatusCommand` in `src/cli/commands/status-command.ts`. The command MUST take no arguments (other than `--help/-h`). The command MUST call `ensureConfigDir()`, MUST print a `Configuration` section containing `Directory: <configDir>` (the value from `getConfigDir()`), and MUST then print a `Profiles` section using `formatProfileTable`. When no profiles exist, the command MUST print `No profiles found. Run 'gemiterm login' to create one.` and MUST exit with code 2. When profiles exist, the command MUST additionally log a status line with the count of active profiles via `Logger.info`.
+The system MUST provide a `status` command implemented by `StatusCommand` in `src/cli/commands/status-command.ts`. The command MUST take no arguments (other than `--help/-h`) and MUST be a thin adapter that delegates to `context.profileLifecycle.manageProfiles("status", {})`. The command MUST NOT construct `CookieStorage` or `ProfileManager` itself. The module-backed action MUST call `ensureConfigDir()`, MUST print a `Configuration` section containing `Directory: <configDir>` (the value from `getConfigDir()`), and MUST then print a `Profiles` section using `formatProfileTable`. When no profiles exist, the command MUST print `No profiles found. Run 'gemiterm login' to create one.` and MUST exit with code 2. When profiles exist, the command MUST additionally log a status line with the count of active profiles via `Logger.info`.
 
 #### Scenario: Status with profiles shows the directory and the profile table
 - **WHEN** the user runs `gemiterm status` and at least one profile exists
@@ -409,6 +413,10 @@ The system MUST provide a `status` command implemented by `StatusCommand` in `sr
 #### Scenario: Status --help shows usage
 - **WHEN** the user runs `gemiterm status --help`
 - **THEN** the output contains `Usage: gemiterm status` and documents `-h, --help`
+
+#### Scenario: Status delegates through the context
+- **WHEN** `StatusCommand.execute` runs
+- **THEN** the profile-lifecycle work is dispatched via `context.profileLifecycle.manageProfiles("status", {})` and the command file contains no inline service construction
 
 ### Requirement: InstallBrowserCommand
 
@@ -424,7 +432,7 @@ The system MUST provide an `install-browser` command implemented by `InstallBrow
 
 ### Requirement: CommandRegistry
 
-The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all commands by name. The `CliCommandContext` interface MUST carry `{ verbose: boolean, profileAuthManager: ProfileAuthManager, getGeminiClient: () => GeminiClientService, listProfiles: () => string[] }` (no `mediator` field). The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
+The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all commands by name. The `CliCommandContext` interface MUST carry `{ verbose: boolean, profileAuthManager: ProfileAuthManager, profileLifecycle: ProfileLifecycle, getGeminiClient: () => GeminiClientService, listProfiles: () => string[] }` (no `mediator` field). The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
 
 #### Scenario: Registering the same name twice throws
 - **WHEN** `register("dup", handlerA)` is called and then `register("dup", handlerB)`
@@ -444,7 +452,7 @@ The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.t
 
 #### Scenario: Context carries services, not a mediator
 - **WHEN** a `CliCommandContext` is constructed for a command
-- **THEN** it exposes `verbose`, `profileAuthManager`, `getGeminiClient`, and `listProfiles`, and does NOT expose a `mediator` field
+- **THEN** it exposes `verbose`, `profileAuthManager`, `profileLifecycle`, `getGeminiClient`, and `listProfiles`, and does NOT expose a `mediator` field
 
 ### Requirement: Command Help Output
 
