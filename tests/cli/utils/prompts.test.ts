@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn, mock } from "bun:test";
 import {
   text,
   confirm,
@@ -11,6 +11,9 @@ import {
   CancellationError,
 } from "../../../src/cli/utils/prompts.ts";
 import { GemitermError } from "../../../src/core/errors.ts";
+import { render } from "@inquirer/testing";
+import { input } from "@inquirer/prompts";
+import { ExitPromptError } from "@inquirer/core";
 
 describe("TTY gate", () => {
   let stdinDescriptor: PropertyDescriptor | undefined;
@@ -128,5 +131,69 @@ describe("abort signal", () => {
     const second = getAbortSignal();
     expect(second).not.toBe(first);
     expect(second.aborted).toBe(false);
+  });
+});
+
+describe("text delegates to @inquirer/input", () => {
+  afterEach(() => {
+    mock.restore();
+  });
+
+  test("returns the typed value", async () => {
+    const { answer, events } = await render(input, { message: "Your name" });
+    events.type("Alice");
+    events.keypress("enter");
+    await expect(answer).resolves.toBe("Alice");
+  });
+
+  test("uses the default on empty submit", async () => {
+    const { answer, events } = await render(input, { message: "Path", default: "default.md" });
+    events.keypress("enter");
+    await expect(answer).resolves.toBe("default.md");
+  });
+
+  test("forwards config and maps ExitPromptError to CancellationError", async () => {
+    const inputMock = mock(async () => {
+      throw new ExitPromptError("cancelled");
+    });
+    mock.module("@inquirer/prompts", () => ({
+      input: inputMock,
+      confirm: () => {
+        throw new Error("unused");
+      },
+      select: () => {
+        throw new Error("unused");
+      },
+    }));
+
+    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const validate = (v: string) => v.length > 0 || "required";
+      await expect(text({ message: "hi", default: "d", validate })).rejects.toBeInstanceOf(
+        CancellationError,
+      );
+      expect(inputMock).toHaveBeenCalledTimes(1);
+      const config = inputMock.mock.calls[0][0] as {
+        message: string;
+        default?: string;
+        validate?: unknown;
+        theme?: unknown;
+      };
+      expect(config.message).toBe("hi");
+      expect(config.default).toBe("d");
+      expect(config.validate).toBe(validate);
+      expect(config.theme).toBeDefined();
+    } finally {
+      if (stdinDescriptor) {
+        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    }
   });
 });

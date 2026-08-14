@@ -1,12 +1,18 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { NewCommand } from "../../../src/cli/commands/new-command.ts";
-import { Mediator } from "../../../src/core/mediator.ts";
-import { COMMAND_TYPES } from "../../../src/core/command-handlers.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import {
   checkArgLength,
   WINDOWS_COMMAND_LINE_ARG_LIMIT,
 } from "../../../src/cli/utils/long-arg-guard.ts";
+
+function makeClient() {
+  const client: any = {
+    startNewChat: mock(async (_msg: string): Promise<{ response: string; conversationId: string }> => ({ response: "Hello from Gemini!", conversationId: "conv-1" })),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
 
 describe("long-arg-guard (bunx Windows 2048 UTF-16 code unit limit)", () => {
   describe("checkArgLength", () => {
@@ -95,31 +101,29 @@ describe("long-arg-guard (bunx Windows 2048 UTF-16 code unit limit)", () => {
 describe("NewCommand with long-arg guard", () => {
   let command: NewCommand;
   let context: CliCommandContext;
+  let client: ReturnType<typeof makeClient>;
   let logSpy: ReturnType<typeof spyOn>;
   let errorSpy: ReturnType<typeof spyOn>;
   let exitSpy: ReturnType<typeof spyOn>;
-  let sendSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new NewCommand();
+    client = makeClient();
     context = {
       verbose: false,
-      mediator: new Mediator(),
       profileAuthManager: {
         getActiveProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => null),
         ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       } as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
     exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`__exit__:${code ?? "undefined"}`);
     }) as never);
-    sendSpy = spyOn(context.mediator, "send").mockResolvedValue({
-      response: "Hello from Gemini!",
-      conversationId: "conv-1",
-    } as never);
   });
 
   afterEach(() => {
@@ -128,65 +132,55 @@ describe("NewCommand with long-arg guard", () => {
     errorSpy.mockRestore();
   });
 
-  test("short message is sent to the mediator normally", async () => {
+  test("short message is sent to the client normally", async () => {
     await command.execute(["Hello"], context);
-    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
   test("message of exactly 2048 ASCII chars is sent normally (boundary)", async () => {
     const arg = "a".repeat(2048);
     await command.execute([arg], context);
-    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
   test("message of 2049 ASCII chars spills to a temp file and is sent", async () => {
     const arg = "a".repeat(2049);
     await command.execute([arg], context);
-    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    const sentCommand = sendSpy.mock.calls[0][0] as { type: string; payload: { message: string } };
-    expect(sentCommand.type).toBe(COMMAND_TYPES.START_NEW_CHAT);
-    expect(sentCommand.payload.message.length).toBe(2049);
-    expect(sentCommand.payload.message).toBe(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg);
   });
 
   test("message of 5000 chars spills to a temp file and is sent", async () => {
     const arg = "a".repeat(5000);
     await command.execute([arg], context);
-    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    const sentCommand = sendSpy.mock.calls[0][0] as { type: string; payload: { message: string } };
-    expect(sentCommand.payload.message.length).toBe(5000);
-    expect(sentCommand.payload.message).toBe(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg);
   });
 
   test("multi-byte message exceeding 2048 code units spills and is sent", async () => {
     const arg = "\u{1F600}".repeat(1500);
     expect(arg.length).toBe(3000);
     await command.execute([arg], context);
-    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    const sentCommand = sendSpy.mock.calls[0][0] as { type: string; payload: { message: string } };
-    expect(sentCommand.payload.message.length).toBe(3000);
-    expect(sentCommand.payload.message).toBe(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg);
   });
 
   test("multi-byte message at 2048 code unit boundary is accepted (does not crash, no exit)", async () => {
     const arg = "\u{1F600}".repeat(1024);
     await command.execute([arg], context);
-    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
-  test("long-arg guard runs before START_NEW_CHAT handler is invoked, and START_NEW_CHAT fires with the spilled content", async () => {
+  test("long-arg guard runs before the client is invoked, and the client receives the spilled content", async () => {
     const arg = "a".repeat(3000);
     await command.execute([arg], context);
-    const calledWith = sendSpy.mock.calls.map((c) => (c[0] as { type: string }).type);
-    expect(calledWith).toContain(COMMAND_TYPES.START_NEW_CHAT);
-    const sentCommand = sendSpy.mock.calls[0][0] as { payload: { message: string } };
-    expect(sentCommand.payload.message.length).toBe(3000);
-    expect(sentCommand.payload.message).toBe(arg);
+    expect(client.startNewChat).toHaveBeenCalledTimes(1);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg);
   });
 });

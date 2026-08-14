@@ -1,33 +1,41 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { DeleteCommand } from "../../../src/cli/commands/delete-command.ts";
-import { Mediator } from "../../../src/core/mediator.ts";
-import { COMMAND_TYPES, type DeleteConversationCommandPayload, type DeleteConversationCommandResult } from "../../../src/core/command-handlers.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
 import { AuthenticationError } from "../../../src/core/errors.ts";
 
+function makeClient() {
+  const client: any = {
+    deleteChat: mock(async (_id: string): Promise<void> => {}),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
+
 describe("delete command integration", () => {
   let command: DeleteCommand;
   let context: CliCommandContext;
+  let client: ReturnType<typeof makeClient>;
   let logSpy: ReturnType<typeof spyOn>;
   let errorSpy: ReturnType<typeof spyOn>;
   let originalEnv: Record<string, string | undefined>;
-  let mediatorSendSpy: ReturnType<typeof spyOn>;
   let findProfileSpy: ReturnType<typeof mock>;
   let getActiveProfilesSpy: ReturnType<typeof mock>;
   let exitSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new DeleteCommand();
+    client = makeClient();
     context = {
       verbose: false,
-      mediator: new Mediator(),
       profileAuthManager: {
         getActiveProfiles: mock(() => ["work", "personal"]),
         findProfileForConversation: mock(() => "work"),
         ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       } as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
@@ -40,8 +48,6 @@ describe("delete command integration", () => {
     const configDir = setupTestConfig("delete-integration");
     spyOn(configModule, "getConfigDir").mockReturnValue(configDir);
     spyOn(configModule, "ensureConfigDir").mockImplementation(() => {});
-
-    mediatorSendSpy = spyOn(context.mediator, "send").mockResolvedValue({ success: true } as DeleteConversationCommandResult);
   });
 
   afterEach(() => {
@@ -67,10 +73,10 @@ describe("delete command integration", () => {
       expect(output).toContain("Usage: gemiterm delete");
     });
 
-    test("help does not send command to mediator", async () => {
+    test("help does not call the client", async () => {
       await command.execute(["--help"], context);
 
-      expect(mediatorSendSpy).not.toHaveBeenCalled();
+      expect(client.deleteChat).not.toHaveBeenCalled();
     });
   });
 
@@ -78,10 +84,9 @@ describe("delete command integration", () => {
     test("resolves the profile that owns the conversation", async () => {
       await command.execute(["conv-123", "--force"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentCommand = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentCommand.type).toBe(COMMAND_TYPES.DELETE_CONVERSATION);
-      expect(sentCommand.payload.profileName).toBe("work");
+      expect(client.deleteChat).toHaveBeenCalledTimes(1);
+      expect(client.forProfile).toHaveBeenCalledWith("work");
+      expect(client.deleteChat).toHaveBeenCalledWith("conv-123");
     });
 
     test("throws AuthenticationError when no profile owns the conversation", async () => {
@@ -107,20 +112,18 @@ describe("delete command integration", () => {
 
       await command.execute(["conv-123", "--force"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentCommand = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentCommand.payload.profileName).toBeUndefined();
+      expect(client.deleteChat).toHaveBeenCalledTimes(1);
+      expect(client.deleteChat).toHaveBeenCalledWith("conv-123");
+      expect(client.forProfile).not.toHaveBeenCalled();
     });
   });
 
   describe("delete execution", () => {
-    test("sends delete-conversation command to mediator", async () => {
+    test("deletes the conversation with the correct id", async () => {
       await command.execute(["conv-123", "--force"], context);
 
-      expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-      const sentCommand = mediatorSendSpy.mock.calls[0][0] as any;
-      expect(sentCommand.type).toBe(COMMAND_TYPES.DELETE_CONVERSATION);
-      expect(sentCommand.payload.conversationId).toBe("conv-123");
+      expect(client.deleteChat).toHaveBeenCalledTimes(1);
+      expect(client.deleteChat).toHaveBeenCalledWith("conv-123");
     });
 
     test("prints success message", async () => {
@@ -131,8 +134,8 @@ describe("delete command integration", () => {
       expect(output).toContain("conv-123");
     });
 
-    test("exits with error when mediator fails", async () => {
-      mediatorSendSpy.mockRejectedValue(new Error("Network error"));
+    test("exits with error when the client fails", async () => {
+      client.deleteChat.mockRejectedValue(new Error("Network error"));
 
       await expect(command.execute(["conv-123", "--force"], context)).rejects.toThrow("process.exit called");
     });

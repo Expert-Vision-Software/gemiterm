@@ -1,19 +1,26 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { ContinueCommand } from "../../../src/cli/commands/continue-command.ts";
-import { Mediator } from "../../../src/core/mediator.ts";
-import { COMMAND_TYPES, type SendMessageCommandResult } from "../../../src/core/command-handlers.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import { writeFileSync, existsSync, unlinkSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+function makeClient() {
+  const client: any = {
+    sendMessage: mock(async (_id: string, _msg: string): Promise<string> => "Hello from Gemini!"),
+    fetchChat: mock(async (_id: string): Promise<any[]> => []),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
+
 describe("continue command --prompt-file option", () => {
   let command: ContinueCommand;
   let context: CliCommandContext;
+  let client: ReturnType<typeof makeClient>;
   let logSpy: ReturnType<typeof spyOn>;
   let errorSpy: ReturnType<typeof spyOn>;
   let exitSpy: ReturnType<typeof spyOn>;
-  let mediatorSendSpy: ReturnType<typeof spyOn>;
   const tempFiles: string[] = [];
 
   function makeTempFile(content: string): string {
@@ -25,23 +32,22 @@ describe("continue command --prompt-file option", () => {
 
   beforeEach(() => {
     command = new ContinueCommand();
+    client = makeClient();
     context = {
       verbose: false,
-      mediator: new Mediator(),
       profileAuthManager: {
         getActiveProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => "default"),
         ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       } as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
     exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`__exit__:${code ?? "undefined"}`);
     }) as never);
-    mediatorSendSpy = spyOn(context.mediator, "send").mockResolvedValue({
-      response: "Hello from Gemini!",
-    } as SendMessageCommandResult);
   });
 
   afterEach(() => {
@@ -56,17 +62,14 @@ describe("continue command --prompt-file option", () => {
     tempFiles.length = 0;
   });
 
-  test("reads file content and sends it via SEND_MESSAGE to the given conversation", async () => {
+  test("reads file content and sends it to the given conversation", async () => {
     const content = "Hello from a prompt file";
     const path = makeTempFile(content);
 
     await command.execute(["conv-123", "--prompt-file", path], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { type: string; payload: { conversationId: string; message: string } };
-    expect(sentCommand.type).toBe(COMMAND_TYPES.SEND_MESSAGE);
-    expect(sentCommand.payload.conversationId).toBe("conv-123");
-    expect(sentCommand.payload.message).toBe(content);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -76,10 +79,8 @@ describe("continue command --prompt-file option", () => {
 
     await command.execute(["conv-123", "--prompt-file", path], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { message: string } };
-    expect(sentCommand.payload.message.length).toBe(5000);
-    expect(sentCommand.payload.message).toBe(content);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -90,10 +91,8 @@ describe("continue command --prompt-file option", () => {
 
     await command.execute(["conv-123", "--prompt-file", path], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { message: string } };
-    expect(sentCommand.payload.message.length).toBe(3000);
-    expect(sentCommand.payload.message).toBe(content);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
   });
 
   test("works with the -f short alias", async () => {
@@ -102,9 +101,8 @@ describe("continue command --prompt-file option", () => {
 
     await command.execute(["conv-123", "-f", path], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { message: string } };
-    expect(sentCommand.payload.message).toBe(content);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -114,10 +112,8 @@ describe("continue command --prompt-file option", () => {
 
     await command.execute(["--prompt-file", path, "conv-xyz"], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { conversationId: string; message: string } };
-    expect(sentCommand.payload.conversationId).toBe("conv-xyz");
-    expect(sentCommand.payload.message).toBe(content);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-xyz", content);
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -131,7 +127,7 @@ describe("continue command --prompt-file option", () => {
     expect(thrown).not.toBeNull();
     expect(thrown?.message).toBe("__exit__:1");
     expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(mediatorSendSpy).not.toHaveBeenCalled();
+    expect(client.sendMessage).not.toHaveBeenCalled();
 
     const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(stderr).toContain("--prompt-file");
@@ -150,7 +146,7 @@ describe("continue command --prompt-file option", () => {
     expect(thrown).not.toBeNull();
     expect(thrown?.message).toBe("__exit__:1");
     expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(mediatorSendSpy).not.toHaveBeenCalled();
+    expect(client.sendMessage).not.toHaveBeenCalled();
 
     const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(stderr).toContain("Error:");
@@ -169,7 +165,7 @@ describe("continue command --prompt-file option", () => {
     expect(thrown).not.toBeNull();
     expect(thrown?.message).toBe("__exit__:1");
     expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(mediatorSendSpy).not.toHaveBeenCalled();
+    expect(client.sendMessage).not.toHaveBeenCalled();
 
     const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(stderr).toContain("--prompt-file");
@@ -188,7 +184,7 @@ describe("continue command --prompt-file option", () => {
     expect(thrown).not.toBeNull();
     expect(thrown?.message).toBe("__exit__:1");
     expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(mediatorSendSpy).not.toHaveBeenCalled();
+    expect(client.sendMessage).not.toHaveBeenCalled();
 
     const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(stderr).toContain("--prompt-file");
@@ -204,8 +200,7 @@ describe("continue command --prompt-file option", () => {
 
     await command.execute(["conv-123", "--prompt-file", path], context);
 
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { message: string } };
-    expect(sentCommand.payload.message).toBe(onDisk);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", onDisk);
   });
 
   test("--help output includes --prompt-file and the -f alias", async () => {
@@ -221,10 +216,10 @@ describe("continue command --prompt-file option", () => {
 describe("continue command spillover: long positional arg is written to a temp file and loaded from there", () => {
   let command: ContinueCommand;
   let context: CliCommandContext;
+  let client: ReturnType<typeof makeClient>;
   let logSpy: ReturnType<typeof spyOn>;
   let errorSpy: ReturnType<typeof spyOn>;
   let exitSpy: ReturnType<typeof spyOn>;
-  let mediatorSendSpy: ReturnType<typeof spyOn>;
   const tempFiles: string[] = [];
 
   function makeTempFile(content: string): string {
@@ -242,23 +237,22 @@ describe("continue command spillover: long positional arg is written to a temp f
 
   beforeEach(() => {
     command = new ContinueCommand();
+    client = makeClient();
     context = {
       verbose: false,
-      mediator: new Mediator(),
       profileAuthManager: {
         getActiveProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => "default"),
         ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       } as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
     exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`__exit__:${code ?? "undefined"}`);
     }) as never);
-    mediatorSendSpy = spyOn(context.mediator, "send").mockResolvedValue({
-      response: "Hello from Gemini!",
-    } as SendMessageCommandResult);
   });
 
   afterEach(() => {
@@ -273,17 +267,13 @@ describe("continue command spillover: long positional arg is written to a temp f
     tempFiles.length = 0;
   });
 
-  test("5000-char positional is sent to SEND_MESSAGE with the correct conversation_id (no error, no truncation)", async () => {
+  test("5000-char positional is sent with the correct conversation_id (no error, no truncation)", async () => {
     const arg = "a".repeat(5000);
     await command.execute(["conv-123", arg], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { type: string; payload: { conversationId: string; message: string } };
-    expect(sentCommand.type).toBe(COMMAND_TYPES.SEND_MESSAGE);
-    expect(sentCommand.payload.conversationId).toBe("conv-123");
-    expect(sentCommand.payload.message.length).toBe(5000);
-    expect(sentCommand.payload.message).toBe(arg);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg);
   });
 
   test("5000-char positional spills: temp file is created in tmpdir and DELETED after send", async () => {
@@ -312,11 +302,9 @@ describe("continue command spillover: long positional arg is written to a temp f
     const arg = "a".repeat(2048);
     await command.execute(["conv-123", arg], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { conversationId: string; message: string } };
-    expect(sentCommand.payload.conversationId).toBe("conv-123");
-    expect(sentCommand.payload.message).toBe(arg);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg);
 
     const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logText.toLowerCase()).not.toContain("spilled to temp file");
@@ -329,9 +317,8 @@ describe("continue command spillover: long positional arg is written to a temp f
     const arg = "a".repeat(2049);
     await command.execute(["conv-123", arg], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { message: string } };
-    expect(sentCommand.payload.message.length).toBe(2049);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg);
 
     const spilledPath = captureSpilledPath();
     expect(spilledPath).not.toBeNull();
@@ -345,11 +332,8 @@ describe("continue command spillover: long positional arg is written to a temp f
 
     await command.execute(["conv-123", arg], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { conversationId: string; message: string } };
-    expect(sentCommand.payload.conversationId).toBe("conv-123");
-    expect(sentCommand.payload.message.length).toBe(3000);
-    expect(sentCommand.payload.message).toBe(arg);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg);
 
     const spilledPath = captureSpilledPath();
     expect(spilledPath).not.toBeNull();
@@ -360,8 +344,7 @@ describe("continue command spillover: long positional arg is written to a temp f
     const arg = "a".repeat(5000);
     await command.execute(["conv-xyz", arg], context);
 
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { conversationId: string; message: string } };
-    expect(sentCommand.payload.conversationId).toBe("conv-xyz");
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-xyz", arg);
   });
 
   test("when --prompt-file is given (no positional), no spillover happens — user-provided file wins, no spillover log", async () => {
@@ -370,10 +353,8 @@ describe("continue command spillover: long positional arg is written to a temp f
 
     await command.execute(["conv-123", "--prompt-file", path], context);
 
-    expect(mediatorSendSpy).toHaveBeenCalledTimes(1);
-    const sentCommand = mediatorSendSpy.mock.calls[0][0] as { payload: { conversationId: string; message: string } };
-    expect(sentCommand.payload.conversationId).toBe("conv-123");
-    expect(sentCommand.payload.message).toBe(content);
+    expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
 
     const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logText.toLowerCase()).not.toContain("spilled to temp file");
@@ -396,7 +377,7 @@ describe("continue command spillover: long positional arg is written to a temp f
     expect(thrown).not.toBeNull();
     expect(thrown?.message).toBe("__exit__:1");
     expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(mediatorSendSpy).not.toHaveBeenCalled();
+    expect(client.sendMessage).not.toHaveBeenCalled();
 
     const stderr = errorSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(stderr).toContain("--prompt-file");

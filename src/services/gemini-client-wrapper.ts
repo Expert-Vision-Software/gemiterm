@@ -1,6 +1,4 @@
 import type { ChatInfo, Message } from "../core/types.ts";
-import type { IGeminiClientService } from "../core/command-handlers.ts";
-import type { IGeminiClientQueryService } from "../core/query-handlers.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { CookieStorageService } from "./cookie-storage-service.ts";
 import type { ChatMetadata } from "./chat-metadata-storage.ts";
@@ -79,9 +77,7 @@ function extractChatMetadata(metadata: (string | null)[] | undefined): ChatMetad
   return { rid: rid ?? "", rcid: rcid ?? "", ctx: ctx === "" ? null : (ctx ?? null) };
 }
 
-export class GeminiClientService
-  implements IGeminiClientService, IGeminiClientQueryService
-{
+export class GeminiClientService {
   private client: InstanceType<GeminiClientDeps["Gemini"]> | null = null;
   private initPromise: Promise<void> | null = null;
   private initialized = false;

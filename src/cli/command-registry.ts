@@ -1,4 +1,4 @@
-import type { Mediator } from "../core/mediator.ts";
+import type { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import type { ProfileAuthManager } from "../services/profile-auth-manager.ts";
 import { AuthCommand } from "./commands/auth-command.ts";
 import { StatusCommand } from "./commands/status-command.ts";
@@ -15,8 +15,9 @@ import { ModelsCommand } from "./commands/models-command.ts";
 
 export interface CliCommandContext {
   verbose: boolean;
-  mediator: Mediator;
   profileAuthManager: ProfileAuthManager;
+  getGeminiClient: () => GeminiClientService;
+  listProfiles: () => string[];
 }
 
 export interface CliCommand {

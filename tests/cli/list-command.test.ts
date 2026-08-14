@@ -1,9 +1,6 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { ListCommand } from "../../src/cli/commands/list-command.ts";
-import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
-import { QUERY_TYPES } from "../../src/core/query-handlers.ts";
-import type { ListChatsQueryResult } from "../../src/core/query-handlers.ts";
 import { NonInteractiveError } from "../../src/cli/utils/prompts.ts";
 import { GemitermError } from "../../src/core/errors.ts";
 import type { ChatInfo } from "../../src/core/types.ts";
@@ -14,16 +11,29 @@ const SAMPLE_CHATS = [
   { id: "ghi789", title: "Alpha test", isPinned: false, timestamp: 1716900000000 },
 ];
 
+function makeClient() {
+  const client: any = {
+    listChats: mock(async (_opts?: any): Promise<ChatInfo[]> => []),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
+
 describe("ListCommand", () => {
   let command: ListCommand;
-  let mediator: Mediator;
+  let client: ReturnType<typeof makeClient>;
   let context: CliCommandContext;
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new ListCommand();
-    mediator = new Mediator();
-    context = { verbose: false, mediator };
+    client = makeClient();
+    context = {
+      verbose: false,
+      profileAuthManager: {} as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
+    };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
   });
 
@@ -46,11 +56,7 @@ describe("ListCommand", () => {
   });
 
   test("sends list-chats query and displays results", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     await command.execute([], context);
 
@@ -61,11 +67,7 @@ describe("ListCommand", () => {
   });
 
   test("applies limit", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     await command.execute(["--limit", "1"], context);
 
@@ -74,60 +76,39 @@ describe("ListCommand", () => {
   });
 
   test("applies search filter", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => {
-        const filtered = SAMPLE_CHATS.filter((c) => c.title.toLowerCase().includes("bun"));
-        return { chats: filtered };
-      }),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     await command.execute(["--search", "Bun"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ search: "Bun" }),
-      }),
+    expect(client.listChats).toHaveBeenCalledWith(
+      expect.objectContaining({ search: "Bun" }),
     );
   });
 
   test("returns all conversations by default (no limit)", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     await command.execute([], context);
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("Total: 3 conversations");
-    const sentQuery = mockHandler.handle.mock.calls[0][0] as any;
-    expect(sentQuery.payload.limit).toBeUndefined();
+    const sentOptions = client.listChats.mock.calls[0][0] as any;
+    expect(sentOptions.limit).toBeUndefined();
   });
 
   test("applies --limit to restrict results", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     await command.execute(["--limit", "1"], context);
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("Total: 1 conversation");
-    const sentQuery = mockHandler.handle.mock.calls[0][0] as any;
-    expect(sentQuery.payload.limit).toBe(1);
+    const sentOptions = client.listChats.mock.calls[0][0] as any;
+    expect(sentOptions.limit).toBe(1);
   });
 
   test("applies sort by alpha", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     await command.execute(["--sort", "alpha"], context);
 
@@ -140,11 +121,7 @@ describe("ListCommand", () => {
   });
 
   test("outputs JSON format", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     await command.execute(["--format", "json"], context);
 
@@ -155,11 +132,7 @@ describe("ListCommand", () => {
   });
 
   test("shows no conversations message when empty", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [] })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => []);
 
     await command.execute([], context);
 
@@ -168,72 +141,42 @@ describe("ListCommand", () => {
   });
 
   test("applies --all-profiles flag in query", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [] })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => []);
+    context.listProfiles = () => ["work", "personal"];
 
     await command.execute(["--all-profiles"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ allProfiles: true }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("work");
+    expect(client.forProfile).toHaveBeenCalledWith("personal");
   });
 
   test("applies --profile flag in query", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [] })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => []);
 
     await command.execute(["--profile", "work"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ profile: "work" }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("work");
   });
 
   test("applies -p short flag in query", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [] })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => []);
 
     await command.execute(["-p", "personal"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ profile: "personal" }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("personal");
   });
 
   test("omits profile from payload when not specified", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [] })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => []);
 
     await command.execute([], context);
 
-    const call = mockHandler.handle.mock.calls[0][0] as any;
-    expect(call.payload.profile).toBeUndefined();
+    expect(client.forProfile).not.toHaveBeenCalled();
+    expect(client.listChats).toHaveBeenCalled();
   });
 
   test("applies --offset flag", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     await command.execute(["--offset", "2", "--limit", "1"], context);
 
@@ -245,15 +188,20 @@ describe("ListCommand", () => {
 
 describe("ListCommand --interactive flag", () => {
   let command: ListCommand;
-  let mediator: Mediator;
+  let client: ReturnType<typeof makeClient>;
   let context: CliCommandContext;
   let logSpy: ReturnType<typeof spyOn>;
   let promptsModule: typeof import("../../src/cli/utils/prompts.ts");
 
   beforeEach(async () => {
     command = new ListCommand();
-    mediator = new Mediator();
-    context = { verbose: false, mediator };
+    client = makeClient();
+    context = {
+      verbose: false,
+      profileAuthManager: {} as unknown as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => ["default"],
+    };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     promptsModule = await import("../../src/cli/utils/prompts.ts");
   });
@@ -283,23 +231,17 @@ describe("ListCommand --interactive flag", () => {
     } as any);
     const selectSpy = spyOn(promptsModule, "select").mockResolvedValue(undefined as any);
 
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     try {
       await command.execute(["--interactive"], context);
       expect(browserSpy).toHaveBeenCalledTimes(1);
       const callArg = browserSpy.mock.calls[0][0] as any;
-      expect(callArg.chats).toEqual(SAMPLE_CHATS);
-      expect(selectSpy).not.toHaveBeenCalled();
-      expect(mockHandler.handle).toHaveBeenCalledWith(
-        expect.objectContaining({
-          payload: expect.objectContaining({ allProfiles: true }),
-        }),
+      expect(callArg.chats).toEqual(
+        [...SAMPLE_CHATS].sort((a, b) => b.timestamp - a.timestamp),
       );
+      expect(selectSpy).not.toHaveBeenCalled();
+      expect(client.forProfile).toHaveBeenCalled();
     } finally {
       if (stdinDescriptor) {
         Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
@@ -321,20 +263,12 @@ describe("ListCommand --interactive flag", () => {
       kind: "quit",
     } as any);
 
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     try {
       await command.execute(["-i"], context);
       expect(browserSpy).toHaveBeenCalledTimes(1);
-      expect(mockHandler.handle).toHaveBeenCalledWith(
-        expect.objectContaining({
-          payload: expect.objectContaining({ allProfiles: true }),
-        }),
-      );
+      expect(client.forProfile).toHaveBeenCalled();
     } finally {
       if (stdinDescriptor) {
         Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
@@ -356,11 +290,7 @@ describe("ListCommand --interactive flag", () => {
       kind: "quit",
     } as any);
 
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     try {
       await command.execute(["-i"], context);
@@ -386,11 +316,7 @@ describe("ListCommand --interactive flag", () => {
       kind: "quit",
     } as any);
 
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     try {
       await command.execute(["--interactive", "--sort", "alpha"], context);
@@ -417,19 +343,11 @@ describe("ListCommand --interactive flag", () => {
       kind: "quit",
     } as any);
 
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     try {
       await command.execute(["-i", "--profile", "work"], context);
-      expect(mockHandler.handle).toHaveBeenCalledWith(
-        expect.objectContaining({
-          payload: expect.objectContaining({ profile: "work", allProfiles: false }),
-        }),
-      );
+      expect(client.forProfile).toHaveBeenCalledWith("work");
       expect(browserSpy).toHaveBeenCalledTimes(1);
     } finally {
       if (stdinDescriptor) {
@@ -448,11 +366,7 @@ describe("ListCommand --interactive flag", () => {
       writable: true,
     });
 
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
 
     try {
       await expect(command.execute(["--interactive"], context)).rejects.toBeInstanceOf(
@@ -468,12 +382,6 @@ describe("ListCommand --interactive flag", () => {
   });
 
   test("--interactive --format json throws GemitermError", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
-
     await expect(command.execute(["--interactive", "--format", "json"], context)).rejects.toThrow(
       GemitermError,
     );
@@ -489,12 +397,6 @@ describe("ListCommand --interactive flag", () => {
   });
 
   test("--interactive --out out.txt throws GemitermError", async () => {
-    const mockHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    mediator.registerQueryHandler(mockHandler as any);
-
     try {
       await command.execute(["--interactive", "--out", "out.txt"], context);
       throw new Error("should have thrown");
@@ -561,11 +463,7 @@ describe("ListCommand --interactive flag", () => {
         const selectSpy = spyOn(promptsModule, "select").mockResolvedValue("delete" as any);
         const textSpy = spyOn(promptsModule, "text").mockResolvedValue("./dummy.md");
 
-        const mockHandler = {
-          queryType: QUERY_TYPES.LIST_CHATS,
-          handle: mock(async () => ({ chats: freshChats })),
-        };
-        mediator.registerQueryHandler(mockHandler as any);
+        client.listChats = mock(async () => freshChats);
 
         await command.execute(["--interactive"], context);
 
@@ -595,11 +493,7 @@ describe("ListCommand --interactive flag", () => {
         const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(true);
         spyOn(promptsModule, "text").mockResolvedValue("./dummy.md");
 
-        const mockHandler = {
-          queryType: QUERY_TYPES.LIST_CHATS,
-          handle: mock(async () => ({ chats: freshChats })),
-        };
-        mediator.registerQueryHandler(mockHandler as any);
+        client.listChats = mock(async () => freshChats);
 
         await command.execute(["--interactive"], context);
 
@@ -624,11 +518,7 @@ describe("ListCommand --interactive flag", () => {
         spyOn(promptsModule, "select").mockResolvedValue("export-markdown" as any);
         const textSpy = spyOn(promptsModule, "text").mockResolvedValue("./my-export.md");
 
-        const mockHandler = {
-          queryType: QUERY_TYPES.LIST_CHATS,
-          handle: mock(async () => ({ chats: freshChats })),
-        };
-        mediator.registerQueryHandler(mockHandler as any);
+        client.listChats = mock(async () => freshChats);
 
         await command.execute(["--interactive"], context);
 
@@ -661,11 +551,7 @@ describe("ListCommand --interactive flag", () => {
         spyOn(promptsModule, "select").mockResolvedValue("export-json" as any);
         const textSpy = spyOn(promptsModule, "text").mockResolvedValue("./my-export.json");
 
-        const mockHandler = {
-          queryType: QUERY_TYPES.LIST_CHATS,
-          handle: mock(async () => ({ chats: freshChats })),
-        };
-        mediator.registerQueryHandler(mockHandler as any);
+        client.listChats = mock(async () => freshChats);
 
         await command.execute(["--interactive"], context);
 
@@ -693,11 +579,7 @@ describe("ListCommand --interactive flag", () => {
         spyOn(promptsModule, "select").mockResolvedValue("export-markdown" as any);
         spyOn(promptsModule, "text").mockResolvedValue("   ");
 
-        const mockHandler = {
-          queryType: QUERY_TYPES.LIST_CHATS,
-          handle: mock(async () => ({ chats: freshChats })),
-        };
-        mediator.registerQueryHandler(mockHandler as any);
+        client.listChats = mock(async () => freshChats);
 
         await command.execute(["--interactive"], context);
 
@@ -725,11 +607,7 @@ describe("ListCommand --interactive flag", () => {
           .mockResolvedValue({ kind: "quit" } as any);
         spyOn(promptsModule, "select").mockResolvedValue("delete" as any);
 
-        const mockHandler = {
-          queryType: QUERY_TYPES.LIST_CHATS,
-          handle: mock(async () => ({ chats: freshChats })),
-        };
-        mediator.registerQueryHandler(mockHandler as any);
+        client.listChats = mock(async () => freshChats);
 
         await command.execute(["--interactive"], context);
 
@@ -755,17 +633,15 @@ describe("ListCommand --interactive flag", () => {
           .mockResolvedValue({ kind: "quit" } as any);
         spyOn(promptsModule, "select").mockResolvedValue("copy-id" as any);
 
-        const mockHandler = {
-          queryType: QUERY_TYPES.LIST_CHATS,
-          handle: mock(async () => ({ chats: freshChats })),
-        };
-        mediator.registerQueryHandler(mockHandler as any);
+        client.listChats = mock(async () => freshChats);
 
         await command.execute(["--interactive"], context);
 
         const secondChats = (browserSpy.mock.calls[1][0] as { chats: ChatInfo[] }).chats;
         expect(secondChats).toHaveLength(SAMPLE_CHATS.length);
-        expect(secondChats.map((c) => c.id)).toEqual(SAMPLE_CHATS.map((c) => c.id));
+        expect(secondChats.map((c) => c.id)).toEqual(
+          [...SAMPLE_CHATS].sort((a, b) => b.timestamp - a.timestamp).map((c) => c.id),
+        );
       } finally {
         restoreStdinTty();
       }

@@ -1,26 +1,36 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { NewCommand } from "../../src/cli/commands/new-command.ts";
-import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
-import { COMMAND_TYPES } from "../../src/core/command-handlers.ts";
+import type { ChatInfo, Message } from "../../src/core/types.ts";
+
+function makeClient() {
+  const client: any = {
+    listChats: mock(async (_opts?: any): Promise<ChatInfo[]> => []),
+    fetchChat: mock(async (_id: string): Promise<Message[]> => []),
+    deleteChat: mock(async (_id: string): Promise<void> => {}),
+    sendMessage: mock(async (_id: string, _msg: string): Promise<string> => ""),
+    startNewChat: mock(async (_msg: string): Promise<{ response: string; conversationId: string }> => ({ response: "", conversationId: "" })),
+    listModels: mock(async (): Promise<string[]> => []),
+    profileHasConversation: mock(async (_name: string, _id: string): Promise<boolean> => false),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
 
 describe("NewCommand", () => {
   let command: NewCommand;
-  let mediator: Mediator;
+  let client: any;
   let context: CliCommandContext;
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new NewCommand();
-    mediator = new Mediator();
+    client = makeClient();
     context = {
       verbose: false,
-      mediator,
-      profileAuthManager: {
-        getActiveProfiles: mock(() => ["default"]),
-        findProfileForConversation: mock(() => null),
-        ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
-      } as unknown as CliCommandContext["profileAuthManager"],
+      profileAuthManager: {} as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
   });
@@ -50,25 +60,14 @@ describe("NewCommand", () => {
   });
 
   test("sends start-new-chat command with message", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.START_NEW_CHAT,
-      handle: mock(async () => ({
-        response: "Hello from Gemini!",
-        conversationId: "conv-123",
-      })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
+    client.startNewChat = mock(async () => ({
+      response: "Hello from Gemini!",
+      conversationId: "conv-123",
+    }));
 
     await command.execute(["Hello there"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: COMMAND_TYPES.START_NEW_CHAT,
-        payload: expect.objectContaining({
-          message: "Hello there",
-        }),
-      }),
-    );
+    expect(client.startNewChat).toHaveBeenCalledWith("Hello there");
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("conv-123");
@@ -76,64 +75,38 @@ describe("NewCommand", () => {
   });
 
   test("sends start-new-chat command with profile specified via -p", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.START_NEW_CHAT,
-      handle: mock(async () => ({
-        response: "Hello from Gemini!",
-        conversationId: "conv-456",
-      })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
+    client.startNewChat = mock(async () => ({
+      response: "Hello from Gemini!",
+      conversationId: "conv-456",
+    }));
 
     await command.execute(["-p", "dhb-worker", "a new test message"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: COMMAND_TYPES.START_NEW_CHAT,
-        payload: expect.objectContaining({
-          message: "a new test message",
-          profileName: "dhb-worker",
-        }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("dhb-worker");
+    expect(client.startNewChat).toHaveBeenCalledWith("a new test message");
   });
 
   test("sends start-new-chat command with profile specified via --profile", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.START_NEW_CHAT,
-      handle: mock(async () => ({
-        response: "Hello from Gemini!",
-        conversationId: "conv-789",
-      })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
+    client.startNewChat = mock(async () => ({
+      response: "Hello from Gemini!",
+      conversationId: "conv-789",
+    }));
 
     await command.execute(["--profile", "my-profile", "test message"], context);
 
-    expect(mockHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: COMMAND_TYPES.START_NEW_CHAT,
-        payload: expect.objectContaining({
-          message: "test message",
-          profileName: "my-profile",
-        }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("my-profile");
+    expect(client.startNewChat).toHaveBeenCalledWith("test message");
   });
 
   test("does not include profileName in payload when no profile specified", async () => {
-    const mockHandler = {
-      commandType: COMMAND_TYPES.START_NEW_CHAT,
-      handle: mock(async () => ({
-        response: "Hello",
-        conversationId: "conv-abc",
-      })),
-    };
-    mediator.registerCommandHandler(mockHandler as any);
+    client.startNewChat = mock(async () => ({
+      response: "Hello",
+      conversationId: "conv-abc",
+    }));
 
     await command.execute(["hello"], context);
 
-    const call = mockHandler.handle.mock.calls[0][0];
-    expect(call.payload.profileName).toBeUndefined();
+    expect(client.forProfile).not.toHaveBeenCalled();
+    expect(client.startNewChat).toHaveBeenCalledWith("hello");
   });
 });

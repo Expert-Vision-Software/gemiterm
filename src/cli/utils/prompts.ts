@@ -3,6 +3,7 @@ import figures from "@inquirer/figures";
 import {
   confirm as inquirerConfirm,
   select as inquirerSelect,
+  input as inquirerInput,
 } from "@inquirer/prompts";
 import {
   createPrompt,
@@ -81,122 +82,19 @@ export interface TextOptions {
 
 export async function text(opts: TextOptions): Promise<string> {
   requireTty(`gemiterm new "Your message"`);
-
-  return new Promise<string>((resolve, reject) => {
-    const stdin = process.stdin;
-    const stdout = process.stdout;
-
-    const prefix = chalk.cyan("?");
-    const message = chalk.bold(opts.message);
-    let buffer = "";
-    let defaultValue = opts.default ?? "";
-    let finished = false;
-
-    function render(showDefault: boolean): void {
-      const display = showDefault && !buffer && defaultValue
-        ? chalk.dim(defaultValue)
-        : buffer;
-      stdout.write(`\r${"\x1b[K"}${prefix} ${message} ${display}`);
-    }
-
-    function cleanup(): void {
-      stdin.removeListener("data", onData);
-      stdin.setRawMode(false);
-      stdin.resume();
-    }
-
-    function finish(value: string): void {
-      if (finished) return;
-      finished = true;
-      cleanup();
-      stdout.write(`\r${"\x1b[K"}${prefix} ${message} ${chalk.green(value)}\n`);
-      resolve(value);
-    }
-
-    function cancel(): void {
-      if (finished) return;
-      finished = true;
-      cleanup();
-      stdout.write("\n");
-      reject(new CancellationError("User cancelled."));
-    }
-
-    async function onData(data: Buffer): Promise<void> {
-      const bytes = new Uint8Array(data);
-
-      for (let i = 0; i < bytes.length; i++) {
-        const byte = bytes[i];
-
-        if (byte === 0x03) {
-          cancel();
-          return;
-        }
-
-        if (byte === 0x0d || byte === 0x0a) {
-          const answer = buffer || defaultValue;
-          if (opts.validate) {
-            const valid = await opts.validate(answer);
-            if (valid !== true) {
-              stdout.write(
-                `\r${"\x1b[K"}${prefix} ${message} ${buffer} ${chalk.red(String(valid))}\n`,
-              );
-              render(false);
-              return;
-            }
-          }
-          finish(answer);
-          return;
-        }
-
-        if (byte === 0x08 || byte === 0x7f) {
-          if (buffer.length > 0) {
-            buffer = buffer.slice(0, -1);
-            render(false);
-          } else if (defaultValue) {
-            defaultValue = "";
-            render(true);
-          }
-          continue;
-        }
-
-        if (byte === 0x1b) {
-          const next1 = bytes[i + 1];
-          const next2 = bytes[i + 2];
-          if (next1 === 0x5b && next2 === 0x33 && bytes[i + 3] === 0x7e) {
-            i += 3;
-            continue;
-          }
-          if (next1 !== undefined) i += 1;
-          continue;
-        }
-
-        if (byte >= 0x20 && byte !== 0x7f) {
-          let char: string;
-          if (byte < 0x80) {
-            char = String.fromCharCode(byte);
-          } else {
-            const decoder = new TextDecoder();
-            char = "\uFFFD";
-            for (let len = 2; len <= 4; len++) {
-              const decoded = decoder.decode(bytes.slice(i, i + len));
-              if (decoded.length > 0 && !/\uFFFD/.test(decoded)) {
-                char = decoded;
-                i += new TextEncoder().encode(char).length - 1;
-                break;
-              }
-            }
-          }
-          buffer += char;
-          render(false);
-        }
-      }
-    }
-
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.on("data", onData);
-    render(true);
-  });
+  try {
+    return await inquirerInput(
+      {
+        message: opts.message,
+        default: opts.default,
+        theme,
+        validate: opts.validate,
+      },
+      { signal: getAbortSignal() },
+    );
+  } catch (error) {
+    mapCancellation(error);
+  }
 }
 
 export interface ConfirmOptions {

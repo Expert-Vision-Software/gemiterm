@@ -1,18 +1,12 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import {
-  COMMAND_TYPES,
-  type SendMessageCommandPayload,
-  type SendMessageCommandResult,
-} from "../../core/command-handlers.ts";
-import { QUERY_TYPES, type FetchChatQueryResult } from "../../core/query-handlers.ts";
+import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
+import { fetchChatForRequest } from "../utils/gemini-queries.ts";
 import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
-import { checkArgLength } from "../utils/long-arg-guard.ts";
-import { loadPromptFromFile, spillOverToTempFile } from "../utils/prompt-file.ts";
-import { removeFile } from "../../infrastructure/io.ts";
+import { loadEffectivePrompt } from "../utils/prompt-file.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
+import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 
 interface ContinueCommandOptions {
   help: boolean;
@@ -20,10 +14,24 @@ interface ContinueCommandOptions {
   profile: string | null;
 }
 
-const DEFAULT_OPTIONS: ContinueCommandOptions = {
-  help: false,
-  promptFile: null,
-  profile: null,
+const CONTINUE_FLAGS: readonly ArgFlagSpec[] = [
+  { key: "promptFile", long: "--prompt-file", short: "-f", type: "string", required: true, valueName: "path", description: "Read the message from a file (bypasses the 2048 code unit arg limit)", helpLabel: "--prompt-file, -f <path>", default: null },
+  { key: "profile", long: "--profile", short: "-p", type: "string", required: true, valueName: "profile name", description: "Profile that owns the conversation (default: auto-discover)", helpLabel: "--profile, -p <name>", default: null },
+  { key: "help", long: "--help", short: "-h", type: "boolean", description: "Show this help message", helpLabel: "--help, -h", default: false },
+];
+
+const CONTINUE_USAGE: UsageSpec = {
+  usageLine: "Usage: gemiterm continue [conversation_id] [message] [options]",
+  arguments: [
+    { name: "conversation_id", description: "ID of the conversation to continue (optional)" },
+    { name: "message", description: "Message to send (optional, starts interactive mode if omitted)" },
+  ],
+  flags: CONTINUE_FLAGS,
+  footer: [
+    "If no conversation_id is provided, the list command will be invoked.",
+    "If no message is provided, an interactive chat session will start.",
+    "In interactive mode, type /exit or /quit to exit.",
+  ],
 };
 
 export class ContinueCommand implements CliCommand {
@@ -80,100 +88,56 @@ export class ContinueCommand implements CliCommand {
 
     const profileName = await resolveProfile(context, conversationId, options.profile ?? undefined);
 
-    let effectivePromptFile: string | null = null;
-    let isSpillover = false;
-    if (options.promptFile) {
-      effectivePromptFile = options.promptFile;
-    } else if (message) {
-      const guard = checkArgLength(message);
-      if (!guard.safe) {
-        const spilled = await spillOverToTempFile(message);
-        effectivePromptFile = spilled;
-        isSpillover = true;
-        console.log(
-          chalk.dim(
-            `[gemiterm] Message is ${guard.length} UTF-16 code units, exceeding the ${guard.limit} limit. ` +
-              `Spilled to temp file '${spilled}' and loading from there.`,
-          ),
-        );
-      }
-    }
-
-    if (effectivePromptFile) {
-      try {
-        message = await loadPromptFromFile(effectivePromptFile);
-      } catch (err) {
-        console.error(chalk.red(`Error: ${err instanceof Error ? err.message : String(err)}`));
-        process.exit(1);
-      }
-      if (isSpillover) {
-        try {
-          removeFile(effectivePromptFile);
-        } catch {
-        }
-      }
-    }
-
-    const mediator: Mediator = context.mediator;
+    message = await loadEffectivePrompt(message, options.promptFile);
 
     if (message) {
-      await this.sendNonInteractive(mediator, conversationId, message, logger, context, profileName);
+      await this.sendNonInteractive(context.getGeminiClient, conversationId, message, logger, profileName);
     } else {
-      await this.startInteractive(mediator, conversationId, logger, context, profileName);
+      await this.startInteractive(context.getGeminiClient, conversationId, logger, profileName);
     }
   }
 
   private async sendNonInteractive(
-    mediator: Mediator,
+    getGeminiClient: () => GeminiClientService,
     conversationId: string,
     message: string,
     logger: Logger,
-    _context: CliCommandContext,
     profileName: string | null,
   ): Promise<void> {
     logger.debug(`Sending message to ${conversationId}`);
-    const result = await mediator.send<SendMessageCommandResult>({
-      type: COMMAND_TYPES.SEND_MESSAGE,
-      payload: { conversationId, message, profileName: profileName ?? undefined },
-    } as Command<SendMessageCommandPayload>);
+    const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
+    const response = await client.sendMessage(conversationId, message);
 
     console.log(chalk.blue.bold("Model:"));
-    console.log(result.response);
+    console.log(response);
   }
 
   private async startInteractive(
-    mediator: Mediator,
+    getGeminiClient: () => GeminiClientService,
     conversationId: string,
     logger: Logger,
-    _context: CliCommandContext,
     profileName: string | null,
   ): Promise<void> {
-    await this.printLastMessage(mediator, conversationId, profileName);
+    await this.printLastMessage(getGeminiClient, conversationId, profileName);
 
     const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
       logger.debug(`Sending message to ${conversationId}`);
-      const result = await mediator.send<SendMessageCommandResult>({
-        type: COMMAND_TYPES.SEND_MESSAGE,
-        payload: { conversationId, message, profileName: profileName ?? undefined },
-      } as Command<SendMessageCommandPayload>);
+      const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
+      const response = await client.sendMessage(conversationId, message);
 
-      return { response: result.response };
+      return { response };
     };
 
     await runInteractiveLoop(messageHandler, { profileName });
   }
 
   private async printLastMessage(
-    mediator: Mediator,
+    getGeminiClient: () => GeminiClientService,
     conversationId: string,
     profileName: string | null,
   ): Promise<void> {
-    const chatResult = await mediator.send<FetchChatQueryResult>({
-      type: QUERY_TYPES.FETCH_CHAT,
-      payload: { conversationId, profileName: profileName ?? undefined },
-    });
+    const messages = await fetchChatForRequest(getGeminiClient, conversationId, profileName ?? undefined);
 
-    const messages = chatResult.messages ?? [];
     const lastModelMessage = [...messages].reverse().find((m) => m.role === "model");
     if (lastModelMessage) {
       console.log(chalk.blue.bold("Last response:"));
@@ -197,58 +161,10 @@ export class ContinueCommand implements CliCommand {
   }
 
   private parseArgs(args: string[]): ContinueCommandOptions {
-    const options = { ...DEFAULT_OPTIONS };
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      if (arg === "--help" || arg === "-h") {
-        options.help = true;
-      } else if (arg === "--prompt-file" || arg === "-f") {
-        const next = args[i + 1];
-        if (next && !next.startsWith("-")) {
-          options.promptFile = next;
-          i++;
-        } else {
-          console.error(chalk.red(`Error: --prompt-file requires a path`));
-          process.exit(1);
-        }
-      } else if (arg === "--profile" || arg === "-p") {
-        const next = args[i + 1];
-        if (next && !next.startsWith("-")) {
-          options.profile = next;
-          i++;
-        } else {
-          console.error(chalk.red(`Error: --profile requires a profile name`));
-          process.exit(1);
-        }
-      }
-    }
-
-    return options;
+    return parseCommandArgs(args, CONTINUE_FLAGS) as unknown as ContinueCommandOptions;
   }
 
   private showUsage(): void {
-    console.log(chalk.bold("Usage: gemiterm continue [conversation_id] [message] [options]"));
-    console.log("");
-    console.log(chalk.bold("Arguments:"));
-    console.log(
-      `  ${chalk.cyan("conversation_id".padEnd(20))}${chalk.dim("ID of the conversation to continue (optional)")}`,
-    );
-    console.log(
-      `  ${chalk.cyan("message".padEnd(20))}${chalk.dim("Message to send (optional, starts interactive mode if omitted)")}`,
-    );
-    console.log("");
-    console.log(chalk.bold("Options:"));
-    console.log(
-      `  ${chalk.cyan("--prompt-file, -f <path>".padEnd(26))}${chalk.dim("Read the message from a file (bypasses the 2048 code unit arg limit)")}`,
-    );
-    console.log(
-      `  ${chalk.cyan("--profile, -p <name>".padEnd(26))}${chalk.dim("Profile that owns the conversation (default: auto-discover)")}`,
-    );
-    console.log(`  ${chalk.cyan("--help, -h".padEnd(26))}${chalk.dim("Show this help message")}`);
-    console.log("");
-    console.log(chalk.dim("If no conversation_id is provided, the list command will be invoked."));
-    console.log(chalk.dim("If no message is provided, an interactive chat session will start."));
-    console.log(chalk.dim("In interactive mode, type /exit or /quit to exit."));
+    console.log(renderUsage(CONTINUE_USAGE));
   }
 }

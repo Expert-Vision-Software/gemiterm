@@ -1,15 +1,9 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Query } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import type { ChatInfo } from "../../core/types.ts";
-import {
-  QUERY_TYPES,
-  type ListChatsQueryPayload,
-  type ListChatsQueryResult,
-  type FetchChatQueryPayload,
-  type FetchChatQueryResult,
-} from "../../core/query-handlers.ts";
+import { listChatsForRequest, fetchChatForRequest } from "../utils/gemini-queries.ts";
+import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 import { formatChatAsMarkdown } from "../../infrastructure/formatters.ts";
 import { ensureDir, writeTextFile } from "../../infrastructure/io.ts";
 import { joinPath, resolvePath } from "../../infrastructure/path-utils.ts";
@@ -22,12 +16,17 @@ interface ExportAllCommandOptions {
   allProfiles: boolean;
 }
 
-const DEFAULT_OPTIONS: ExportAllCommandOptions = {
-  help: false,
-  outDir: "./exports",
-  since: "",
-  includeMetadata: false,
-  allProfiles: false,
+const EXPORT_ALL_FLAGS: readonly ArgFlagSpec[] = [
+  { key: "outDir", long: "--out-dir", short: "-o", type: "string", description: "Output directory (default: ./exports)", helpLabel: "--out-dir, -o <dir>", default: "./exports" },
+  { key: "since", long: "--since", type: "string", description: "Only export chats from this date onwards", helpLabel: "--since <date>", default: "" },
+  { key: "includeMetadata", long: "--include-metadata", type: "boolean", description: "Include metadata headers in exports", helpLabel: "--include-metadata", default: false },
+  { key: "allProfiles", long: "--all-profiles", short: "-a", type: "boolean", description: "Export conversations from all profiles", helpLabel: "--all-profiles, -a", default: false },
+  { key: "help", long: "--help", short: "-h", type: "boolean", description: "Show this help message", helpLabel: "--help, -h", default: false },
+];
+
+const EXPORT_ALL_USAGE: UsageSpec = {
+  usageLine: "Usage: gemiterm export-all [options]",
+  flags: EXPORT_ALL_FLAGS,
 };
 
 interface ExportResult {
@@ -51,19 +50,12 @@ export class ExportAllCommand implements CliCommand {
       return;
     }
 
-    const mediator: Mediator = context.mediator;
-
-    logger.debug("Sending list-chats query for export-all");
+    logger.debug("Listing chats for export-all");
 
     try {
-      const listResult = await mediator.send<ListChatsQueryResult>({
-        type: QUERY_TYPES.LIST_CHATS,
-        payload: {
-          allProfiles: options.allProfiles,
-        } as ListChatsQueryPayload,
-      } as Query<ListChatsQueryPayload>);
-
-      let chats = listResult.chats;
+      let chats = await listChatsForRequest(context.getGeminiClient, context.listProfiles, {
+        allProfiles: options.allProfiles,
+      });
 
       chats = this.applyDateFilter(chats, options.since);
 
@@ -86,18 +78,12 @@ export class ExportAllCommand implements CliCommand {
         process.stdout.write(`  ${chalk.dim(progress)} Exporting ${chalk.cyan(chat.id)}...`);
 
         try {
-          const fetchResult = await mediator.send<FetchChatQueryResult>({
-            type: QUERY_TYPES.FETCH_CHAT,
-            payload: {
-              conversationId: chat.id,
-              profileName: chat.profile,
-            } as FetchChatQueryPayload,
-          } as Query<FetchChatQueryPayload>);
+          const messages = await fetchChatForRequest(context.getGeminiClient, chat.id, chat.profile);
 
           const filename = this.sanitizeFilename(chat.title || chat.id);
           const filePath = joinPath(outDir, `${filename}.md`);
           const content = formatChatAsMarkdown(
-            fetchResult.messages,
+            messages,
             chat.title,
             chat.id,
             options.includeMetadata,
@@ -195,52 +181,10 @@ export class ExportAllCommand implements CliCommand {
   }
 
   private parseArgs(args: string[]): ExportAllCommandOptions {
-    const options = { ...DEFAULT_OPTIONS };
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      switch (arg) {
-        case "--help":
-        case "-h":
-          options.help = true;
-          break;
-        case "--out-dir":
-        case "-o":
-          options.outDir = args[++i] ?? DEFAULT_OPTIONS.outDir;
-          break;
-        case "--since":
-          options.since = args[++i] ?? "";
-          break;
-        case "--include-metadata":
-          options.includeMetadata = true;
-          break;
-        case "--all-profiles":
-        case "-a":
-          options.allProfiles = true;
-          break;
-      }
-    }
-
-    return options;
+    return parseCommandArgs(args, EXPORT_ALL_FLAGS) as unknown as ExportAllCommandOptions;
   }
 
   private showUsage(): void {
-    console.log(chalk.bold("Usage: gemiterm export-all [options]"));
-    console.log("");
-    console.log(chalk.bold("Options:"));
-
-    const flags = [
-      { flag: "--out-dir, -o <dir>", desc: "Output directory (default: ./exports)" },
-      { flag: "--since <date>", desc: "Only export chats from this date onwards" },
-      { flag: "--include-metadata", desc: "Include metadata headers in exports" },
-      { flag: "--all-profiles, -a", desc: "Export conversations from all profiles" },
-      { flag: "--help, -h", desc: "Show this help message" },
-    ];
-
-    const maxLen = Math.max(...flags.map((f) => f.flag.length));
-    for (const f of flags) {
-      const padded = f.flag.padEnd(maxLen + 2);
-      console.log(`  ${chalk.cyan(padded)}${chalk.dim(f.desc)}`);
-    }
+    console.log(renderUsage(EXPORT_ALL_USAGE));
   }
 }

@@ -1,15 +1,10 @@
 import chalk from "chalk";
 import { confirm } from "../utils/prompts.ts";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
-import type { Mediator, Command } from "../../core/mediator.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import {
-  COMMAND_TYPES,
-  type DeleteConversationCommandPayload,
-  type DeleteConversationCommandResult,
-} from "../../core/command-handlers.ts";
 import { validateConversationId } from "../../infrastructure/validators.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
+import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 
 interface DeleteCommandOptions {
   help: boolean;
@@ -17,10 +12,16 @@ interface DeleteCommandOptions {
   profile: string;
 }
 
-const DEFAULT_OPTIONS: DeleteCommandOptions = {
-  help: false,
-  force: false,
-  profile: "",
+const DELETE_FLAGS: readonly ArgFlagSpec[] = [
+  { key: "force", long: "--force", short: "-f", type: "boolean", description: "Skip confirmation prompt", helpLabel: "--force, -f", default: false },
+  { key: "profile", long: "--profile", short: "-p", type: "string", description: "Profile that owns the conversation (default: auto-discover)", helpLabel: "--profile, -p <name>", default: "" },
+  { key: "help", long: "--help", short: "-h", type: "boolean", description: "Show this help message", helpLabel: "--help, -h", default: false },
+];
+
+const DELETE_USAGE: UsageSpec = {
+  usageLine: "Usage: gemiterm delete <conversation_id> [options]",
+  arguments: [{ name: "conversation_id", description: "ID of the conversation to delete" }],
+  flags: DELETE_FLAGS,
 };
 
 export class DeleteCommand implements CliCommand {
@@ -61,24 +62,16 @@ export class DeleteCommand implements CliCommand {
       }
     }
 
-    const mediator: Mediator = context.mediator;
-    const payload: DeleteConversationCommandPayload = { conversationId, profileName: profileName ?? undefined };
-
-    logger.debug(`Sending delete-conversation command: ${JSON.stringify(payload)}`);
+    logger.debug(`Deleting conversation: ${conversationId}`);
 
     try {
-      const result = await mediator.send<DeleteConversationCommandResult>({
-        type: COMMAND_TYPES.DELETE_CONVERSATION,
-        payload,
-      } as Command<DeleteConversationCommandPayload>);
+      const client = profileName
+        ? context.getGeminiClient().forProfile(profileName)
+        : context.getGeminiClient();
+      await client.deleteChat(conversationId);
 
-      if (result.success) {
-        console.log(chalk.green(`Conversation '${chalk.cyan(conversationId)}' deleted.`));
-        logger.info(`Deleted conversation: ${conversationId}`);
-      } else {
-        console.error(chalk.red("Failed to delete conversation."));
-        process.exit(1);
-      }
+      console.log(chalk.green(`Conversation '${chalk.cyan(conversationId)}' deleted.`));
+      logger.info(`Deleted conversation: ${conversationId}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(chalk.red(`Error: ${message}`));
@@ -95,27 +88,7 @@ export class DeleteCommand implements CliCommand {
   }
 
   private parseArgs(args: string[]): DeleteCommandOptions {
-    const options = { ...DEFAULT_OPTIONS };
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      switch (arg) {
-        case "--help":
-        case "-h":
-          options.help = true;
-          break;
-        case "--force":
-        case "-f":
-          options.force = true;
-          break;
-        case "--profile":
-        case "-p":
-          options.profile = args[++i] ?? "";
-          break;
-      }
-    }
-
-    return options;
+    return parseCommandArgs(args, DELETE_FLAGS) as unknown as DeleteCommandOptions;
   }
 
   private promptConfirmation(question: string): Promise<boolean> {
@@ -123,25 +96,6 @@ export class DeleteCommand implements CliCommand {
   }
 
   private showUsage(): void {
-    console.log(chalk.bold("Usage: gemiterm delete <conversation_id> [options]"));
-    console.log("");
-    console.log(chalk.bold("Arguments:"));
-    console.log(
-      `  ${chalk.cyan("conversation_id".padEnd(20))}${chalk.dim("ID of the conversation to delete")}`,
-    );
-    console.log("");
-    console.log(chalk.bold("Options:"));
-
-    const flags = [
-      { flag: "--force, -f", desc: "Skip confirmation prompt" },
-      { flag: "--profile, -p <name>", desc: "Profile that owns the conversation (default: auto-discover)" },
-      { flag: "--help, -h", desc: "Show this help message" },
-    ];
-
-    const maxLen = Math.max(...flags.map((f) => f.flag.length));
-    for (const f of flags) {
-      const padded = f.flag.padEnd(maxLen + 2);
-      console.log(`  ${chalk.cyan(padded)}${chalk.dim(f.desc)}`);
-    }
+    console.log(renderUsage(DELETE_USAGE));
   }
 }

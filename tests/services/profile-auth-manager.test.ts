@@ -8,7 +8,10 @@ import { CookieStorageService } from "../../src/services/cookie-storage-service.
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { ProfileManager as ProfileManagerType } from "../../src/infrastructure/storage.ts";
-import type { IGeminiClientService } from "../../src/core/command-handlers.ts";
+
+type GeminiClientLike = {
+  profileHasConversation(profileName: string, conversationId: string): Promise<boolean>;
+};
 
 /*
 The 8 tests in `describe('findProfileForConversation')` previously asserted the BUGGY
@@ -75,7 +78,7 @@ function makeExpiredCookies(): Cookie[] {
 
 function createManager(
   profileManager: ProfileManagerType,
-  geminiClient?: IGeminiClientService,
+  geminiClient?: GeminiClientLike,
 ): ProfileAuthManager {
   const cookieStorage = new CookieStorageService({
     cookieStorage: new CookieStorage(),
@@ -90,7 +93,7 @@ function createManager(
       async sendMessage() { return ""; },
       async startNewChat() { return { response: "", conversationId: "" }; },
       async profileHasConversation() { return false; },
-      forProfile() { return this as unknown as IGeminiClientService; },
+      forProfile() { return this as unknown as GeminiClientLike; },
     },
   });
 }
@@ -220,10 +223,10 @@ describe("ProfileAuthManager", () => {
         async profileHasConversation(profileName: string) {
           return profileName === "work";
         },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        forProfile() { return this as unknown as GeminiClientLike; },
       };
 
-      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const mgr = createManager(manager, mockGeminiClient as unknown as GeminiClientLike);
       const result = await mgr.findProfileForConversation("conv-123");
 
       expect(result).toBe("work");
@@ -240,10 +243,10 @@ describe("ProfileAuthManager", () => {
         async sendMessage() { return ""; },
         async startNewChat() { return { response: "", conversationId: "" }; },
         async profileHasConversation() { return false; },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        forProfile() { return this as unknown as GeminiClientLike; },
       };
 
-      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const mgr = createManager(manager, mockGeminiClient as unknown as GeminiClientLike);
       const result = await mgr.findProfileForConversation("conv-456");
 
       expect(result).toBeNull();
@@ -272,10 +275,10 @@ describe("ProfileAuthManager", () => {
         async sendMessage() { return ""; },
         async startNewChat() { return { response: "", conversationId: "" }; },
         async profileHasConversation() { return false; },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        forProfile() { return this as unknown as GeminiClientLike; },
       };
 
-      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const mgr = createManager(manager, mockGeminiClient as unknown as GeminiClientLike);
       const result = await mgr.findProfileForConversation("conv-999");
 
       expect(result).toBeNull();
@@ -298,10 +301,10 @@ describe("ProfileAuthManager", () => {
         async profileHasConversation(profileName: string) {
           return profileName === "profile1" || profileName === "profile3";
         },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        forProfile() { return this as unknown as GeminiClientLike; },
       };
 
-      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const mgr = createManager(manager, mockGeminiClient as unknown as GeminiClientLike);
       const result = await mgr.findProfileForConversation("conv-shared");
 
       expect(result).toBe("profile1");
@@ -322,10 +325,10 @@ describe("ProfileAuthManager", () => {
           calls.push([profileName, conversationId]);
           return false;
         },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        forProfile() { return this as unknown as GeminiClientLike; },
       };
 
-      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const mgr = createManager(manager, mockGeminiClient as unknown as GeminiClientLike);
       await mgr.findProfileForConversation("abc-123");
 
       expect(calls).toContainEqual(["work", "abc-123"]);
@@ -348,10 +351,10 @@ describe("ProfileAuthManager", () => {
           probedNames.push(profileName);
           return false;
         },
-        forProfile() { return this as unknown as IGeminiClientService; },
+        forProfile() { return this as unknown as GeminiClientLike; },
       };
 
-      const mgr = createManager(manager, mockGeminiClient as unknown as IGeminiClientService);
+      const mgr = createManager(manager, mockGeminiClient as unknown as GeminiClientLike);
       await mgr.findProfileForConversation("conv-xyz");
 
       expect(probedNames).toContain("alive");

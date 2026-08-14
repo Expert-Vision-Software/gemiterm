@@ -1,8 +1,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { ExportAllCommand } from "../../src/cli/commands/export-all-command.ts";
-import { Mediator } from "../../src/core/mediator.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
-import { QUERY_TYPES } from "../../src/core/query-handlers.ts";
+import type { ChatInfo, Message } from "../../src/core/types.ts";
 import { mkdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -31,9 +30,23 @@ function capturedStdout(spy: ReturnType<typeof spyOn>): string {
   return stripAnsi(spy.mock.calls.map((c) => c[0]).join(""));
 }
 
+function makeClient() {
+  const client: any = {
+    listChats: mock(async (_opts?: any): Promise<ChatInfo[]> => []),
+    fetchChat: mock(async (_id: string): Promise<Message[]> => []),
+    deleteChat: mock(async (_id: string): Promise<void> => {}),
+    sendMessage: mock(async (_id: string, _msg: string): Promise<string> => ""),
+    startNewChat: mock(async (_msg: string): Promise<{ response: string; conversationId: string }> => ({ response: "", conversationId: "" })),
+    listModels: mock(async (): Promise<string[]> => []),
+    profileHasConversation: mock(async (_name: string, _id: string): Promise<boolean> => false),
+    forProfile: mock((_name: string) => client),
+  };
+  return client;
+}
+
 describe("ExportAllCommand", () => {
   let command: ExportAllCommand;
-  let mediator: Mediator;
+  let client: any;
   let context: CliCommandContext;
   let logSpy: ReturnType<typeof spyOn>;
   let writeSpy: ReturnType<typeof spyOn>;
@@ -41,10 +54,15 @@ describe("ExportAllCommand", () => {
 
   beforeEach(() => {
     command = new ExportAllCommand();
-    mediator = new Mediator();
+    client = makeClient();
     tempDir = join(tmpdir(), `export-all-test-${Date.now()}`);
     mkdirSync(tempDir, { recursive: true });
-    context = { verbose: false, mediator };
+    context = {
+      verbose: false,
+      profileAuthManager: {} as CliCommandContext["profileAuthManager"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
+    };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     writeSpy = spyOn(process.stdout, "write").mockImplementation(() => true);
   });
@@ -73,16 +91,8 @@ describe("ExportAllCommand", () => {
   });
 
   test("exports all chats and creates index.md", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["--out-dir", tempDir], context);
 
@@ -96,16 +106,8 @@ describe("ExportAllCommand", () => {
   });
 
   test("creates individual export files for each chat", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["--out-dir", tempDir], context);
 
@@ -115,11 +117,7 @@ describe("ExportAllCommand", () => {
   });
 
   test("shows no conversations message when empty", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [] })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
+    client.listChats = mock(async () => []);
 
     await command.execute(["--out-dir", tempDir], context);
 
@@ -128,37 +126,18 @@ describe("ExportAllCommand", () => {
   });
 
   test("passes allProfiles flag to query", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    context.listProfiles = () => ["default"];
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["--all-profiles", "--out-dir", tempDir], context);
 
-    expect(listHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ allProfiles: true }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("default");
   });
 
   test("filters by --since date", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["--since", "2024-01-01", "--out-dir", tempDir], context);
 
@@ -168,21 +147,13 @@ describe("ExportAllCommand", () => {
   });
 
   test("reports failed exports in summary and index", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
+    client.listChats = mock(async () => SAMPLE_CHATS);
     let callCount = 0;
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => {
-        callCount++;
-        if (callCount === 1) return { messages: SAMPLE_MESSAGES };
-        throw new Error("Network error");
-      }),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.fetchChat = mock(async () => {
+      callCount++;
+      if (callCount === 1) return SAMPLE_MESSAGES;
+      throw new Error("Network error");
+    });
 
     await command.execute(["--out-dir", tempDir], context);
 
@@ -196,16 +167,8 @@ describe("ExportAllCommand", () => {
   });
 
   test("shows progress output during export", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["--out-dir", tempDir], context);
 
@@ -215,16 +178,8 @@ describe("ExportAllCommand", () => {
   });
 
   test("uses --include-metadata in index", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["--include-metadata", "--out-dir", tempDir], context);
 
@@ -234,11 +189,7 @@ describe("ExportAllCommand", () => {
   });
 
   test("defaults output directory to ./exports", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [] })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
+    client.listChats = mock(async () => []);
 
     await command.execute([], context);
     const output = capturedLog(logSpy);
@@ -246,18 +197,10 @@ describe("ExportAllCommand", () => {
   });
 
   test("handles all exports failing", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => {
-        throw new Error("boom");
-      }),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => {
+      throw new Error("boom");
+    });
 
     await command.execute(["--out-dir", tempDir], context);
 
@@ -274,18 +217,10 @@ describe("ExportAllCommand", () => {
   });
 
   test("preserves non-Error throw values in failure output", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [SAMPLE_CHATS[0]] })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => {
-        throw "string-failure";
-      }),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => [SAMPLE_CHATS[0]]);
+    client.fetchChat = mock(async () => {
+      throw "string-failure";
+    });
 
     await command.execute(["--out-dir", tempDir], context);
 
@@ -295,16 +230,8 @@ describe("ExportAllCommand", () => {
 
   test("creates the output directory when it does not exist", async () => {
     const nested = join(tempDir, "deep", "nested", "out");
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["--out-dir", nested], context);
 
@@ -313,37 +240,18 @@ describe("ExportAllCommand", () => {
   });
 
   test("accepts -a short form for --all-profiles", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    context.listProfiles = () => ["default"];
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["-a", "--out-dir", tempDir], context);
 
-    expect(listHandler.handle).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payload: expect.objectContaining({ allProfiles: true }),
-      }),
-    );
+    expect(client.forProfile).toHaveBeenCalledWith("default");
   });
 
   test("ignores invalid --since date and exports all chats", async () => {
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: SAMPLE_CHATS })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => SAMPLE_CHATS);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["--since", "not-a-date", "--out-dir", tempDir], context);
 
@@ -355,16 +263,8 @@ describe("ExportAllCommand", () => {
   test("filters out chats older than --since date", async () => {
     const oldChat = { id: "old1", title: "Old chat", isPinned: false, timestamp: 1577836800000 };
     const newChat = { id: "new1", title: "New chat", isPinned: false, timestamp: 1717200000000 };
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [oldChat, newChat] })),
-    };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.listChats = mock(async () => [oldChat, newChat]);
+    client.fetchChat = mock(async () => SAMPLE_MESSAGES);
 
     await command.execute(["--since", "2024-01-01", "--out-dir", tempDir], context);
 
@@ -376,26 +276,22 @@ describe("ExportAllCommand", () => {
   test("forwards chat.profile into FETCH_CHAT payload for non-default profiles", async () => {
     const evsChat = { id: "evs-1", title: "EVS chat", isPinned: false, timestamp: 1717000000000, profile: "evs-diegohb" };
     const dhbChat = { id: "dhb-1", title: "DHB chat", isPinned: false, timestamp: 1717100000000, profile: "dhb-work" };
-    const listHandler = {
-      queryType: QUERY_TYPES.LIST_CHATS,
-      handle: mock(async () => ({ chats: [evsChat, dhbChat] })),
+    const profileClients: Record<string, any> = {
+      "evs-diegohb": {
+        listChats: mock(async () => [evsChat]),
+        fetchChat: mock(async () => SAMPLE_MESSAGES),
+      },
+      "dhb-work": {
+        listChats: mock(async () => [dhbChat]),
+        fetchChat: mock(async () => SAMPLE_MESSAGES),
+      },
     };
-    const fetchHandler = {
-      queryType: QUERY_TYPES.FETCH_CHAT,
-      handle: mock(async () => ({ messages: SAMPLE_MESSAGES })),
-    };
-    mediator.registerQueryHandler(listHandler as any);
-    mediator.registerQueryHandler(fetchHandler as any);
+    client.forProfile = mock((name: string) => profileClients[name]);
+    context.listProfiles = () => ["evs-diegohb", "dhb-work"];
 
     await command.execute(["--all-profiles", "--out-dir", tempDir], context);
 
-    expect(fetchHandler.handle).toHaveBeenCalledTimes(2);
-    const calls = fetchHandler.handle.mock.calls;
-    const evsCall = calls.find((c) => (c[0] as any).payload.conversationId === "evs-1");
-    const dhbCall = calls.find((c) => (c[0] as any).payload.conversationId === "dhb-1");
-    expect(evsCall).toBeDefined();
-    expect(dhbCall).toBeDefined();
-    expect((evsCall![0] as any).payload.profileName).toBe("evs-diegohb");
-    expect((dhbCall![0] as any).payload.profileName).toBe("dhb-work");
+    expect(profileClients["evs-diegohb"].fetchChat).toHaveBeenCalledWith("evs-1");
+    expect(profileClients["dhb-work"].fetchChat).toHaveBeenCalledWith("dhb-1");
   });
 });
