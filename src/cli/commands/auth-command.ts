@@ -30,6 +30,7 @@ const AUTH_FLAGS: readonly ArgFlagSpec[] = [
 
 const AUTH_USAGE: UsageSpec = {
   usageLine: "Usage: gemiterm auth [profileName] [options]",
+  description: "Authenticate with Google Gemini.",
   arguments: [
     { name: "profileName", description: "Authenticate to an existing profile directly" },
   ],

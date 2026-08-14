@@ -129,4 +129,13 @@ describe("renderUsage", () => {
     expect(out).toContain("Options:");
     expect(out).not.toContain("Arguments:");
   });
+
+  test("renders the description line when provided", () => {
+    const out = renderUsage({
+      usageLine: "Usage: gemiterm auth [profileName] [options]",
+      description: "Authenticate with Google Gemini.",
+      flags: BOOL_SPEC,
+    });
+    expect(out).toContain("Authenticate with Google Gemini.");
+  });
 });

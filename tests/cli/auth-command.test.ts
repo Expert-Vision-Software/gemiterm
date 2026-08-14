@@ -102,6 +102,7 @@ describe("AuthCommand", () => {
 
       const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
       expect(output).toContain("Usage: gemiterm auth");
+      expect(output).toContain("Authenticate with Google Gemini.");
       expect(output).toContain("-h, --help");
       expect(manageProfiles).not.toHaveBeenCalled();
 

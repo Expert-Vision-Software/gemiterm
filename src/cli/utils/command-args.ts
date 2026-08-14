@@ -22,6 +22,7 @@ export interface UsageArgument {
 
 export interface UsageSpec {
   usageLine: string;
+  description?: string;
   arguments?: readonly UsageArgument[];
   flags: readonly ArgFlagSpec[];
   footer?: readonly string[];
@@ -95,6 +96,11 @@ export function renderUsage(spec: UsageSpec): string {
 
   lines.push(chalk.bold(spec.usageLine));
   lines.push("");
+
+  if (spec.description) {
+    lines.push(spec.description);
+    lines.push("");
+  }
 
   if (spec.arguments && spec.arguments.length > 0) {
     lines.push(chalk.bold("Arguments:"));
