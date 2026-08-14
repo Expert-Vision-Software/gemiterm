@@ -2,6 +2,9 @@ import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:
 import { ExportCommand } from "../../../src/cli/commands/export-command.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import type { Message } from "../../../src/core/types.ts";
+import { SingleExport, BatchExport } from "../../../src/services/export-strategy.ts";
+import { fetchChatForRequest } from "../../../src/cli/utils/gemini-queries.ts";
+import { Logger } from "../../../src/infrastructure/logger.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import { createMockMessageHistory } from "../../fixtures/chat-fixtures.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
@@ -41,6 +44,18 @@ describe("export command integration", () => {
       profileAuthManager: profileAuthManager as any,
       getGeminiClient: () => client,
       listProfiles: () => [],
+      exportStrategies: {
+        single: new SingleExport({
+          fetchChat: (id, profile) => fetchChatForRequest(() => client, id, profile),
+          logger: new Logger("test"),
+        }),
+        batch: new BatchExport({
+          fetchChat: (id, profile) => fetchChatForRequest(() => client, id, profile),
+          listChatsForProfile: (name, opts) => client.forProfile(name).listChats(opts),
+          listProfiles: () => context.listProfiles(),
+          logger: new Logger("test"),
+        }),
+      },
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});

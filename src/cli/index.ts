@@ -6,6 +6,8 @@ import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import { CookieStorageService } from "../services/cookie-storage-service.ts";
 import { ProfileAuthManager } from "../services/profile-auth-manager.ts";
 import { ProfileLifecycle } from "../services/profile-lifecycle.ts";
+import { SingleExport, BatchExport } from "../services/export-strategy.ts";
+import { fetchChatForRequest } from "./utils/gemini-queries.ts";
 import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
 import { CookieMonitor } from "../services/cookie-monitor.ts";
 import { AuthService } from "../services/auth-service.ts";
@@ -20,6 +22,7 @@ const pkg = getPackageJson(import.meta.url);
 interface CliServices {
   profileAuthManager: ProfileAuthManager;
   profileLifecycle: ProfileLifecycle;
+  exportStrategies: { single: SingleExport; batch: BatchExport };
   getGeminiClient: () => GeminiClientService;
   listProfiles: () => string[];
 }
@@ -69,7 +72,20 @@ async function setupServices(): Promise<CliServices> {
   try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
   const profileAuthManager = new ProfileAuthManager({ profileManager, cookieStorageService, logger, geminiClient: factoryClient });
 
-  return { profileAuthManager, profileLifecycle, getGeminiClient, listProfiles };
+  const exportStrategies = {
+    single: new SingleExport({
+      fetchChat: (id, profile) => fetchChatForRequest(getGeminiClient, id, profile),
+      logger: new Logger("export-strategy"),
+    }),
+    batch: new BatchExport({
+      fetchChat: (id, profile) => fetchChatForRequest(getGeminiClient, id, profile),
+      listChatsForProfile: (name, options) => getGeminiClient().forProfile(name).listChats(options),
+      listProfiles,
+      logger: new Logger("export-strategy"),
+    }),
+  };
+
+  return { profileAuthManager, profileLifecycle, exportStrategies, getGeminiClient, listProfiles };
 }
 
 async function main(): Promise<void> {
@@ -125,6 +141,7 @@ async function main(): Promise<void> {
       verbose,
       profileAuthManager: services.profileAuthManager,
       profileLifecycle: services.profileLifecycle,
+      exportStrategies: services.exportStrategies,
       getGeminiClient: services.getGeminiClient,
       listProfiles: services.listProfiles,
     });
