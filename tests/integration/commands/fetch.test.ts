@@ -224,12 +224,21 @@ describe("fetch command integration", () => {
 
   describe("no conversation id", () => {
     test("does not fetch when no id is provided", async () => {
-      spyOn(command as any, "invokeListCommand").mockImplementation(() => {});
+      const listExecute = mock(() => Promise.resolve());
+      mock.module("../../../src/cli/command-registry.ts", () => ({
+        CommandRegistry: class {
+          registerAllCommands(): void {}
+          getHandler(name: string): { execute: ReturnType<typeof mock> } | undefined {
+            if (name === "list") return { execute: listExecute };
+            return undefined;
+          }
+        },
+      }));
 
       await command.execute([], context);
 
       expect(client.fetchChat).not.toHaveBeenCalled();
-      expect((command as any).invokeListCommand).toHaveBeenCalledTimes(1);
+      expect(listExecute).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -6,6 +6,7 @@ import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from 
 import type { Message } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
+import { invokeCommand } from "../utils/command-invoker.ts";
 
 interface FetchCommandOptions {
   help: boolean;
@@ -44,7 +45,8 @@ export class FetchCommand implements CliCommand {
     let conversationId = this.extractConversationId(args, options);
 
     if (!conversationId) {
-      await this.invokeListCommand(context);
+      console.log(chalk.dim("No conversation ID specified. Listing conversations:\n"));
+      await invokeCommand("list", [], context);
       return;
     }
 
@@ -66,20 +68,6 @@ export class FetchCommand implements CliCommand {
       return arg;
     }
     return null;
-  }
-
-  private async invokeListCommand(context: CliCommandContext): Promise<void> {
-    const { CommandRegistry } = await import("../command-registry.ts");
-    const registry = new CommandRegistry();
-    registry.registerAllCommands();
-
-    const listHandler = registry.getHandler("list");
-    if (listHandler) {
-      console.log(chalk.dim("No conversation ID specified. Listing conversations:\n"));
-      await listHandler.execute([], context);
-    } else {
-      throw new Error("Could not invoke list command.");
-    }
   }
 
   private outputJson(messages: Message[], conversationId: string, out: string): void {

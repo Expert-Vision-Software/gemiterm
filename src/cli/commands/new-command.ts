@@ -1,9 +1,8 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
-import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 import { loadEffectivePrompt } from "../utils/prompt-file.ts";
+import { startChatSession } from "../utils/chat-session.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 
 interface NewCommandOptions {
@@ -64,51 +63,22 @@ export class NewCommand implements CliCommand {
 
     message = await loadEffectivePrompt(message, options.promptFile);
 
-    if (message) {
-      await this.sendNonInteractive(context.getGeminiClient, message, options.profile, logger);
-    } else {
-      await this.startInteractive(context.getGeminiClient, options.profile, logger);
-    }
-  }
-
-  private async sendNonInteractive(
-    getGeminiClient: () => GeminiClientService,
-    message: string,
-    profileName: string | null,
-    logger: Logger,
-  ): Promise<void> {
-    logger.debug("Starting new chat with message");
-    const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
-    const result = await client.startNewChat(message);
-
-    console.log(chalk.cyan(`Conversation ID: ${result.conversationId}`));
-    console.log(chalk.blue.bold("Model:"));
-    console.log(result.response);
-  }
-
-  private async startInteractive(
-    getGeminiClient: () => GeminiClientService,
-    profileName: string | null,
-    logger: Logger,
-  ): Promise<void> {
-    let conversationId: string | null = null;
-
-    const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
-      const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
-      const result = await client.startNewChat(message);
-
-      const isFirst = !conversationId;
-      if (isFirst) {
-        conversationId = result.conversationId;
-        console.log(chalk.dim(`Conversation started: ${chalk.cyan(conversationId)}`));
-      } else {
-        console.log(chalk.dim(`Response from: ${chalk.cyan(result.conversationId)}`));
-      }
-
-      return { response: result.response };
-    };
-
-    await runInteractiveLoop(messageHandler, { profileName });
+    await startChatSession({
+      effectiveMessage: message,
+      profileName: options.profile,
+      getGeminiClient: context.getGeminiClient,
+      logger,
+      onFirstTurn: (conversationId) => {
+        console.log(chalk.cyan(`Conversation ID: ${conversationId}`));
+      },
+      onInteractiveTurn: (conversationId, isFirst) => {
+        if (isFirst) {
+          console.log(chalk.dim(`Conversation started: ${chalk.cyan(conversationId)}`));
+        } else {
+          console.log(chalk.dim(`Response from: ${chalk.cyan(conversationId)}`));
+        }
+      },
+    });
   }
 
   private parseArgs(args: string[]): NewCommandOptions {

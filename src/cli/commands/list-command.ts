@@ -8,6 +8,7 @@ import type { ChatInfo } from "../../core/types.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
 import { GemitermError } from "../../core/errors.ts";
 import { browser, select, text, type BrowserAction } from "../utils/prompts.ts";
+import { invokeCommand } from "../utils/command-invoker.ts";
 
 interface ListCommandOptions {
   help: boolean;
@@ -240,26 +241,18 @@ export class ListCommand implements CliCommand {
       }
       return;
     }
-    const { CommandRegistry } = await import("../command-registry.ts");
-    const registry = new CommandRegistry();
-    registry.registerAllCommands();
     if (action === "view") {
-      const fetch = registry.getHandler("fetch");
-      if (fetch) await fetch.execute([chat.id, "--format", "text"], context);
+      await invokeCommand("fetch", [chat.id, "--format", "text"], context);
     } else if (action === "export-markdown") {
       const outPath = await this.promptExportPath(chat.id, "md");
-      const exportCmd = registry.getHandler("export");
-      if (exportCmd) await exportCmd.execute([chat.id, "--format", "markdown", "--out", outPath], context);
+      await invokeCommand("export", [chat.id, "--format", "markdown", "--out", outPath], context);
     } else if (action === "export-json") {
       const outPath = await this.promptExportPath(chat.id, "json");
-      const exportCmd = registry.getHandler("export");
-      if (exportCmd) await exportCmd.execute([chat.id, "--format", "json", "--out", outPath], context);
+      await invokeCommand("export", [chat.id, "--format", "json", "--out", outPath], context);
     } else if (action === "continue") {
-      const continueCmd = registry.getHandler("continue");
-      if (continueCmd) await continueCmd.execute([chat.id], context);
+      await invokeCommand("continue", [chat.id], context);
     } else if (action === "delete") {
-      const deleteCmd = registry.getHandler("delete");
-      if (deleteCmd) await deleteCmd.execute([chat.id, "--force"], context);
+      await invokeCommand("delete", [chat.id, "--force"], context);
     }
   }
 
