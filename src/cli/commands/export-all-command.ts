@@ -1,8 +1,8 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import { listChatsForRequest } from "../utils/gemini-queries.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
+import { render } from "../utils/chat-output.ts";
 
 interface ExportAllCommandOptions {
   help: boolean;
@@ -43,11 +43,19 @@ export class ExportAllCommand implements CliCommand {
     try {
       const chats = options.allProfiles
         ? []
-        : await listChatsForRequest(context.getGeminiClient, context.listProfiles, { allProfiles: false });
+        : await context.getGeminiClient().listChats({});
 
-      await context.exportStrategies.batch.export(
-        { kind: "batch", chats, outDir: options.outDir },
-        { since: options.since, includeMetadata: options.includeMetadata, allProfiles: options.allProfiles },
+      await render(
+        {
+          kind: "batch-export",
+          chats,
+          outDir: options.outDir,
+          since: options.since || undefined,
+          allProfiles: options.allProfiles,
+          includeMetadata: options.includeMetadata,
+        },
+        { format: "markdown" },
+        context.exportStrategies,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

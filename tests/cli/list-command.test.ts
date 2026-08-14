@@ -32,7 +32,7 @@ describe("ListCommand", () => {
       verbose: false,
       profileAuthManager: {} as unknown as CliCommandContext["profileAuthManager"],
       getGeminiClient: () => client,
-      listProfiles: () => [],
+      listProfiles: () => ["default"],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
   });
@@ -166,12 +166,12 @@ describe("ListCommand", () => {
     expect(client.forProfile).toHaveBeenCalledWith("personal");
   });
 
-  test("omits profile from payload when not specified", async () => {
+  test("fans out to all configured profiles when no profile is specified", async () => {
     client.listChats = mock(async () => []);
 
     await command.execute([], context);
 
-    expect(client.forProfile).not.toHaveBeenCalled();
+    expect(client.forProfile).toHaveBeenCalledWith("default");
     expect(client.listChats).toHaveBeenCalled();
   });
 
@@ -183,6 +183,41 @@ describe("ListCommand", () => {
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("ghi789");
     expect(output).toContain("Total: 1 conversation");
+  });
+
+  test("default aggregates all configured profiles", async () => {
+    const profileClients: Record<string, { listChats: ReturnType<typeof mock> }> = {
+      work: { listChats: mock(async () => [{ id: "w1", title: "Work chat", isPinned: false, timestamp: 1717100000000, profile: "work" }]) },
+      personal: { listChats: mock(async () => [{ id: "p1", title: "Personal chat", isPinned: false, timestamp: 1717000000000, profile: "personal" }]) },
+    };
+    client.forProfile = mock((name: string) => profileClients[name]);
+    context.listProfiles = () => ["work", "personal"];
+
+    await command.execute([], context);
+
+    expect(client.forProfile).toHaveBeenCalledWith("work");
+    expect(client.forProfile).toHaveBeenCalledWith("personal");
+    const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("Work chat");
+    expect(output).toContain("Personal chat");
+    expect(output).toContain("PROFILE");
+    expect(output).toContain("work");
+    expect(output).toContain("personal");
+  });
+
+  test("--profile scopes to the named profile without fan-out to other profiles", async () => {
+    const profileClients: Record<string, { listChats: ReturnType<typeof mock> }> = {
+      work: { listChats: mock(async () => [{ id: "w1", title: "Work chat", isPinned: false, timestamp: 1717100000000, profile: "work" }]) },
+      personal: { listChats: mock(async () => [{ id: "p1", title: "Personal chat", isPinned: false, timestamp: 1717000000000, profile: "personal" }]) },
+    };
+    client.forProfile = mock((name: string) => profileClients[name]);
+    context.listProfiles = () => ["work", "personal"];
+
+    await command.execute(["--profile", "work"], context);
+
+    expect(client.forProfile).toHaveBeenCalledWith("work");
+    expect(client.forProfile).not.toHaveBeenCalledWith("personal");
+    expect(profileClients.personal.listChats).not.toHaveBeenCalled();
   });
 });
 

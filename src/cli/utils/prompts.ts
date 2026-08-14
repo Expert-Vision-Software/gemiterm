@@ -20,6 +20,7 @@ import {
 } from "@inquirer/core";
 import { GemitermError } from "../../core/errors.ts";
 import type { ChatInfo } from "../../core/types.ts";
+import { sortChats } from "./chat-output.ts";
 
 export class NonInteractiveError extends GemitermError {
   constructor(message: string) {
@@ -207,19 +208,7 @@ export const browserPrompt = createPrompt<BrowserResult, BrowserConfig>(
         if (favoritesOnly && !c.isPinned) return false;
         return true;
       });
-      const sorted = [...filtered];
-      switch (sort) {
-        case "recent":
-          sorted.sort((a, b) => b.timestamp - a.timestamp);
-          break;
-        case "oldest":
-          sorted.sort((a, b) => a.timestamp - b.timestamp);
-          break;
-        case "alpha":
-          sorted.sort((a, b) => a.title.localeCompare(b.title));
-          break;
-      }
-      return sorted;
+      return sortChats(filtered, sort);
     }, [config.chats, sort, profileFilter, favoritesOnly]);
 
     const pageSize = useMemo(() => {

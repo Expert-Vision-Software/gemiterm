@@ -3,12 +3,11 @@ import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { listChatsForRequest } from "../utils/gemini-queries.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
-import { formatChatList } from "../../infrastructure/formatters.ts";
 import type { ChatInfo } from "../../core/types.ts";
-import { writeTextFile } from "../../infrastructure/io.ts";
 import { GemitermError } from "../../core/errors.ts";
 import { browser, select, text, type BrowserAction } from "../utils/prompts.ts";
 import { invokeCommand } from "../utils/command-invoker.ts";
+import { render, sortChats, filterChatsByDate } from "../utils/chat-output.ts";
 
 interface ListCommandOptions {
   help: boolean;
@@ -90,8 +89,11 @@ export class ListCommand implements CliCommand {
       return;
     }
 
-    chats = this.applySort(chats, options.sort);
-    chats = this.applyDateFilter(chats, options.after, options.before);
+    chats = filterChatsByDate(chats, {
+      after: options.after || undefined,
+      before: options.before || undefined,
+    });
+    chats = sortChats(chats, options.sort);
 
     if (hasLimit) {
       chats = chats.slice(options.offset, options.offset + options.limit);
@@ -99,67 +101,13 @@ export class ListCommand implements CliCommand {
       chats = chats.slice(options.offset);
     }
 
-    if (options.format === "json") {
-      this.outputJson(chats, options.out);
-    } else {
-      this.outputText(chats, options.out, options.allProfiles || Boolean(options.profile));
-    }
-  }
+    const includeProfileColumn =
+      options.allProfiles || Boolean(options.profile) || context.listProfiles().length > 1;
 
-  private applySort(chats: ChatInfo[], sort: "recent" | "oldest" | "alpha"): ChatInfo[] {
-    const sorted = [...chats];
-    switch (sort) {
-      case "recent":
-        sorted.sort((a, b) => b.timestamp - a.timestamp);
-        break;
-      case "oldest":
-        sorted.sort((a, b) => a.timestamp - b.timestamp);
-        break;
-      case "alpha":
-        sorted.sort((a, b) => a.title.localeCompare(b.title));
-        break;
-    }
-    return sorted;
-  }
-
-  private applyDateFilter(chats: ChatInfo[], after: string, before: string): ChatInfo[] {
-    return chats.filter((chat) => {
-      const chatDate = new Date(chat.timestamp);
-      if (after) {
-        const afterDate = new Date(after);
-        if (isNaN(afterDate.getTime())) return true;
-        if (chatDate < afterDate) return false;
-      }
-      if (before) {
-        const beforeDate = new Date(before);
-        if (isNaN(beforeDate.getTime())) return true;
-        if (chatDate > beforeDate) return false;
-      }
-      return true;
-    });
-  }
-
-  private outputJson(chats: ChatInfo[], out: string): void {
-    const output = JSON.stringify({ chats }, null, 2);
-    if (out) {
-      this.writeOutput(out, output);
-    } else {
-      console.log(output);
-    }
-  }
-
-  private outputText(chats: ChatInfo[], out: string, allProfiles: boolean): void {
-    const output = formatChatList(chats, { includeProfileColumn: allProfiles });
-    if (out) {
-      this.writeOutput(out, output);
-    } else {
-      console.log(output);
-    }
-  }
-
-  private writeOutput(out: string, content: string): void {
-    writeTextFile(out, content);
-    console.log(chalk.dim(`Output written to: ${out}`));
+    await render(
+      { kind: "chat-list", chats, includeProfileColumn },
+      { format: options.format, out: options.out || undefined },
+    );
   }
 
   private async copyToClipboard(text: string): Promise<boolean> {

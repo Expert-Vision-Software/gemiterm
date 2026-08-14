@@ -5,6 +5,7 @@ import { fetchChatForRequest } from "../utils/gemini-queries.ts";
 import { validateConversationId } from "../../infrastructure/validators.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
+import { render } from "../utils/chat-output.ts";
 
 interface ExportCommandOptions {
   help: boolean;
@@ -62,12 +63,18 @@ export class ExportCommand implements CliCommand {
       logger.debug(`Fetching chat for export: ${conversationId}`);
       const messages = await fetchChatForRequest(context.getGeminiClient, conversationId, profileName ?? undefined);
 
-      const results = await context.exportStrategies.single.export(
-        { kind: "single", conversationId, messages, format: options.format, out: options.out || undefined },
-        { includeMetadata: options.includeMetadata },
+      const results = await render(
+        {
+          kind: "conversation",
+          conversationId,
+          messages,
+          includeMetadata: options.includeMetadata,
+        },
+        { format: options.format, out: options.out || undefined },
+        context.exportStrategies,
       );
 
-      const outputPath = results[0].filePath;
+      const outputPath = results![0].filePath;
       console.log(chalk.green(`Exported conversation '${chalk.cyan(conversationId)}' to: ${outputPath}`));
       logger.info(`Exported conversation ${conversationId} to ${outputPath}`);
     } catch (error) {
