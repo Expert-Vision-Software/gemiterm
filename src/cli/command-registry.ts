@@ -1,5 +1,6 @@
 import type { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import type { ProfileAuthManager } from "../services/profile-auth-manager.ts";
+import type { ProfileLifecycle } from "../services/profile-lifecycle.ts";
 import { AuthCommand } from "./commands/auth-command.ts";
 import { StatusCommand } from "./commands/status-command.ts";
 import { ListCommand } from "./commands/list-command.ts";
@@ -16,6 +17,7 @@ import { ModelsCommand } from "./commands/models-command.ts";
 export interface CliCommandContext {
   verbose: boolean;
   profileAuthManager: ProfileAuthManager;
+  profileLifecycle: ProfileLifecycle;
   getGeminiClient: () => GeminiClientService;
   listProfiles: () => string[];
 }
