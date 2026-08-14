@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import type { ChatInfo, Message } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
-import { formatChatAsJson, formatChatAsMarkdown } from "../infrastructure/formatters.ts";
+import { formatChatAsJson, formatChatAsMarkdown, filterChatsByDate } from "../infrastructure/formatters.ts";
 import { ensureDir, writeTextFile } from "../infrastructure/io.ts";
 import { joinPath, resolvePath } from "../infrastructure/path-utils.ts";
 
@@ -179,7 +179,7 @@ export class BatchExport implements ExportStrategy {
     if (options.allProfiles) {
       chats = await this.listChatsAcrossProfiles();
     }
-    chats = this.applyDateFilter(chats, options.since ?? "");
+    chats = filterChatsByDate(chats, { since: options.since });
 
     if (chats.length === 0) {
       console.log(chalk.dim("No conversations found to export."));
@@ -244,13 +244,6 @@ export class BatchExport implements ExportStrategy {
       }
     });
     return chats.sort((a, b) => b.timestamp - a.timestamp);
-  }
-
-  private applyDateFilter(chats: ChatInfo[], since: string): ChatInfo[] {
-    if (!since) return chats;
-    const sinceDate = new Date(since);
-    if (isNaN(sinceDate.getTime())) return chats;
-    return chats.filter((chat) => new Date(chat.timestamp) >= sinceDate);
   }
 
   private writeIndex(outDir: string, results: ExportResult[], includeMetadata: boolean): void {

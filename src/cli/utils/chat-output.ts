@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import type { ChatInfo, Message } from "../../core/types.ts";
 import { formatChatList } from "../../infrastructure/formatters.ts";
+export { sortChats, filterChatsByDate, type DateBounds } from "../../infrastructure/formatters.ts";
 import { writeTextFile } from "../../infrastructure/io.ts";
 import type { ExportStrategy, ExportResult } from "../../services/export-strategy.ts";
 
@@ -38,53 +39,6 @@ export interface ChatOutputSink {
 export interface RenderStrategies {
   single: ExportStrategy;
   batch: ExportStrategy;
-}
-
-export function sortChats(
-  chats: ChatInfo[],
-  order: "recent" | "oldest" | "alpha",
-): ChatInfo[] {
-  const sorted = [...chats];
-  switch (order) {
-    case "recent":
-      sorted.sort((a, b) => b.timestamp - a.timestamp);
-      break;
-    case "oldest":
-      sorted.sort((a, b) => a.timestamp - b.timestamp);
-      break;
-    case "alpha":
-      sorted.sort((a, b) => a.title.localeCompare(b.title));
-      break;
-  }
-  return sorted;
-}
-
-export interface DateBounds {
-  after?: string;
-  before?: string;
-  since?: string;
-}
-
-export function filterChatsByDate(chats: ChatInfo[], bounds: DateBounds): ChatInfo[] {
-  return chats.filter((chat) => {
-    const chatDate = new Date(chat.timestamp);
-    if (bounds.after) {
-      const afterDate = new Date(bounds.after);
-      if (isNaN(afterDate.getTime())) return true;
-      if (chatDate < afterDate) return false;
-    }
-    if (bounds.before) {
-      const beforeDate = new Date(bounds.before);
-      if (isNaN(beforeDate.getTime())) return true;
-      if (chatDate > beforeDate) return false;
-    }
-    if (bounds.since) {
-      const sinceDate = new Date(bounds.since);
-      if (isNaN(sinceDate.getTime())) return true;
-      if (chatDate < sinceDate) return false;
-    }
-    return true;
-  });
 }
 
 function formatConversationText(conversationId: string, messages: Message[]): string {

@@ -105,6 +105,53 @@ export function formatProfileTable(statuses: ProfileStatus[]): string {
   });
 }
 
+export function sortChats(
+  chats: ChatInfo[],
+  order: "recent" | "oldest" | "alpha",
+): ChatInfo[] {
+  const sorted = [...chats];
+  switch (order) {
+    case "recent":
+      sorted.sort((a, b) => b.timestamp - a.timestamp);
+      break;
+    case "oldest":
+      sorted.sort((a, b) => a.timestamp - b.timestamp);
+      break;
+    case "alpha":
+      sorted.sort((a, b) => a.title.localeCompare(b.title));
+      break;
+  }
+  return sorted;
+}
+
+export interface DateBounds {
+  after?: string;
+  before?: string;
+  since?: string;
+}
+
+export function filterChatsByDate(chats: ChatInfo[], bounds: DateBounds): ChatInfo[] {
+  return chats.filter((chat) => {
+    const chatDate = new Date(chat.timestamp);
+    if (bounds.after) {
+      const afterDate = new Date(bounds.after);
+      if (isNaN(afterDate.getTime())) return true;
+      if (chatDate < afterDate) return false;
+    }
+    if (bounds.before) {
+      const beforeDate = new Date(bounds.before);
+      if (isNaN(beforeDate.getTime())) return true;
+      if (chatDate > beforeDate) return false;
+    }
+    if (bounds.since) {
+      const sinceDate = new Date(bounds.since);
+      if (isNaN(sinceDate.getTime())) return true;
+      if (chatDate < sinceDate) return false;
+    }
+    return true;
+  });
+}
+
 export function formatChatList(chats: ChatInfo[], options?: { includeProfileColumn?: boolean }): string {
   const includeProfile = options?.includeProfileColumn === true;
 

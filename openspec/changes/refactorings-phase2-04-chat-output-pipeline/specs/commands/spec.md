@@ -58,7 +58,7 @@ The system MUST provide a `list` command implemented by `ListCommand` in `src/cl
 
 ### Requirement: ListCommand Text Output Table
 
-The `list` command's default text output MUST be a 4-column table with headers `ID`, `TITLE`, `DATE`, `PIN` (in that order), produced by `formatChatList` via `ChatOutput.render`. When more than one profile is configured, OR `--all-profiles` is explicitly supplied, the render MUST call `formatChatList(chats, { includeProfileColumn: true })` and the text output MUST include a `PROFILE` column as the 5th column. When exactly one profile is configured and `--all-profiles` is not supplied, the table MUST remain the 4-column form (byte-equivalent to the single-profile baseline). When `--profile <name>` scopes the listing, the table MUST be the 4-column form.
+The `list` command's default text output MUST be a 4-column table with headers `ID`, `TITLE`, `DATE`, `PIN` (in that order), produced by `formatChatList` via `ChatOutput.render`. The render MUST call `formatChatList(chats, { includeProfileColumn: true })` and the text output MUST include a `PROFILE` column as the 5th column when: more than one profile is configured, OR `--all-profiles` is explicitly supplied, OR `--profile <name>` scopes the listing. When exactly one profile is configured and neither `--all-profiles` nor `--profile` is supplied, the table MUST remain the 4-column form (byte-equivalent to the single-profile baseline).
 
 #### Scenario: Single-profile default output has 4 columns
 - **WHEN** the user runs `gemiterm list` (no flags) and exactly one profile is configured
@@ -72,9 +72,9 @@ The `list` command's default text output MUST be a 4-column table with headers `
 - **WHEN** the user runs `gemiterm list --all-profiles`
 - **THEN** the rendered text output table contains the `PROFILE` column regardless of how many profiles are configured
 
-#### Scenario: --profile keeps the 4-column form
-- **WHEN** the user runs `gemiterm list --profile work` and multiple profiles are configured
-- **THEN** the rendered table contains the 4 columns `ID`, `TITLE`, `DATE`, `PIN` only
+#### Scenario: --profile renders the Profile column
+- **WHEN** the user runs `gemiterm list --profile work`
+- **THEN** the rendered table contains the 5 columns `ID`, `TITLE`, `DATE`, `PIN`, `PROFILE`, byte-equivalent to the pre-change `--profile`-scoped output
 
 ### Requirement: ListCommand non-interactive byte-equivalence contract
 
