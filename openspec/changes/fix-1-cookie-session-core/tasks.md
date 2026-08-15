@@ -21,9 +21,9 @@ Baseline: `bun test` -> 862 pass / 2 skip / 0 fail / 1748 expects / 56 files. Ru
 
 ## 4. BrowserRefresher + refresh-runner (the rotation engine)
 
-- [ ] 4.1 Create `src/auth/browser-refresher.ts`: `rotatePsidts(profile, baselineValue, timeoutMs=60_000)` - headless `open --persistent --profile`, poll `cookie-list` until `__Secure-1PSIDTS` value differs from baseline or timeout, `state-save` to the profile's storage path via full-jar writer, close session in `finally`; domain filter (`.google.com`, `.youtube.com`, `accounts.google.com`) applied to the captured jar
-- [ ] 4.2 Create `src/auth/refresh-runner.ts`: standalone Bun entry point taking a profile name; runs the refresher with the on-disk PSIDTS as baseline; never prompts, never throws user-visible; idempotent; logs rotation outcome
-- [ ] 4.3 RED-first tests: refresher persists only on PSIDTS change (no spurious writes); timeout path closes the browser and reports `rotated:false`; captured jar keeps companions (regression pin for the H6/full-jar contract); domain filter keeps `.google.com`/`.youtube.com`/`accounts.google.com` rows only
+- [x] 4.1 Create `src/auth/browser-refresher.ts`: `rotatePsidts(profile, baselineValue, timeoutMs=60_000)` - headless `open --persistent --profile`, poll `cookie-list` until `__Secure-1PSIDTS` value differs from baseline or timeout, `state-save` to the profile's storage path via full-jar writer, close session in `finally`; domain filter (`.google.com`, `.youtube.com`, `accounts.google.com`) applied to the captured jar
+- [x] 4.2 Create `src/auth/refresh-runner.ts`: standalone Bun entry point taking a profile name; runs the refresher with the on-disk PSIDTS as baseline; never prompts, never throws user-visible; idempotent; logs rotation outcome
+- [x] 4.3 RED-first tests: refresher persists only on PSIDTS change (no spurious writes); timeout path closes the browser and reports `rotated:false`; captured jar keeps companions (regression pin for the H6/full-jar contract); domain filter keeps `.google.com`/`.youtube.com`/`accounts.google.com` rows only
 
 ## 5. CookieSession facade + recovery
 
