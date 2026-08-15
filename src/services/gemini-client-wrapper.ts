@@ -111,10 +111,10 @@ export class GeminiClientService {
     this.initPromise = this.client!.init();
     await this.initPromise;
     this.initialized = true;
-    this.persistRefreshedCookies();
+    await this.persistRefreshedCookies();
   }
 
-  private persistRefreshedCookies(): void {
+  private async persistRefreshedCookies(): Promise<void> {
     try {
       if (!this.cookieStorageService || !this.profileName || !this.client) return;
       const jar = this.client.cookies as Record<string, string>;
@@ -124,7 +124,7 @@ export class GeminiClientService {
       const changed1psidts = typeof live1psidts === "string" && live1psidts !== "" && live1psidts !== this.baselineSecure1psidts;
       if (!changed1psid && !changed1psidts) return;
 
-      const stored = this.cookieStorageService.loadAllCookiesForProfile(this.profileName);
+      const stored = await this.cookieStorageService.loadAllCookiesForProfile(this.profileName);
       const expirySec = Math.floor((Date.now() + COOKIE_EXPIRY_THRESHOLD_MS) / 1000);
       let changed = false;
       const merged = stored.map((c) => {
@@ -140,7 +140,7 @@ export class GeminiClientService {
       });
       if (!changed) return;
 
-      this.cookieStorageService.saveCookiesForProfile(this.profileName, merged);
+      await this.cookieStorageService.saveCookiesForProfile(this.profileName, merged);
       if (changed1psid) this.baselineSecure1psid = live1psid;
       if (changed1psidts) this.baselineSecure1psidts = live1psidts;
       this.logger.debug(`Persisted refreshed cookies for profile '${this.profileName}'`);
@@ -202,11 +202,11 @@ export class GeminiClientService {
     return new GeminiAPIError("Unexpected error: " + String(e));
   }
 
-  forProfile(profileName: string): GeminiClientService {
+  async forProfile(profileName: string): Promise<GeminiClientService> {
     if (!this.cookieStorageService) {
       throw new Error("CookieStorageService is required for forProfile");
     }
-    const cookies = this.cookieStorageService.loadCookiesForProfile(profileName);
+    const cookies = await this.cookieStorageService.loadCookiesForProfile(profileName);
     return new GeminiClientService(
       { secure1psid: cookies.secure_1psid, secure1psidts: cookies.secure_1psidts },
       this.logger,
@@ -219,7 +219,7 @@ export class GeminiClientService {
 
   async profileHasConversation(profileName: string, conversationId: string): Promise<boolean> {
     try {
-      const profileClient = this.forProfile(profileName);
+      const profileClient = await this.forProfile(profileName);
       const chats = await profileClient.listChats();
       return chats.some((chat) => chat.id === conversationId);
     } catch {
@@ -251,7 +251,7 @@ export class GeminiClientService {
         chats = chats.slice(0, options.limit);
       }
 
-      this.persistRefreshedCookies();
+      await this.persistRefreshedCookies();
       return chats;
     } catch (e) {
       const err = this.translateError(e);
@@ -268,7 +268,7 @@ export class GeminiClientService {
       if (turns.length > 0) {
         const lastModelTurn = [...turns].reverse().find((t) => t.role === "model");
         if (lastModelTurn?.rid && this.profileName) {
-          this.chatMetadata.save(this.profileName, conversationId, {
+          await this.chatMetadata.save(this.profileName, conversationId, {
             rid: lastModelTurn.rid,
             rcid: lastModelTurn.rcid ?? "",
             ctx: null,
@@ -276,7 +276,7 @@ export class GeminiClientService {
         }
       }
       const messages = turns.length === 0 ? [] : this.toDomainMessages(turns, conversationId);
-      this.persistRefreshedCookies();
+      await this.persistRefreshedCookies();
       return messages;
     } catch (e) {
       const err = this.translateError(e);
@@ -289,7 +289,7 @@ export class GeminiClientService {
     await this.init();
     try {
       await this.client!.deleteChat(conversationId);
-      this.persistRefreshedCookies();
+      await this.persistRefreshedCookies();
     } catch (e) {
       const err = this.translateError(e);
       this.logger.debug(`deleteChat failed: ${e}`);
@@ -312,7 +312,7 @@ export class GeminiClientService {
     try {
       let session: RawChatSession;
       if (this.profileName) {
-        const stored = this.chatMetadata.lookup(this.profileName, conversationId);
+        const stored = await this.chatMetadata.lookup(this.profileName, conversationId);
         if (stored) {
           session = this.buildSession(conversationId, [
             conversationId, stored.rid, stored.rcid, null, null, null, null, null, null,
@@ -330,10 +330,10 @@ export class GeminiClientService {
       const output = await session.generateContent({ prompt: message });
       const captured = extractChatMetadata(output.metadata);
       if (captured && this.profileName) {
-        this.chatMetadata.save(this.profileName, conversationId, captured);
+        await this.chatMetadata.save(this.profileName, conversationId, captured);
       }
       const text = output.text.toString();
-      this.persistRefreshedCookies();
+      await this.persistRefreshedCookies();
       return text;
     } catch (e) {
       const err = this.translateError(e);
@@ -352,10 +352,10 @@ export class GeminiClientService {
       if (this.profileName) {
         const captured = extractChatMetadata(output.metadata);
         if (captured) {
-          this.chatMetadata.save(this.profileName, conversationId, captured);
+          await this.chatMetadata.save(this.profileName, conversationId, captured);
         }
       }
-      this.persistRefreshedCookies();
+      await this.persistRefreshedCookies();
       return { response, conversationId };
     } catch (e) {
       const err = this.translateError(e);
@@ -369,7 +369,7 @@ export class GeminiClientService {
     try {
       const raw = await this.client!.models();
       const models = (raw ?? []).map((m: RawAvailableModel) => this.toDomainModelName(m));
-      this.persistRefreshedCookies();
+      await this.persistRefreshedCookies();
       return models;
     } catch (e) {
       const err = this.translateError(e);

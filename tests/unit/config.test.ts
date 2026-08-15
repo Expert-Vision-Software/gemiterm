@@ -26,134 +26,134 @@ describe("config", () => {
   });
 
   describe("getDefaultProfileName", () => {
-    test("returns 'default' when no marker file exists", () => {
-      expect(getDefaultProfileName()).toBe("default");
+    test("returns 'default' when no marker file exists", async () => {
+      expect(await getDefaultProfileName()).toBe("default");
     });
 
-    test("returns the name from the marker file when it exists", () => {
+    test("returns the name from the marker file when it exists", async () => {
       const profilesDir = join(configDir, "profiles");
       mkdirSync(profilesDir, { recursive: true });
-      setDefaultProfileName("work");
-      expect(getDefaultProfileName()).toBe("work");
+      await setDefaultProfileName("work");
+      expect(await getDefaultProfileName()).toBe("work");
     });
 
-    test("trims whitespace from marker file content", () => {
+    test("trims whitespace from marker file content", async () => {
       const profilesDir = join(configDir, "profiles");
       mkdirSync(profilesDir, { recursive: true });
       const markerPath = join(profilesDir, ".default");
       writeFileSync(markerPath, "  my-profile  \n", "utf-8");
-      expect(getDefaultProfileName()).toBe("my-profile");
+      expect(await getDefaultProfileName()).toBe("my-profile");
     });
   });
 
   describe("setDefaultProfileName", () => {
-    test("creates marker file with the given name", () => {
+    test("creates marker file with the given name", async () => {
       const markerPath = join(configDir, "profiles", ".default");
       expect(existsSync(markerPath)).toBe(false);
 
-      setDefaultProfileName("personal");
+      await setDefaultProfileName("personal");
 
       expect(existsSync(markerPath)).toBe(true);
       const content = readFileSync(markerPath, "utf-8");
       expect(content).toBe("personal");
     });
 
-    test("creates profiles directory if it does not exist", () => {
+    test("creates profiles directory if it does not exist", async () => {
       const profilesDir = join(configDir, "profiles");
       expect(existsSync(profilesDir)).toBe(false);
 
-      setDefaultProfileName("work");
+      await setDefaultProfileName("work");
 
       expect(existsSync(profilesDir)).toBe(true);
     });
 
-    test("overwrites existing marker file", () => {
-      setDefaultProfileName("first");
-      expect(getDefaultProfileName()).toBe("first");
+    test("overwrites existing marker file", async () => {
+      await setDefaultProfileName("first");
+      expect(await getDefaultProfileName()).toBe("first");
 
-      setDefaultProfileName("second");
-      expect(getDefaultProfileName()).toBe("second");
+      await setDefaultProfileName("second");
+      expect(await getDefaultProfileName()).toBe("second");
     });
   });
 
   describe("listProfiles", () => {
-    test("returns empty array when profiles directory does not exist", () => {
+    test("returns empty array when profiles directory does not exist", async () => {
       const profilesDir = join(configDir, "profiles");
       expect(existsSync(profilesDir)).toBe(false);
 
-      const profiles = listProfiles();
+      const profiles = await listProfiles();
 
       expect(profiles).toEqual([]);
     });
 
-    test("returns empty array when profiles directory exists but is empty", () => {
+    test("returns empty array when profiles directory exists but is empty", async () => {
       mkdirSync(join(configDir, "profiles"), { recursive: true });
 
-      const profiles = listProfiles();
+      const profiles = await listProfiles();
 
       expect(profiles).toEqual([]);
     });
 
-    test("returns sorted list of profile directories", () => {
+    test("returns sorted list of profile directories", async () => {
       const profilesDir = join(configDir, "profiles");
       mkdirSync(join(profilesDir, "charlie"), { recursive: true });
       mkdirSync(join(profilesDir, "alpha"), { recursive: true });
       mkdirSync(join(profilesDir, "bravo"), { recursive: true });
 
-      const profiles = listProfiles();
+      const profiles = await listProfiles();
 
       expect(profiles).toEqual(["alpha", "bravo", "charlie"]);
     });
 
-    test("excludes the default marker file (.default) from results", () => {
+    test("excludes the default marker file (.default) from results", async () => {
       const profilesDir = join(configDir, "profiles");
       mkdirSync(join(profilesDir, "work"), { recursive: true });
       mkdirSync(join(profilesDir, "personal"), { recursive: true });
       writeFileSync(join(profilesDir, ".default"), "work", "utf-8");
 
-      const profiles = listProfiles();
+      const profiles = await listProfiles();
 
       expect(profiles).toEqual(["personal", "work"]);
     });
 
-    test("excludes files (only includes directories)", () => {
+    test("excludes files (only includes directories)", async () => {
       const profilesDir = join(configDir, "profiles");
       mkdirSync(join(profilesDir, "valid-profile"), { recursive: true });
       writeFileSync(join(profilesDir, "not-a-profile.txt"), "data", "utf-8");
 
-      const profiles = listProfiles();
+      const profiles = await listProfiles();
 
       expect(profiles).toEqual(["valid-profile"]);
     });
   });
 
   describe("ensureConfigDir", () => {
-    test("creates config directory when it does not exist", () => {
+    test("creates config directory when it does not exist", async () => {
       rmSync(configDir, { recursive: true, force: true });
 
-      ensureConfigDir();
+      await ensureConfigDir();
 
       expect(existsSync(configDir)).toBe(true);
     });
 
-    test("creates profiles directory inside config dir", () => {
+    test("creates profiles directory inside config dir", async () => {
       const profilesDir = join(configDir, "profiles");
 
-      ensureConfigDir();
+      await ensureConfigDir();
 
       expect(existsSync(profilesDir)).toBe(true);
     });
 
-    test("returns the config directory path", () => {
-      const result = ensureConfigDir();
+    test("returns the config directory path", async () => {
+      const result = await ensureConfigDir();
 
       expect(result).toBe(configDir);
     });
 
-    test("does not throw when directories already exist", () => {
+    test("does not throw when directories already exist", async () => {
       mkdirSync(join(configDir, "profiles"), { recursive: true });
 
-      expect(() => ensureConfigDir()).not.toThrow();
+      await ensureConfigDir();
     });
   });
 });

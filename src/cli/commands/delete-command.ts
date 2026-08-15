@@ -66,8 +66,8 @@ export class DeleteCommand implements CliCommand {
 
     try {
       const client = profileName
-        ? context.getGeminiClient().forProfile(profileName)
-        : context.getGeminiClient();
+        ? await (await context.getGeminiClient()).forProfile(profileName)
+        : await context.getGeminiClient();
       await client.deleteChat(conversationId);
 
       console.log(chalk.green(`Conversation '${chalk.cyan(conversationId)}' deleted.`));

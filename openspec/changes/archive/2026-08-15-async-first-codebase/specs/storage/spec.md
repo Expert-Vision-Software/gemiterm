@@ -1,8 +1,8 @@
-## Purpose
+# Delta: storage (async-first-codebase)
 
-The cookie and profile persistence layer. It reads and writes the per-profile `storage_state.json` cookie file, manages the lifecycle of profile directories (create, delete, rename, set-default), and computes profile freshness from cookie expiry. Two classes are exposed: `CookieStorage` (raw cookie I/O) and `ProfileManager` (high-level profile lifecycle and status).
+All observable behavior (error messages, on-disk layout, freshness rules, default reassignment) is unchanged; the sole contract change is that every IO-bound method is now `async` and returns a `Promise` of its previous sync return type. Sync variants no longer exist.
 
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: CookieStorage.save
 The `CookieStorage` class MUST expose an async `save(profileName, cookies)` method returning `Promise<void>` that writes the given cookie array into the profile's `storage_state.json` file as a JSON object with shape `{ cookies: Cookie[] }`. The method MUST create the profile directory (and any parents) before writing.
@@ -178,21 +178,3 @@ The `ProfileManager` class MUST expose an async `loadCookiesForApi(profileName)`
 #### Scenario: Throws on missing profile
 - **WHEN** no storage file exists for the profile
 - **THEN** `await loadCookiesForApi(name)` rejects with an error whose message contains `No storage state found`
-
-### Requirement: Freshness and Validity
-A profile's cookies are considered valid and fresh when ALL of the following are true: (a) the cookie set includes both `__Secure-1PSID` and `__Secure-1PSIDTS`, (b) the `__Secure-1PSIDTS` cookie has an `expires` value greater than 0, and (c) the resulting expiry timestamp (cookie `expires` in milliseconds) is later than `now + 7 days` (the freshness threshold). The system MUST use these rules consistently in `hasValidCookies`, `getStatus`, and `loadCookiesForApi`.
-
-#### Scenario: Freshness window uses 7-day threshold
-- **WHEN** a profile's `__Secure-1PSIDTS` cookie expires more than 7 days from now
-- **THEN** `hasValidCookies` and `getStatus` both report the profile as active
-
-#### Scenario: Cookies inside the 7-day window are not fresh
-- **WHEN** a profile's `__Secure-1PSIDTS` cookie expires within 7 days from now (or has already passed)
-- **THEN** `hasValidCookies` returns `false` and `getStatus` reports `isActive: false`
-
-### Requirement: Cookie JSON On-Disk Layout
-Cookies MUST be persisted to `<profilesDir>/<name>/storage_state.json` as a JSON object of the form `{ "cookies": <Cookie[]> }`. The file MUST be UTF-8 encoded. The `expires` field on each cookie is a Unix-seconds numeric timestamp.
-
-#### Scenario: Storage file is parseable JSON with cookies array
-- **WHEN** `CookieStorage.save(name, cookies)` completes
-- **THEN** the file at `<profilesDir>/<name>/storage_state.json` is valid JSON whose top-level `cookies` field is the saved array

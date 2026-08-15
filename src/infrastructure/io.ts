@@ -4,23 +4,22 @@
  * No other source file in `src/` may import from `node:fs` or `node:path`
  * directly.
  *
- * This module is intentionally small: every function is a thin wrapper around
- * the corresponding `node:fs` call with consistent semantics (always-recursive
- * `mkdir`, safe returns, structured errors). New functions should be added
- * only when at least 2 call sites need them; ad-hoc single-use helpers should
- * stay in the call site.
+ * This module is intentionally small: every function is a thin async wrapper
+ * around the corresponding `node:fs/promises` call with consistent semantics
+ * (always-recursive `mkdir`, safe returns, structured errors). New functions
+ * should be added only when at least 2 call sites need them; ad-hoc
+ * single-use helpers should stay in the call site.
  */
 
 import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 export class IOError extends Error {
@@ -34,21 +33,26 @@ function wrap(op: string, path: string, cause?: Error): IOError {
   return new IOError(`${op} failed for ${path}`, cause);
 }
 
-function ensureDir(path: string): void {
+async function ensureDir(path: string): Promise<void> {
   try {
-    mkdirSync(path, { recursive: true });
+    await mkdir(path, { recursive: true });
   } catch (err) {
     throw wrap("ensureDir", path, err instanceof Error ? err : undefined);
   }
 }
 
-function existsFile(path: string): boolean {
-  return existsSync(path);
+async function existsFile(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function readTextFile(path: string): string {
+async function readTextFile(path: string): Promise<string> {
   try {
-    return readFileSync(path, "utf-8");
+    return await readFile(path, "utf-8");
   } catch (err) {
     throw wrap("readTextFile", path, err instanceof Error ? err : undefined);
   }
@@ -62,31 +66,32 @@ function readTextFile(path: string): string {
  * Note: the `""` return conflates "file does not exist" with "file exists
  * but is empty". This is appropriate for callers that only need a string
  * for `.includes()` / `.trim()` checks (for example, the WSL `/proc/version`
+ * probe in `path-utils.ts`). Callers that must distinguish
  * the two cases should use `readTextFile` and handle the `IOError`.
  */
-function safeReadTextFile(path: string): string {
+async function safeReadTextFile(path: string): Promise<string> {
   try {
-    return readFileSync(path, "utf-8");
+    return await readFile(path, "utf-8");
   } catch {
     return "";
   }
 }
 
-function writeTextFile(path: string, content: string): void {
+async function writeTextFile(path: string, content: string): Promise<void> {
   const absolute = resolve(path);
   const parent = dirname(absolute);
-  ensureDir(parent);
+  await ensureDir(parent);
   try {
-    writeFileSync(absolute, content, "utf-8");
+    await writeFile(absolute, content, "utf-8");
   } catch (err) {
     throw wrap("writeTextFile", absolute, err instanceof Error ? err : undefined);
   }
 }
 
-function readJsonFile<T = unknown>(path: string): T {
+async function readJsonFile<T = unknown>(path: string): Promise<T> {
   let raw: string;
   try {
-    raw = readFileSync(path, "utf-8");
+    raw = await readFile(path, "utf-8");
   } catch (err) {
     throw wrap("readJsonFile", path, err instanceof Error ? err : undefined);
   }
@@ -100,29 +105,29 @@ function readJsonFile<T = unknown>(path: string): T {
   }
 }
 
-function writeJsonFile(path: string, data: unknown): void {
-  writeTextFile(path, JSON.stringify(data, null, 2));
+async function writeJsonFile(path: string, data: unknown): Promise<void> {
+  await writeTextFile(path, JSON.stringify(data, null, 2));
 }
 
-function removeDir(path: string): void {
+async function removeDir(path: string): Promise<void> {
   try {
-    rmSync(path, { recursive: true, force: true });
+    await rm(path, { recursive: true, force: true });
   } catch (err) {
     throw wrap("removeDir", path, err instanceof Error ? err : undefined);
   }
 }
 
-function removeFile(path: string): void {
+async function removeFile(path: string): Promise<void> {
   try {
-    rmSync(path, { force: true });
+    await rm(path, { force: true });
   } catch (err) {
     throw wrap("removeFile", path, err instanceof Error ? err : undefined);
   }
 }
 
-function renameDir(src: string, dest: string): void {
+async function renameDir(src: string, dest: string): Promise<void> {
   try {
-    renameSync(src, dest);
+    await rename(src, dest);
   } catch (err) {
     throw new IOError(
       `renameDir: ${src} -> ${dest}: ${err instanceof Error ? err.message : String(err)}`,
@@ -131,30 +136,34 @@ function renameDir(src: string, dest: string): void {
   }
 }
 
-function isDirectory(path: string): boolean {
+async function isDirectory(path: string): Promise<boolean> {
   try {
-    return statSync(path).isDirectory();
+    return (await stat(path)).isDirectory();
   } catch {
     return false;
   }
 }
 
-function listSubdirectories(path: string): string[] {
-  if (!existsSync(path)) {
+async function listSubdirectories(path: string): Promise<string[]> {
+  if (!(await existsFile(path))) {
     return [];
   }
-  return readdirSync(path).filter((entry) => {
+  const entries = await readdir(path);
+  const subdirectories: string[] = [];
+  for (const entry of entries) {
     try {
-      return statSync(join(path, entry)).isDirectory();
+      if ((await stat(join(path, entry))).isDirectory()) {
+        subdirectories.push(entry);
+      }
     } catch {
-      return false;
     }
-  });
+  }
+  return subdirectories;
 }
 
-function getFileMtime(path: string): Date | null {
+async function getFileMtime(path: string): Promise<Date | null> {
   try {
-    return statSync(path).mtime;
+    return (await stat(path)).mtime;
   } catch {
     return null;
   }

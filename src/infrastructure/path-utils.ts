@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { IOError, existsFile } from "./io.ts";
+import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { homedir, platform, tmpdir } from "node:os";
 
@@ -60,16 +61,15 @@ function getTempFilePath(prefix: string, extension = ".tmp"): string {
   return join(tmpdir(), `${unique}${extension}`);
 }
 
-function isWSL(): boolean {
+async function isWSL(): Promise<boolean> {
   if (process.platform !== "linux") {
     return false;
   }
   try {
-    if (existsSync("/proc/version")) {
-      const version = readFileSync("/proc/version", "utf-8").toLowerCase();
-      if (version.includes("microsoft") || version.includes("wsl")) {
-        return true;
-      }
+    const version = await readFile("/proc/version", "utf-8");
+    const lower = version.toLowerCase();
+    if (lower.includes("microsoft") || lower.includes("wsl")) {
+      return true;
     }
   } catch {
     // ignore — fall through to env var check
@@ -78,13 +78,13 @@ function isWSL(): boolean {
   return typeof distro === "string" && distro.length > 0;
 }
 
-function getProjectRoot(importMetaUrl?: string): string {
+async function getProjectRoot(importMetaUrl?: string): Promise<string> {
   const start = importMetaUrl
     ? dirname(new URL(importMetaUrl).pathname.replace(/^\/([A-Za-z]:)/, "$1"))
     : process.cwd();
   let dir = start;
   for (let i = 0; i < 32; i++) {
-    if (existsSync(join(dir, "package.json"))) {
+    if (await existsFile(join(dir, "package.json"))) {
       return dir;
     }
     const parent = dirname(dir);
@@ -93,7 +93,7 @@ function getProjectRoot(importMetaUrl?: string): string {
     }
     dir = parent;
   }
-  throw new Error(
+  throw new IOError(
     `getProjectRoot: could not find a 'package.json' in any parent of ${start}`,
   );
 }
@@ -125,14 +125,14 @@ const BUILD_TIME_PACKAGE: PackageJson | null =
       }
     : null;
 
-function getPackageJson(importMetaUrl?: string): PackageJson {
+async function getPackageJson(importMetaUrl?: string): Promise<PackageJson> {
   if (BUILD_TIME_PACKAGE !== null) {
     return BUILD_TIME_PACKAGE;
   }
 
   try {
-    const root = getProjectRoot(importMetaUrl);
-    const raw = readFileSync(join(root, "package.json"), "utf-8");
+    const root = await getProjectRoot(importMetaUrl);
+    const raw = await readFile(join(root, "package.json"), "utf-8");
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object") {
       return parsed as PackageJson;

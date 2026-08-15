@@ -62,9 +62,9 @@ function formatConversationText(conversationId: string, messages: Message[]): st
   return lines.join("\n");
 }
 
-function dispatch(content: string, out?: string): void {
+async function dispatch(content: string, out?: string): Promise<void> {
   if (out) {
-    writeTextFile(out, content);
+    await writeTextFile(out, content);
     console.log(chalk.dim(`Output written to: ${out}`));
   } else {
     console.log(content);
@@ -124,7 +124,7 @@ export async function render(
       sink.format === "json"
         ? JSON.stringify({ conversationId: data.conversationId, messages: data.messages }, null, 2)
         : formatConversationText(data.conversationId, data.messages);
-    dispatch(content, sink.out);
+    await dispatch(content, sink.out);
     return;
   }
 
@@ -132,5 +132,5 @@ export async function render(
     sink.format === "json"
       ? JSON.stringify({ chats: data.chats }, null, 2)
       : formatChatList(data.chats, { includeProfileColumn: data.includeProfileColumn });
-  dispatch(content, sink.out);
+  await dispatch(content, sink.out);
 }

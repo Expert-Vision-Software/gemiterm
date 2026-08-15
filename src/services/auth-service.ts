@@ -41,7 +41,7 @@ export class AuthService {
   }
 
   async authenticate(profileName?: string): Promise<AuthResult> {
-    const name = profileName ?? getDefaultProfileName();
+    const name = profileName ?? await getDefaultProfileName();
     validateProfileName(name);
 
     if (isRunningElevated()) {
@@ -65,7 +65,7 @@ export class AuthService {
   }
 
   async renew(profileName?: string): Promise<AuthResult> {
-    const name = profileName ?? getDefaultProfileName();
+    const name = profileName ?? await getDefaultProfileName();
     validateProfileName(name);
 
     if (isRunningElevated()) {
@@ -87,7 +87,7 @@ export class AuthService {
       await this.launchBrowser(name);
 
       const statePath = getProfilePath(name);
-      if (existsFile(statePath)) {
+      if (await existsFile(statePath)) {
         try {
           await this.driver.stateLoad(name, statePath);
           await this.driver.evalJs(name, "location.reload()");
@@ -150,9 +150,9 @@ export class AuthService {
   }
 
   async extractCookies(profileName: string, cookies: Cookie[]): Promise<void> {
-    ensureConfigDir();
+    await ensureConfigDir();
     this.logger.info(`Saving ${cookies.length} cookies for profile: ${profileName}`);
-    this.cookieStorage.save(profileName, cookies);
+    await this.cookieStorage.save(profileName, cookies);
   }
 
   confirmAuthSuccess(cookieCount: number, expiresAt: Date | null, cookies: Cookie[] = []): void {

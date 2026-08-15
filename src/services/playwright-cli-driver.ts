@@ -166,13 +166,13 @@ export class PlaywrightCliDriver {
     const tempPath = getTempFilePath("gemiterm-state", ".json");
     try {
       await this.stateSave(session, tempPath);
-      const state = readJsonFile<{ cookies?: unknown[] }>(tempPath);
+      const state = await readJsonFile<{ cookies?: unknown[] }>(tempPath);
       const cookies = Array.isArray(state.cookies) ? state.cookies : [];
       return cookies
         .filter((c): c is Record<string, unknown> => c !== null && typeof c === "object")
         .map((c) => this.cookieFromObject(c));
     } finally {
-      removeDir(tempPath);
+      await removeDir(tempPath);
     }
   }
 

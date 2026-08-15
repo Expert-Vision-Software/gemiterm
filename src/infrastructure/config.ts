@@ -14,32 +14,32 @@ import {
   DEFAULT_PROFILE_MARKER,
 } from "./path-utils.ts";
 
-function getDefaultProfileName(): string {
+async function getDefaultProfileName(): Promise<string> {
   const marker = getDefaultProfileMarkerPath();
-  if (existsFile(marker)) {
-    return readTextFile(marker).trim() || "default";
+  if (await existsFile(marker)) {
+    return (await readTextFile(marker)).trim() || "default";
   }
   return "default";
 }
 
-function setDefaultProfileName(name: string): void {
+async function setDefaultProfileName(name: string): Promise<void> {
   const marker = getDefaultProfileMarkerPath();
-  ensureDir(dirnamePath(marker));
-  writeTextFile(marker, name);
+  await ensureDir(dirnamePath(marker));
+  await writeTextFile(marker, name);
 }
 
-function listProfiles(): string[] {
+async function listProfiles(): Promise<string[]> {
   const profilesPath = getProfilesDir();
-  if (!isDirectory(profilesPath)) return [];
-  return listSubdirectories(profilesPath)
+  if (!(await isDirectory(profilesPath))) return [];
+  return (await listSubdirectories(profilesPath))
     .filter((entry) => entry !== DEFAULT_PROFILE_MARKER)
     .sort();
 }
 
-function ensureConfigDir(): string {
+async function ensureConfigDir(): Promise<string> {
   const configDir = getConfigDir();
-  ensureDir(configDir);
-  ensureDir(getProfilesDir());
+  await ensureDir(configDir);
+  await ensureDir(getProfilesDir());
   return configDir;
 }
 

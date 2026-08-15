@@ -1,62 +1,8 @@
-## Purpose
+# Delta: configuration (async-first-codebase)
 
-The configuration subsystem resolves the on-disk config directory, manages the default-profile marker file, lists and mutates profile directories, and ensures the config tree exists. It encapsulates the platform-specific location of the user's gemiterm data and the `profiles/<name>/storage_state.json` layout used by storage.
+The path-resolution functions (`getConfigDir`, `getProfilesDir`, `getProfilePath`, `getDefaultProfileMarkerPath`) remain synchronous pure string builders. The IO-bound functions become `async`. Resolution rules are otherwise unchanged.
 
-## Requirements
-
-### Requirement: Config Directory Resolution With Env Override
-The system MUST resolve the config directory by checking the `GEMITERM_CONFIG_DIR` environment variable first. If that variable is set to a non-empty string, the config directory MUST be exactly that string. If the env var is unset or empty, the system MUST fall back to a platform default.
-
-#### Scenario: Env override takes precedence
-- **WHEN** `GEMITERM_CONFIG_DIR` is set to `/custom/gemiterm`
-- **THEN** `getConfigDir()` returns `/custom/gemiterm` regardless of the current platform
-
-#### Scenario: Env var empty falls back to platform default
-- **WHEN** `GEMITERM_CONFIG_DIR` is unset or empty
-- **THEN** `getConfigDir()` returns the platform default
-
-### Requirement: Windows Config Path
-On Windows (`process.platform === "win32"`), when the env override is not set, the system MUST use `%APPDATA%\gemiterm` (i.e. the value of the `APPDATA` environment variable joined with `"gemiterm"`).
-
-#### Scenario: Windows with APPDATA
-- **WHEN** `process.platform === "win32"` and `APPDATA` is set to `C:\Users\test\AppData\Roaming`
-- **THEN** `getConfigDir()` returns `C:\Users\test\AppData\Roaming\gemiterm`
-
-#### Scenario: Windows without APPDATA falls back to homedir
-- **WHEN** `process.platform === "win32"` and `APPDATA` is not set
-- **THEN** `getConfigDir()` returns `<homedir>/gemiterm` (the Linux/macOS-style default)
-
-### Requirement: Linux and macOS Config Path
-On Linux and macOS (`process.platform` is `"linux"` or `"darwin"`), when the env override is not set, the system MUST use `~/gemiterm` (i.e. `<homedir>/gemiterm`; no `.config` intermediary).
-
-#### Scenario: Linux platform
-- **WHEN** `process.platform === "linux"` and the env override is not set
-- **THEN** `getConfigDir()` returns `<homedir>/gemiterm`
-
-#### Scenario: macOS platform
-- **WHEN** `process.platform === "darwin"` and the env override is not set
-- **THEN** `getConfigDir()` returns `<homedir>/gemiterm`
-
-### Requirement: Profiles Subdirectory Layout
-The system MUST expose a `getProfilesDir()` function that returns `<configDir>/profiles`. The profiles subdirectory is the parent of every per-profile directory.
-
-#### Scenario: Profiles dir under config
-- **WHEN** the config dir is `/x/gemiterm`
-- **THEN** `getProfilesDir()` returns `/x/gemiterm/profiles`
-
-### Requirement: Storage State File Path
-The system MUST expose a `getProfilePath(name)` function that returns `<profilesDir>/<name>/storage_state.json`. The filename `storage_state.json` is the canonical file inside each profile directory that holds the cookie JSON.
-
-#### Scenario: Profile path for a single profile
-- **WHEN** the config dir is `/x/gemiterm`
-- **THEN** `getProfilePath("work")` returns `/x/gemiterm/profiles/work/storage_state.json`
-
-### Requirement: Default Profile Marker File
-The system MUST use the file name `.default` (the value of the exported `DEFAULT_PROFILE_MARKER` constant) inside the profiles directory to record the current default profile name. The full marker path is `<profilesDir>/.default` and is exposed via `getDefaultProfileMarkerPath()`. The file content MUST be the default profile name as a plain text string.
-
-#### Scenario: Marker path
-- **WHEN** the config dir is `/x/gemiterm`
-- **THEN** `getDefaultProfileMarkerPath()` returns `/x/gemiterm/profiles/.default`
+## MODIFIED Requirements
 
 ### Requirement: Default Profile Name Resolution
 The system MUST expose an async `getDefaultProfileName(): Promise<string>` function that resolves the contents of the marker file (trimmed) when the file exists, and MUST resolve the literal string `"default"` when the marker file does not exist.

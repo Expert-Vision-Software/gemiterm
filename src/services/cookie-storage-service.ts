@@ -24,8 +24,8 @@ export class CookieStorageService {
     this.logger = deps.logger;
   }
 
-  loadCookiesForProfile(profileName: string): LoadedCookies {
-    const cookies = this.cookieStorage.load(profileName);
+  async loadCookiesForProfile(profileName: string): Promise<LoadedCookies> {
+    const cookies = await this.cookieStorage.load(profileName);
     const map = new Map(cookies.map((c) => [c.name, c.value]));
     const secure1psid = map.get("__Secure-1PSID");
     if (!secure1psid) {
@@ -39,12 +39,12 @@ export class CookieStorageService {
     };
   }
 
-  loadAllCookiesForProfile(profileName: string): Cookie[] {
-    return this.cookieStorage.load(profileName);
+  async loadAllCookiesForProfile(profileName: string): Promise<Cookie[]> {
+    return await this.cookieStorage.load(profileName);
   }
 
-  saveCookiesForProfile(profileName: string, cookies: Cookie[]): void {
-    this.cookieStorage.save(profileName, cookies);
+  async saveCookiesForProfile(profileName: string, cookies: Cookie[]): Promise<void> {
+    await this.cookieStorage.save(profileName, cookies);
   }
 
   validateCookies(cookies: Cookie[]): boolean {

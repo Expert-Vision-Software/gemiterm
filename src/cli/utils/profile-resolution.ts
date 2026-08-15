@@ -6,7 +6,7 @@ export async function resolveProfile(
   conversationId: string,
   explicitProfile?: string,
 ): Promise<string | null> {
-  const activeProfiles = context.profileAuthManager.getActiveProfiles();
+  const activeProfiles = await context.profileAuthManager.getActiveProfiles();
 
   if (explicitProfile) {
     if (!activeProfiles.includes(explicitProfile)) {

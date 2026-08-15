@@ -43,7 +43,7 @@ export class ExportAllCommand implements CliCommand {
     try {
       const chats = options.allProfiles
         ? []
-        : await context.getGeminiClient().listChats({});
+        : await (await context.getGeminiClient()).listChats({});
 
       await render(
         {

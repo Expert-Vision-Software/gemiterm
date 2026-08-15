@@ -100,10 +100,10 @@ function makePartialCookies(): Cookie[] {
 
 function createMockCookieStorage(): CookieStorage {
   return {
-    save: mock((_profileName: string, _cookies: Cookie[]) => {}),
-    load: mock((_profileName: string) => [] as Cookie[]),
-    delete: mock((_profileName: string) => {}),
-    list: mock(() => [] as string[]),
+    save: mock(async (_profileName: string, _cookies: Cookie[]) => {}),
+    load: mock(async (_profileName: string) => [] as Cookie[]),
+    delete: mock(async (_profileName: string) => {}),
+    list: mock(async () => [] as string[]),
   } as unknown as CookieStorage;
 }
 
@@ -123,24 +123,24 @@ describe("CookieStorageService", () => {
   });
 
   describe("loadCookiesForProfile", () => {
-    test("returns cookie values from profile", () => {
-      storage.load = mock(() => makeFreshCookies()) as CookieStorage["load"];
+    test("returns cookie values from profile", async () => {
+      storage.load = mock(async () => makeFreshCookies()) as CookieStorage["load"];
 
-      const result = service.loadCookiesForProfile("default");
+      const result = await service.loadCookiesForProfile("default");
       expect(result.secure_1psid).toBe("fresh-psid");
       expect(result.secure_1psidts).toBe("fresh-psidts");
     });
 
-    test("returns null for 1PSIDTS when missing", () => {
-      storage.load = mock(() => makePartialCookies()) as CookieStorage["load"];
+    test("returns null for 1PSIDTS when missing", async () => {
+      storage.load = mock(async () => makePartialCookies()) as CookieStorage["load"];
 
-      const result = service.loadCookiesForProfile("default");
+      const result = await service.loadCookiesForProfile("default");
       expect(result.secure_1psid).toBe("only-psid");
       expect(result.secure_1psidts).toBeNull();
     });
 
-    test("throws when __Secure-1PSID is missing", () => {
-      storage.load = mock(() => [
+    test("throws when __Secure-1PSID is missing", async () => {
+      storage.load = mock(async () => [
         {
           name: "__Secure-1PSIDTS",
           value: "no-psid",
@@ -153,7 +153,7 @@ describe("CookieStorageService", () => {
         },
       ]) as CookieStorage["load"];
 
-      expect(() => service.loadCookiesForProfile("default")).toThrow("Missing required cookie");
+      await expect(service.loadCookiesForProfile("default")).rejects.toThrow("Missing required cookie");
     });
   });
 
@@ -242,17 +242,17 @@ describe("CookieStorageService persistence seams", () => {
     mock.restore();
   });
 
-  test("saveCookiesForProfile delegates profile name and cookies to storage.save", () => {
+  test("saveCookiesForProfile delegates profile name and cookies to storage.save", async () => {
     const cookies = makeFreshCookies();
-    service.saveCookiesForProfile("default", cookies);
+    await service.saveCookiesForProfile("default", cookies);
     expect(storage.save).toHaveBeenCalledTimes(1);
     expect(storage.save).toHaveBeenCalledWith("default", cookies);
   });
 
-  test("loadAllCookiesForProfile delegates to storage.load and returns the raw cookie list", () => {
+  test("loadAllCookiesForProfile delegates to storage.load and returns the raw cookie list", async () => {
     const cookies = makeFreshCookies();
-    storage.load = mock(() => cookies) as CookieStorage["load"];
-    expect(service.loadAllCookiesForProfile("default")).toBe(cookies);
+    storage.load = mock(async () => cookies) as CookieStorage["load"];
+    expect(await service.loadAllCookiesForProfile("default")).toBe(cookies);
     expect(storage.load).toHaveBeenCalledWith("default");
   });
 });

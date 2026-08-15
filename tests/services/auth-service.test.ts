@@ -35,10 +35,10 @@ function createMockCookieMonitor() {
 
 function createMockCookieStorage() {
   return {
-    save: mock((_profileName: string, _cookies: Cookie[]) => {}),
-    load: mock((_profileName: string) => [] as Cookie[]),
-    delete: mock((_profileName: string) => {}),
-    list: mock(() => [] as string[]),
+    save: mock(async (_profileName: string, _cookies: Cookie[]) => {}),
+    load: mock(async (_profileName: string) => [] as Cookie[]),
+    delete: mock(async (_profileName: string) => {}),
+    list: mock(async () => [] as string[]),
   };
 }
 

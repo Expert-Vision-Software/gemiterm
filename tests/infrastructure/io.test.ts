@@ -18,13 +18,13 @@ import {
 
 const TEST_ROOT = join(tmpdir(), `gemiterm-io-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
-beforeEach(() => {
-  ensureDir(TEST_ROOT);
+beforeEach(async () => {
+  await ensureDir(TEST_ROOT);
 });
 
-afterEach(() => {
+afterEach(async () => {
   try {
-    removeDir(TEST_ROOT);
+    await removeDir(TEST_ROOT);
   } catch {
     // ignore
   }
@@ -46,152 +46,152 @@ describe("IOError", () => {
 });
 
 describe("ensureDir", () => {
-  test("creates a directory that does not exist", () => {
+  test("creates a directory that does not exist", async () => {
     const dir = join(TEST_ROOT, "new-dir");
-    expect(existsFile(dir)).toBe(false);
-    ensureDir(dir);
-    expect(existsFile(dir)).toBe(true);
-    expect(isDirectory(dir)).toBe(true);
+    expect(await existsFile(dir)).toBe(false);
+    await ensureDir(dir);
+    expect(await existsFile(dir)).toBe(true);
+    expect(await isDirectory(dir)).toBe(true);
   });
 
-  test("creates nested directories recursively", () => {
+  test("creates nested directories recursively", async () => {
     const dir = join(TEST_ROOT, "a", "b", "c");
-    expect(existsFile(dir)).toBe(false);
-    ensureDir(dir);
-    expect(isDirectory(dir)).toBe(true);
-    expect(isDirectory(join(TEST_ROOT, "a", "b"))).toBe(true);
-    expect(isDirectory(join(TEST_ROOT, "a"))).toBe(true);
+    expect(await existsFile(dir)).toBe(false);
+    await ensureDir(dir);
+    expect(await isDirectory(dir)).toBe(true);
+    expect(await isDirectory(join(TEST_ROOT, "a", "b"))).toBe(true);
+    expect(await isDirectory(join(TEST_ROOT, "a"))).toBe(true);
   });
 
-  test("is a no-op on an existing directory", () => {
-    ensureDir(TEST_ROOT);
-    expect(() => ensureDir(TEST_ROOT)).not.toThrow();
+  test("is a no-op on an existing directory", async () => {
+    await ensureDir(TEST_ROOT);
+    await expect(ensureDir(TEST_ROOT)).resolves.toBeUndefined();
   });
 });
 
 describe("existsFile", () => {
-  test("returns true for an existing file", () => {
+  test("returns true for an existing file", async () => {
     const file = join(TEST_ROOT, "marker.txt");
-    ensureDir(TEST_ROOT);
-    writeTextFile(file, "x");
-    expect(existsFile(file)).toBe(true);
+    await ensureDir(TEST_ROOT);
+    await writeTextFile(file, "x");
+    expect(await existsFile(file)).toBe(true);
   });
 
-  test("returns false for a missing file", () => {
-    expect(existsFile(join(TEST_ROOT, "nope.txt"))).toBe(false);
+  test("returns false for a missing file", async () => {
+    expect(await existsFile(join(TEST_ROOT, "nope.txt"))).toBe(false);
   });
 });
 
 describe("readTextFile", () => {
-  test("reads an existing file as UTF-8", () => {
+  test("reads an existing file as UTF-8", async () => {
     const file = join(TEST_ROOT, "read.txt");
-    writeTextFile(file, "hello");
-    expect(readTextFile(file)).toBe("hello");
+    await writeTextFile(file, "hello");
+    expect(await readTextFile(file)).toBe("hello");
   });
 
-  test("throws IOError on a missing file", () => {
-    expect(() => readTextFile(join(TEST_ROOT, "nope.txt"))).toThrow(IOError);
+  test("throws IOError on a missing file", async () => {
+    await expect(readTextFile(join(TEST_ROOT, "nope.txt"))).rejects.toThrow(IOError);
   });
 });
 
 describe("safeReadTextFile", () => {
-  test("returns the content of an existing file", () => {
+  test("returns the content of an existing file", async () => {
     const file = join(TEST_ROOT, "safe.txt");
-    writeTextFile(file, "content");
-    expect(safeReadTextFile(file)).toBe("content");
+    await writeTextFile(file, "content");
+    expect(await safeReadTextFile(file)).toBe("content");
   });
 
-  test("returns the empty string on a missing file", () => {
-    expect(safeReadTextFile(join(TEST_ROOT, "nope.txt"))).toBe("");
+  test("returns the empty string on a missing file", async () => {
+    expect(await safeReadTextFile(join(TEST_ROOT, "nope.txt"))).toBe("");
   });
 });
 
 describe("writeTextFile", () => {
-  test("writes a new file", () => {
+  test("writes a new file", async () => {
     const file = join(TEST_ROOT, "out.txt");
-    writeTextFile(file, "data");
-    expect(existsFile(file)).toBe(true);
-    expect(readTextFile(file)).toBe("data");
+    await writeTextFile(file, "data");
+    expect(await existsFile(file)).toBe(true);
+    expect(await readTextFile(file)).toBe("data");
   });
 
-  test("creates nested directories that do not exist", () => {
+  test("creates nested directories that do not exist", async () => {
     const file = join(TEST_ROOT, "nested", "deep", "out.txt");
-    writeTextFile(file, "data");
-    expect(readTextFile(file)).toBe("data");
+    await writeTextFile(file, "data");
+    expect(await readTextFile(file)).toBe("data");
   });
 });
 
 describe("readJsonFile and writeJsonFile", () => {
-  test("round-trips a JSON object", () => {
+  test("round-trips a JSON object", async () => {
     const file = join(TEST_ROOT, "obj.json");
     const original = { a: 1, b: ["x", "y"], c: { nested: true } };
-    writeJsonFile(file, original);
-    const read = readJsonFile<typeof original>(file);
+    await writeJsonFile(file, original);
+    const read = await readJsonFile<typeof original>(file);
     expect(read).toEqual(original);
   });
 
-  test("readJsonFile throws on missing file", () => {
-    expect(() => readJsonFile(join(TEST_ROOT, "missing.json"))).toThrow(IOError);
+  test("readJsonFile throws on missing file", async () => {
+    await expect(readJsonFile(join(TEST_ROOT, "missing.json"))).rejects.toThrow(IOError);
   });
 });
 
 describe("removeDir", () => {
-  test("removes a directory recursively", () => {
+  test("removes a directory recursively", async () => {
     const dir = join(TEST_ROOT, "rm");
-    ensureDir(dir);
-    writeTextFile(join(dir, "f.txt"), "x");
-    expect(existsFile(dir)).toBe(true);
-    removeDir(dir);
-    expect(existsFile(dir)).toBe(false);
+    await ensureDir(dir);
+    await writeTextFile(join(dir, "f.txt"), "x");
+    expect(await existsFile(dir)).toBe(true);
+    await removeDir(dir);
+    expect(await existsFile(dir)).toBe(false);
   });
 
-  test("is a no-op on a missing path", () => {
-    expect(() => removeDir(join(TEST_ROOT, "nope"))).not.toThrow();
+  test("is a no-op on a missing path", async () => {
+    await expect(removeDir(join(TEST_ROOT, "nope"))).resolves.toBeUndefined();
   });
 });
 
 describe("renameDir", () => {
-  test("renames a directory", () => {
+  test("renames a directory", async () => {
     const src = join(TEST_ROOT, "src");
     const dest = join(TEST_ROOT, "dest");
-    ensureDir(src);
-    expect(isDirectory(src)).toBe(true);
-    renameDir(src, dest);
-    expect(isDirectory(src)).toBe(false);
-    expect(isDirectory(dest)).toBe(true);
+    await ensureDir(src);
+    expect(await isDirectory(src)).toBe(true);
+    await renameDir(src, dest);
+    expect(await isDirectory(src)).toBe(false);
+    expect(await isDirectory(dest)).toBe(true);
   });
 
-  test("throws when source is missing", () => {
-    expect(() => renameDir(join(TEST_ROOT, "nope"), join(TEST_ROOT, "dest"))).toThrow(IOError);
+  test("throws when source is missing", async () => {
+    await expect(renameDir(join(TEST_ROOT, "nope"), join(TEST_ROOT, "dest"))).rejects.toThrow(IOError);
   });
 });
 
 describe("isDirectory", () => {
-  test("returns true for a directory", () => {
-    expect(isDirectory(TEST_ROOT)).toBe(true);
+  test("returns true for a directory", async () => {
+    expect(await isDirectory(TEST_ROOT)).toBe(true);
   });
 
-  test("returns false for a file", () => {
+  test("returns false for a file", async () => {
     const file = join(TEST_ROOT, "f.txt");
-    writeTextFile(file, "x");
-    expect(isDirectory(file)).toBe(false);
+    await writeTextFile(file, "x");
+    expect(await isDirectory(file)).toBe(false);
   });
 
-  test("returns false for a missing path", () => {
-    expect(isDirectory(join(TEST_ROOT, "nope"))).toBe(false);
+  test("returns false for a missing path", async () => {
+    expect(await isDirectory(join(TEST_ROOT, "nope"))).toBe(false);
   });
 });
 
 describe("listSubdirectories", () => {
-  test("returns only subdirectory names", () => {
-    ensureDir(join(TEST_ROOT, "a"));
-    ensureDir(join(TEST_ROOT, "b"));
-    writeTextFile(join(TEST_ROOT, "not-a-dir.txt"), "x");
-    const subs = listSubdirectories(TEST_ROOT).sort();
+  test("returns only subdirectory names", async () => {
+    await ensureDir(join(TEST_ROOT, "a"));
+    await ensureDir(join(TEST_ROOT, "b"));
+    await writeTextFile(join(TEST_ROOT, "not-a-dir.txt"), "x");
+    const subs = (await listSubdirectories(TEST_ROOT)).sort();
     expect(subs).toEqual(["a", "b"]);
   });
 
-  test("returns an empty array for a missing path", () => {
-    expect(listSubdirectories(join(TEST_ROOT, "nope"))).toEqual([]);
+  test("returns an empty array for a missing path", async () => {
+    expect(await listSubdirectories(join(TEST_ROOT, "nope"))).toEqual([]);
   });
 });

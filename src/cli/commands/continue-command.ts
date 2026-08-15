@@ -105,7 +105,7 @@ export class ContinueCommand implements CliCommand {
   }
 
   private async printLastMessage(
-    getGeminiClient: () => GeminiClientService,
+    getGeminiClient: () => Promise<GeminiClientService>,
     conversationId: string,
     profileName: string | null,
   ): Promise<void> {
