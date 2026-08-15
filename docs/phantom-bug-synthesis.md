@@ -672,5 +672,24 @@ The phantom check is skipped for `allProfiles` queries (profiles aggregate, per-
 **Verified:** 953 pass / 0 fail / 1 skip, typecheck clean. Test mock (`query-handlers.test.ts`) updated with `models: mock(...)` to match new `IGeminiClientService.models()` call in the handler.
 
 **Related ledger entries:**
-- §"2026-08-10 — Simplify plan revised" — the companion design doc; this fix is the reactive phantom detection described in the simplify plan's `ensureAuthenticated` ladder but implemented at a higher layer (command/query handler, not auth gate).
+- §"2026-08-10 — Simplify plan revised" — the companion design doc; this fix is the reactive phantom detection described in the simplify plan's `ensureAuthenticated` ladder but implemented at a higher layer (command/query handler, not auth gate). 
+
+## 2026-08-15 — First-principles ablation: PSIDTS supersession is the root cause; companions theory dead; auth replacement planned
+
+**Discovered by:** Diego-directed ablation study (raw-wire harness, zero gemiterm auth code, methodology mirrored from notebooklm-py `docs/auth-cookie-lifecycle.md` §3.3). Full findings: `docs/cookie-ablation-findings.md`. Plan: `docs/auth-replacement-plan.md`.
+
+**Symptom (captured live):** profile `dhb-zeek` after 9.1 h idle — jar byte-unchanged on disk, init GET returns 200 signed-out HTML (no tokens, no redirect). Earlier stage of the same decay = the phantom state (init tokens ✓, listChats 0).
+
+**Root cause:** server-side `__Secure-1PSIDTS` supersession during zero-rotation idle. Proven: identical jar *shape* with a fresh PSIDTS value → live; byte-stale jar → dead. Also proven (4/4 attempts): HTTP `RotateCookies` returns 200 + `hfcr=600` + SIDCC-family rotation but **withholds PSIDTS** on this account — for dead, sentinel, AND live sessions. Live RPC/init traffic rotates only SIDCC-family, never PSIDTS. The only working rotation engine: browser page-load on the persistent profile (headless, via playwright-cli) — resurrected the 9h-dead session end-to-end.
+
+**Ablation verdicts (3× deterministic):** dropping `__Secure-1PSIDTS` alone → DEAD-INIT. Dropping ANY other single cookie (incl. `SID`, `__Secure-1PSID`) → OK. Dropping the full companion set → OK. The historical trimmed 4-cookie jar → OK when fresh. The "companions required for listChats" hypothesis (this ledger, §The 4-cookie discovery) is therefore misattributed: jar shape was never the dormancy mechanism; PSIDTS freshness was.
+
+**Fix (planned):** full auth replacement — `CookieSession` facade mirroring notebooklm-py architecture (browser-backed refresh as primary engine, L3 headless recovery, CAS cookie store, two-tier validation with tier-1 = PSIDTS routability, reactive phantom detection, full-jar domain-filtered capture). Three OpenSpec changes: `cookie-session-core` → `phantom-detection` → `session-keepalive`.
+
+**Verified:** harness logs in `.gemiterm/harness/` (gitignored): 31-variant ablation + 3× stress matrix + rotate probes + L3 recovery, all deterministic. Post-recovery live check: `gemiterm list` → 14 conversations on restored profile.
+
+**Related ledger entries:**
+- §"2026-08-09 — RotateCookies 401 pre-emptively kills sessions" — correct instinct (don't trust RotateCookies), now moot: endpoint omits PSIDTS entirely on this account.
+- §"2026-08-11 — Reactive phantom detection" — the classifier design survives; detection now knows dead-vs-phantom boundary exactly (tokens ✗ vs tokens ✓ + 0 chats).
+- §"The 4-cookie discovery" — capture fix was necessary hygiene but was never the dormancy mechanism.
 
