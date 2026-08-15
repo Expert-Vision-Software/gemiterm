@@ -1,6 +1,7 @@
 import type { ChatInfo, Message } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
-import type { CookieStorageService } from "./cookie-storage-service.ts";
+import type { CookieSession } from "./cookie-session.ts";
+import { PRIMARY_COOKIE_NAME, SECONDARY_COOKIE_NAME } from "./cookie-session.ts";
 import type { ChatMetadata } from "./chat-metadata-storage.ts";
 import { ChatMetadataStorage } from "./chat-metadata-storage.ts";
 import { GeminiAPIError, AuthenticationError } from "../core/errors.ts";
@@ -66,8 +67,6 @@ interface GeminiClientConfig {
   secure1psidts?: string | null;
 }
 
-const COOKIE_EXPIRY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
-
 function extractChatMetadata(metadata: (string | null)[] | undefined): ChatMetadata | null {
   if (!metadata) return null;
   const rid = metadata[1];
@@ -82,23 +81,23 @@ export class GeminiClientService {
   private initPromise: Promise<void> | null = null;
   private initialized = false;
   readonly logger: Logger;
-  readonly cookieStorageService?: CookieStorageService;
+  readonly session?: CookieSession;
   readonly profileName?: string;
   private readonly deps: GeminiClientDeps;
   private baselineSecure1psid: string;
   private baselineSecure1psidts: string | null;
   private readonly chatMetadata: ChatMetadataStorage;
 
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps, chatMetadata?: ChatMetadataStorage);
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: "_test", chatMetadata?: ChatMetadataStorage);
-  constructor(config: GeminiClientConfig, logger: Logger, cookieStorageService?: CookieStorageService, profileName?: string, _deps?: GeminiClientDeps | "_test", chatMetadata?: ChatMetadataStorage) {
+  constructor(config: GeminiClientConfig, logger: Logger, session?: CookieSession, profileName?: string, _deps?: GeminiClientDeps, chatMetadata?: ChatMetadataStorage);
+  constructor(config: GeminiClientConfig, logger: Logger, session?: CookieSession, profileName?: string, _deps?: "_test", chatMetadata?: ChatMetadataStorage);
+  constructor(config: GeminiClientConfig, logger: Logger, session?: CookieSession, profileName?: string, _deps?: GeminiClientDeps | "_test", chatMetadata?: ChatMetadataStorage) {
     this.logger = logger;
-    this.cookieStorageService = cookieStorageService;
+    this.session = session;
     this.profileName = profileName;
     this.deps = (typeof _deps === "object" ? _deps : null) ?? getRealDeps();
     this.client = new this.deps.Gemini({ secure_1psid: config.secure1psid, timeout: 300_000, autoClose: false });
     if (config.secure1psidts) {
-      this.client.cookies["__Secure-1PSIDTS"] = config.secure1psidts;
+      this.client.cookies[SECONDARY_COOKIE_NAME] = config.secure1psidts;
     }
     this.baselineSecure1psid = config.secure1psid;
     this.baselineSecure1psidts = config.secure1psidts ?? null;
@@ -116,31 +115,15 @@ export class GeminiClientService {
 
   private persistRefreshedCookies(): void {
     try {
-      if (!this.cookieStorageService || !this.profileName || !this.client) return;
+      if (!this.session || !this.profileName || !this.client) return;
       const jar = this.client.cookies as Record<string, string>;
-      const live1psid = jar["__Secure-1PSID"];
-      const live1psidts = jar["__Secure-1PSIDTS"];
+      const live1psid = jar[PRIMARY_COOKIE_NAME];
+      const live1psidts = jar[SECONDARY_COOKIE_NAME];
       const changed1psid = typeof live1psid === "string" && live1psid !== "" && live1psid !== this.baselineSecure1psid;
       const changed1psidts = typeof live1psidts === "string" && live1psidts !== "" && live1psidts !== this.baselineSecure1psidts;
       if (!changed1psid && !changed1psidts) return;
 
-      const stored = this.cookieStorageService.loadAllCookiesForProfile(this.profileName);
-      const expirySec = Math.floor((Date.now() + COOKIE_EXPIRY_THRESHOLD_MS) / 1000);
-      let changed = false;
-      const merged = stored.map((c) => {
-        if (c.name === "__Secure-1PSID" && changed1psid) {
-          changed = true;
-          return { ...c, value: live1psid, expires: expirySec };
-        }
-        if (c.name === "__Secure-1PSIDTS" && changed1psidts) {
-          changed = true;
-          return { ...c, value: live1psidts, expires: expirySec };
-        }
-        return c;
-      });
-      if (!changed) return;
-
-      this.cookieStorageService.saveCookiesForProfile(this.profileName, merged);
+      this.session.commit(this.profileName, { jar });
       if (changed1psid) this.baselineSecure1psid = live1psid;
       if (changed1psidts) this.baselineSecure1psidts = live1psidts;
       this.logger.debug(`Persisted refreshed cookies for profile '${this.profileName}'`);
@@ -203,14 +186,24 @@ export class GeminiClientService {
   }
 
   forProfile(profileName: string): GeminiClientService {
-    if (!this.cookieStorageService) {
-      throw new Error("CookieStorageService is required for forProfile");
+    if (!this.session) {
+      throw new Error("CookieSession is required for forProfile");
     }
-    const cookies = this.cookieStorageService.loadCookiesForProfile(profileName);
+    const status = this.session.sessionStatus(profileName);
+    if (!status.loaded) {
+      throw new Error(
+        `No storage state found for profile '${profileName}'. Run 'gemiterm auth' to authenticate.`,
+      );
+    }
+    if (!status.hasPrimary) {
+      throw new Error(
+        `Missing required cookie ${PRIMARY_COOKIE_NAME} for profile '${profileName}'. Run 'gemiterm auth' to re-authenticate.`,
+      );
+    }
     return new GeminiClientService(
-      { secure1psid: cookies.secure_1psid, secure1psidts: cookies.secure_1psidts },
+      { secure1psid: status.secure1psid!, secure1psidts: status.secure1psidts },
       this.logger,
-      this.cookieStorageService,
+      this.session,
       profileName,
       this.deps,
       this.chatMetadata,

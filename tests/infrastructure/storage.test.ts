@@ -266,6 +266,39 @@ describe("ProfileManager", () => {
     expect(status.expiresAt).toBeNull();
   });
 
+  test("getStatus expiresAt is the max across tracked cookies (mixed fixture)", () => {
+    const storage = new CookieStorage();
+    const mgr = new ProfileManager(storage);
+    const soon = Math.floor(Date.now() / 1000) + 10 * 60;
+    const later = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+    const mixed: Cookie[] = [
+      {
+        name: "__Secure-1PSID",
+        value: "psid",
+        domain: ".google.com",
+        path: "/",
+        expires: later,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__Secure-1PSIDTS",
+        value: "psidts",
+        domain: ".google.com",
+        path: "/",
+        expires: soon,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ];
+    storage.save("mixed", mixed);
+
+    const status = mgr.getStatus("mixed");
+    expect(status.expiresAt).toBe(new Date(later * 1000).toISOString());
+  });
+
   test("getStatus returns not exists for missing profile", () => {
     const status = manager.getStatus("missing");
     expect(status.exists).toBe(false);

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { Logger } from "../../src/infrastructure/logger.ts";
-import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
+import { CookieSession } from "../../src/services/cookie-session.ts";
 import { ChatMetadataStorage } from "../../src/services/chat-metadata-storage.ts";
 import { setupTestConfig, teardownTestConfig } from "../setup.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
@@ -227,13 +227,13 @@ function installGeminiReverseMock(overrides?: typeof mockOverrides): GeminiClien
 
 describe("GeminiClientService", () => {
   let logger: Logger;
-  let cookieStorageService: CookieStorageService;
+  let cookieStorageService: CookieSession;
 
   beforeEach(async () => {
     setupTestConfig("gemini-client-wrapper");
     logger = new Logger("test");
     const storage = createMockCookieStorage();
-    cookieStorageService = new CookieStorageService({ cookieStorage: storage, logger });
+    cookieStorageService = new CookieSession({ cookieStorage: storage, logger });
   });
 
   afterEach(() => {
@@ -353,7 +353,7 @@ describe("GeminiClientService", () => {
         work: { secure_1psid: "work-sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
 
       const d = installGeminiReverseMock({
         chats: [createMockChatRow({ cid: "1", title: "Profile Chat" })],
@@ -417,7 +417,7 @@ describe("GeminiClientService", () => {
         testprofile: { secure_1psid: "sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
 
       const d: GeminiClientDeps = {
@@ -457,7 +457,7 @@ describe("GeminiClientService", () => {
         "testprofile-empty": { secure_1psid: "sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
 
       const d: GeminiClientDeps = {
@@ -552,7 +552,7 @@ describe("GeminiClientService", () => {
         testprofile: { secure_1psid: "sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
       chatMetadata.save("testprofile", "existing-conv-xyz", { rid: "rid-xyz", rcid: "rcid-xyz", ctx: null });
 
@@ -612,7 +612,7 @@ describe("GeminiClientService", () => {
         testprofile: { secure_1psid: "sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
       chatMetadata.save("testprofile", "existing-conv-xyz", { rid: "rid-xyz", rcid: "rcid-xyz", ctx: null });
 
@@ -672,7 +672,7 @@ describe("GeminiClientService", () => {
         testprofile: { secure_1psid: "sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -729,7 +729,7 @@ describe("GeminiClientService", () => {
         testprofile: { secure_1psid: "sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -786,7 +786,7 @@ describe("GeminiClientService", () => {
         testprofile: { secure_1psid: "sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -849,7 +849,7 @@ describe("GeminiClientService", () => {
         testprofile: { secure_1psid: "sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -899,7 +899,7 @@ describe("GeminiClientService", () => {
         testprofile: { secure_1psid: "sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -1102,7 +1102,7 @@ describe("GeminiClientService", () => {
         work: { secure_1psid: "work-sid", secure_1psidts: "work-ts" },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
 
       const d = installGeminiReverseMock({ chats: [createMockChatRow({ cid: "1", title: "Work Chat" })] });
 
@@ -1122,7 +1122,7 @@ describe("GeminiClientService", () => {
         work: { secure_1psid: "work-sid", secure_1psidts: null },
       };
       const storage = createMockCookieStorage(profileCookies);
-      const css = new CookieStorageService({ cookieStorage: storage, logger });
+      const css = new CookieSession({ cookieStorage: storage, logger });
 
       const d = installGeminiReverseMock({
         initImplementation: (client) => {
@@ -1242,7 +1242,7 @@ describe("persistRefreshedCookies", () => {
     storage.save = mock((name: string, cookies: Cookie[]) => {
       saveCalls.push({ name, cookies });
     }) as CookieStorage["save"];
-    const css = new CookieStorageService({ cookieStorage: storage, logger });
+    const css = new CookieSession({ cookieStorage: storage, logger });
 
     const d = installGeminiReverseMock({
       initImplementation: (client: RawGemini) => {
@@ -1283,7 +1283,7 @@ describe("persistRefreshedCookies", () => {
     storage.save = mock((_name: string, cookies: Cookie[]) => {
       saveCalls.push(cookies);
     }) as CookieStorage["save"];
-    const css = new CookieStorageService({ cookieStorage: storage, logger });
+    const css = new CookieSession({ cookieStorage: storage, logger });
 
     const d = installGeminiReverseMock({ chats: [createMockChatRow()] });
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
@@ -1301,7 +1301,7 @@ describe("persistRefreshedCookies", () => {
     storage.save = mock((_name: string, cookies: Cookie[]) => {
       saveCalls.push(cookies);
     }) as CookieStorage["save"];
-    const css = new CookieStorageService({ cookieStorage: storage, logger });
+    const css = new CookieSession({ cookieStorage: storage, logger });
 
     const d = installGeminiReverseMock({
       initImplementation: (client: RawGemini) => {
@@ -1325,7 +1325,7 @@ describe("persistRefreshedCookies", () => {
     storage.save = mock(() => {
       throw new Error("disk full");
     }) as CookieStorage["save"];
-    const css = new CookieStorageService({ cookieStorage: storage, logger });
+    const css = new CookieSession({ cookieStorage: storage, logger });
 
     const d = installGeminiReverseMock({
       initImplementation: (client: RawGemini) => {

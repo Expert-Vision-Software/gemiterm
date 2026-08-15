@@ -4,6 +4,13 @@
 
 - **BREAKING**: `gemiterm list` now defaults to aggregating conversations across **all** configured profiles (unless `--profile <name>` is given), skipping inaccessible profiles with a warning instead of failing the whole listing. In a single-profile setup the output is unchanged (4-column table); in multi-profile setups the default table gains a `PROFILE` column. `--all-profiles` remains accepted and is now redundant with the default; `--profile <name>` restores the exact per-profile output.
 - Consolidated the four output commands (`list`, `fetch`, `export`, `export-all`) onto a single `ChatOutput` module (`src/cli/utils/chat-output.ts`) with shared `sortChats` / `filterChatsByDate` helpers and one stdout-vs-file dispatch. The commands no longer carry their own sort/filter/output/write helpers.
+- Collapsed the cookie lifecycle into a single `CookieSession` module (`src/services/cookie-session.ts`) behind `ensureSession(profile)` (the only load path) and `commit(...)` (the only persistence path). `CookieStorageService` is removed; `GeminiClientService`, `AuthService`, `ProfileAuthManager`, and `ProfileManager` now source cookie validation/freshness/expiry from the one module, with a single `COOKIE_EXPIRY_THRESHOLD_MS`, both tracked cookie-name constants, and the expiry computation living in one place.
+
+### Fixed
+
+- Auth captures missing `__Secure-1PSID` now fail at capture time with a retry message instead of silently saving a broken partial session.
+- All persisted cookie writes stamp `__Secure-1PSID`/`__Secure-1PSIDTS` `expires` to capture-time + 7 days, so short-TTL browser cookies no longer land on disk already failing the freshness check.
+- Identical re-captures no longer rewrite the profile file, preserving its mtime and `lastUsedAt`.
 
 ---
 

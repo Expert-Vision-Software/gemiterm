@@ -3,7 +3,8 @@ import type { Cookie, AuthResult } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { PlaywrightCliDriver } from "./playwright-cli-driver.ts";
 import type { CookieMonitor } from "./cookie-monitor.ts";
-import type { CookieStorage } from "../infrastructure/storage.ts";
+import type { CookieSession } from "./cookie-session.ts";
+import { PRIMARY_COOKIE_NAME, psidtsExpiry } from "./cookie-session.ts";
 import { ensureConfigDir, getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { getProfilePath } from "../infrastructure/path-utils.ts";
@@ -16,7 +17,7 @@ const DEFAULT_AUTH_TIMEOUT_MS = 300_000;
 export interface AuthServiceDeps {
   driver: PlaywrightCliDriver;
   cookieMonitor: CookieMonitor;
-  cookieStorage: CookieStorage;
+  session: CookieSession;
   logger: Logger;
 }
 
@@ -30,13 +31,13 @@ export class AuthServiceTimeoutError extends Error {
 export class AuthService {
   private readonly driver: PlaywrightCliDriver;
   private readonly cookieMonitor: CookieMonitor;
-  private readonly cookieStorage: CookieStorage;
+  private readonly session: CookieSession;
   private readonly logger: Logger;
 
   constructor(deps: AuthServiceDeps) {
     this.driver = deps.driver;
     this.cookieMonitor = deps.cookieMonitor;
-    this.cookieStorage = deps.cookieStorage;
+    this.session = deps.session;
     this.logger = deps.logger;
   }
 
@@ -55,8 +56,8 @@ export class AuthService {
       await this.launchBrowser(name);
 
       const cookies = await this.waitForLogin(name, DEFAULT_AUTH_TIMEOUT_MS);
-      await this.extractCookies(name, cookies);
-      const expiresAt = this.getCookieExpiry(cookies);
+      const committed = await this.extractCookies(name, cookies);
+      const expiresAt = psidtsExpiry(committed);
       this.confirmAuthSuccess(cookies.length, expiresAt, cookies);
       return { cookies, expiresAt };
     } finally {
@@ -98,8 +99,8 @@ export class AuthService {
       }
 
       const cookies = await this.waitForLogin(name, DEFAULT_AUTH_TIMEOUT_MS);
-      await this.extractCookies(name, cookies);
-      const expiresAt = this.getCookieExpiry(cookies);
+      const committed = await this.extractCookies(name, cookies);
+      const expiresAt = psidtsExpiry(committed);
       this.confirmRenewSuccess(cookies.length, expiresAt, cookies);
       return { cookies, expiresAt };
     } finally {
@@ -149,10 +150,10 @@ export class AuthService {
     });
   }
 
-  async extractCookies(profileName: string, cookies: Cookie[]): Promise<void> {
+  async extractCookies(profileName: string, cookies: Cookie[]): Promise<Cookie[]> {
     ensureConfigDir();
     this.logger.info(`Saving ${cookies.length} cookies for profile: ${profileName}`);
-    this.cookieStorage.save(profileName, cookies);
+    return this.session.commit(profileName, cookies);
   }
 
   confirmAuthSuccess(cookieCount: number, expiresAt: Date | null, cookies: Cookie[] = []): void {
@@ -161,8 +162,8 @@ export class AuthService {
     if (expiresAt) {
       console.log(chalk.dim(`Session expires: ${expiresAt.toLocaleString()}`));
     }
-    const hasSid = cookies.some((c) => c.name === "__Secure-1PSID");
-    console.log(chalk.dim(`   Has __Secure-1PSID: ${hasSid ? "✅" : "❌"}`));
+    const hasSid = cookies.some((c) => c.name === PRIMARY_COOKIE_NAME);
+    console.log(chalk.dim(`   Has ${PRIMARY_COOKIE_NAME}: ${hasSid ? "✅" : "❌"}`));
   }
 
   confirmRenewSuccess(cookieCount: number, expiresAt: Date | null, cookies: Cookie[] = []): void {
@@ -171,8 +172,8 @@ export class AuthService {
     if (expiresAt) {
       console.log(chalk.dim(`Session expires: ${expiresAt.toLocaleString()}`));
     }
-    const hasSid = cookies.some((c) => c.name === "__Secure-1PSID");
-    console.log(chalk.dim(`   Has __Secure-1PSID: ${hasSid ? "✅" : "❌"}`));
+    const hasSid = cookies.some((c) => c.name === PRIMARY_COOKIE_NAME);
+    console.log(chalk.dim(`   Has ${PRIMARY_COOKIE_NAME}: ${hasSid ? "✅" : "❌"}`));
   }
 
   async closeBrowser(profileName: string): Promise<void> {
@@ -182,14 +183,5 @@ export class AuthService {
     } catch (err) {
       this.logger.warn(`Failed to close browser: ${err}`);
     }
-  }
-
-  private getCookieExpiry(cookies: Cookie[]): Date | null {
-    for (const cookie of cookies) {
-      if (cookie.name === "__Secure-1PSIDTS" && cookie.expires > 0) {
-        return new Date(cookie.expires * 1000);
-      }
-    }
-    return null;
   }
 }

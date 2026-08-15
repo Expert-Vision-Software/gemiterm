@@ -1,8 +1,6 @@
-import type { Cookie } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import type { ProfileManager } from "../infrastructure/storage.ts";
-import type { CookieStorageService } from "./cookie-storage-service.ts";
-import type { LoadedCookies } from "./cookie-storage-service.ts";
+import type { CookieSession, LoadedCookies } from "./cookie-session.ts";
 import { AuthenticationError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
@@ -13,41 +11,45 @@ interface ProfileConversationLookup {
 
 export interface ProfileAuthManagerDeps {
   profileManager: ProfileManager;
-  cookieStorageService: CookieStorageService;
+  session: CookieSession;
   logger: Logger;
   geminiClient: ProfileConversationLookup;
 }
 
 export class ProfileAuthManager {
   private readonly profileManager: ProfileManager;
-  private readonly cookieStorageService: CookieStorageService;
+  private readonly session: CookieSession;
   private readonly logger: Logger;
   private readonly geminiClient: ProfileConversationLookup;
 
   constructor(deps: ProfileAuthManagerDeps) {
     this.profileManager = deps.profileManager;
-    this.cookieStorageService = deps.cookieStorageService;
+    this.session = deps.session;
     this.logger = deps.logger;
     this.geminiClient = deps.geminiClient;
   }
 
-  ensureAuthenticated(profileName?: string): LoadedCookies {
+  async ensureAuthenticated(profileName?: string): Promise<LoadedCookies> {
     const name = profileName ?? getDefaultProfileName();
     validateProfileName(name);
 
-    if (!this.profileManager.hasValidCookies(name)) {
+    try {
+      const active = await this.session.ensureSession(name);
+      this.logger.info(`Profile '${name}' is authenticated`);
+      return { secure_1psid: active.secure1psid, secure_1psidts: active.secure1psidts };
+    } catch {
       throw new AuthenticationError(
         `No valid session for profile '${name}'. Run 'gemiterm login' to authenticate.`,
       );
     }
-
-    this.logger.info(`Profile '${name}' is authenticated`);
-    return this.cookieStorageService.loadCookiesForProfile(name);
   }
 
   getActiveProfiles(): string[] {
     const profiles = this.profileManager.list();
-    return profiles.filter((name) => this.profileManager.hasValidCookies(name));
+    return profiles.filter((name) => {
+      const status = this.session.sessionStatus(name);
+      return status.loaded && status.hasPrimary && status.hasSecondary && status.fresh;
+    });
   }
 
   async findProfileForConversation(conversationId: string): Promise<string | null> {

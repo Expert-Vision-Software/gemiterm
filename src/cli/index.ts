@@ -3,7 +3,7 @@
 import { CommandRegistry } from "./command-registry.ts";
 import { Logger } from "../infrastructure/logger.ts";
 import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
-import { CookieStorageService } from "../services/cookie-storage-service.ts";
+import { CookieSession } from "../services/cookie-session.ts";
 import { ProfileAuthManager } from "../services/profile-auth-manager.ts";
 import { ProfileLifecycle } from "../services/profile-lifecycle.ts";
 import { SingleExport, BatchExport } from "../services/export-strategy.ts";
@@ -30,12 +30,12 @@ interface CliServices {
 async function setupServices(): Promise<CliServices> {
   const logger = new Logger("cli");
   const cookieStorage = new CookieStorage();
-  const profileManager = new ProfileManager(cookieStorage);
-  const cookieStorageService = new CookieStorageService({ cookieStorage, logger });
+  const session = new CookieSession({ cookieStorage, logger });
+  const profileManager = new ProfileManager(cookieStorage, session);
 
   const driver = new PlaywrightCliDriver();
   const cookieMonitor = new CookieMonitor({ driver, logger });
-  const authService = new AuthService({ driver, cookieMonitor, cookieStorage, logger });
+  const authService = new AuthService({ driver, cookieMonitor, session, logger });
   const profileLifecycle = new ProfileLifecycle({
     cookieStorage,
     profileManager,
@@ -59,7 +59,7 @@ async function setupServices(): Promise<CliServices> {
       geminiClient = new GeminiClientService(
         { secure1psid: cookieData.secure1psid, secure1psidts: cookieData.secure1psidts },
         logger,
-        cookieStorageService,
+        session,
         profileName,
       );
       return geminiClient;
@@ -68,9 +68,9 @@ async function setupServices(): Promise<CliServices> {
     }
   }
 
-  const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, cookieStorageService);
+  const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, session);
   try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
-  const profileAuthManager = new ProfileAuthManager({ profileManager, cookieStorageService, logger, geminiClient: factoryClient });
+  const profileAuthManager = new ProfileAuthManager({ profileManager, session, logger, geminiClient: factoryClient });
 
   const exportStrategies = {
     single: new SingleExport({

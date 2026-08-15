@@ -10,42 +10,11 @@ import {
   setDefaultProfileName,
   listProfiles,
 } from "./config.ts";
-
-const COOKIE_EXPIRY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+import { CookieSession, PRIMARY_COOKIE_NAME } from "../services/cookie-session.ts";
+import { Logger } from "./logger.ts";
 
 interface StorageState {
   cookies: Cookie[];
-}
-
-function validateCookies(cookies: Cookie[]): boolean {
-  const names = new Set(cookies.map((c) => c.name));
-  return names.has("__Secure-1PSID") && names.has("__Secure-1PSIDTS");
-}
-
-function getCookieExpiryTimestamp(cookies: Cookie[]): number | null {
-  let maxExpiry: number | null = null;
-  for (const cookie of cookies) {
-    if (
-      (cookie.name === "__Secure-1PSID" || cookie.name === "__Secure-1PSIDTS") &&
-      cookie.expires > 0
-    ) {
-      const ms = cookie.expires * 1000;
-      if (maxExpiry === null || ms > maxExpiry) {
-        maxExpiry = ms;
-      }
-    }
-  }
-  return maxExpiry;
-}
-
-function checkCookieFreshness(cookies: Cookie[]): boolean {
-  for (const cookie of cookies) {
-    if (cookie.name === "__Secure-1PSIDTS" && cookie.expires > 0) {
-      const threshold = Date.now() + COOKIE_EXPIRY_THRESHOLD_MS;
-      if (cookie.expires * 1000 < threshold) return false;
-    }
-  }
-  return true;
 }
 
 export class CookieStorage {
@@ -78,9 +47,13 @@ export class CookieStorage {
 
 export class ProfileManager {
   private readonly cookieStorage: CookieStorage;
+  private readonly session: CookieSession;
 
-  constructor(cookieStorage?: CookieStorage) {
+  constructor(cookieStorage?: CookieStorage, session?: CookieSession) {
     this.cookieStorage = cookieStorage ?? new CookieStorage();
+    this.session =
+      session ??
+      new CookieSession({ cookieStorage: this.cookieStorage, logger: new Logger("storage") });
   }
 
   create(profileName: string): void {
@@ -154,24 +127,8 @@ export class ProfileManager {
         isDefault: name === defaultName,
       };
     }
-    try {
-      const cookies = this.cookieStorage.load(name);
-      const hasValidCookies = validateCookies(cookies);
-      const expiresMs = getCookieExpiryTimestamp(cookies);
-      const isActive = hasValidCookies && (expiresMs === null || expiresMs > Date.now());
-      let expiresAt: string | null = null;
-      if (expiresMs !== null) {
-        expiresAt = new Date(expiresMs).toISOString();
-      }
-      return {
-        name,
-        exists: true,
-        isActive,
-        expiresAt,
-        lastUsedAt,
-        isDefault: name === defaultName,
-      };
-    } catch {
+    const status = this.session.sessionStatus(name);
+    if (!status.loaded) {
       return {
         name,
         exists: true,
@@ -181,6 +138,16 @@ export class ProfileManager {
         isDefault: name === defaultName,
       };
     }
+    const isActive = status.hasPrimary && status.hasSecondary && status.fresh;
+    const expiresAt = status.expiresAt === null ? null : status.expiresAt.toISOString();
+    return {
+      name,
+      exists: true,
+      isActive,
+      expiresAt,
+      lastUsedAt,
+      isDefault: name === defaultName,
+    };
   }
 
   getAllStatuses(): ProfileStatus[] {
@@ -193,29 +160,26 @@ export class ProfileManager {
   }
 
   hasValidCookies(profileName: string): boolean {
-    try {
-      const cookies = this.cookieStorage.load(profileName);
-      return validateCookies(cookies) && checkCookieFreshness(cookies);
-    } catch {
-      return false;
-    }
+    const status = this.session.sessionStatus(profileName);
+    return status.loaded && status.hasPrimary && status.hasSecondary && status.fresh;
   }
 
   loadCookiesForApi(profileName: string): { secure1psid: string; secure1psidts: string | null } {
     const cookies = this.cookieStorage.load(profileName);
-    if (!checkCookieFreshness(cookies)) {
+    const validation = this.session.validate(cookies);
+    if (!validation.fresh) {
       throw new Error(
         `Session for profile '${profileName}' appears expired. Run 'gemiterm auth' to re-authenticate.`,
       );
     }
-    const map = new Map(cookies.map((c) => [c.name, c.value]));
-    const secure1psid = map.get("__Secure-1PSID");
-    if (!secure1psid) {
-      throw new Error(`Missing required cookie __Secure-1PSID for profile '${profileName}'.`);
+    if (!validation.hasPrimary) {
+      throw new Error(
+        `Missing required cookie ${PRIMARY_COOKIE_NAME} for profile '${profileName}'.`,
+      );
     }
     return {
-      secure1psid,
-      secure1psidts: map.get("__Secure-1PSIDTS") ?? null,
+      secure1psid: validation.secure1psid ?? "",
+      secure1psidts: validation.secure1psidts,
     };
   }
 }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ProfileAuthManager } from "../../src/services/profile-auth-manager.ts";
 import { ProfileManager, CookieStorage } from "../../src/infrastructure/storage.ts";
-import { CookieStorageService } from "../../src/services/cookie-storage-service.ts";
+import { CookieSession } from "../../src/services/cookie-session.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 import type { ProfileManager as ProfileManagerType } from "../../src/infrastructure/storage.ts";
@@ -80,13 +80,11 @@ function createManager(
   profileManager: ProfileManagerType,
   geminiClient?: GeminiClientLike,
 ): ProfileAuthManager {
-  const cookieStorage = new CookieStorageService({
-    cookieStorage: new CookieStorage(),
-    logger,
-  });
+  const cookieStorage = new CookieStorage();
+  const session = new CookieSession({ cookieStorage, logger });
   return new ProfileAuthManager({
     profileManager,
-    cookieStorageService: cookieStorage,
+    session,
     logger,
     geminiClient: geminiClient ?? {
       async deleteChat() { return; },
@@ -110,30 +108,30 @@ afterEach(() => {
 
 describe("ProfileAuthManager", () => {
   describe("ensureAuthenticated", () => {
-    test("returns cookies for a profile with valid session", () => {
+    test("returns cookies for a profile with valid session", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
       storage.save("default", makeValidCookies());
 
       const mgr = createManager(manager);
-      const cookies = mgr.ensureAuthenticated("default");
+      const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
       expect(cookies.secure_1psidts).toBe("test-psidts-value");
     });
 
-    test("throws AuthenticationError when no valid cookies", () => {
+    test("throws AuthenticationError when no valid cookies", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
 
       const mgr = createManager(manager);
 
-      expect(() => mgr.ensureAuthenticated("default")).toThrow("No valid session");
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
     });
 
-    test("throws AuthenticationError with expired cookies", () => {
+    test("throws AuthenticationError with expired cookies", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -141,18 +139,18 @@ describe("ProfileAuthManager", () => {
 
       const mgr = createManager(manager);
 
-      expect(() => mgr.ensureAuthenticated("default")).toThrow("No valid session");
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
     });
 
-    test("throws on invalid profile name", () => {
+    test("throws on invalid profile name", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       const mgr = createManager(manager);
 
-      expect(() => mgr.ensureAuthenticated("bad name!")).toThrow("invalid characters");
+      await expect(mgr.ensureAuthenticated("bad name!")).rejects.toThrow("invalid characters");
     });
 
-    test("uses default profile when none specified", () => {
+    test("uses default profile when none specified", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       manager.create("default");
@@ -163,7 +161,7 @@ describe("ProfileAuthManager", () => {
       writeFileSync(join(markerDir, "default-profile"), "default", "utf-8");
 
       const mgr = createManager(manager);
-      const cookies = mgr.ensureAuthenticated();
+      const cookies = await mgr.ensureAuthenticated();
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
     });
