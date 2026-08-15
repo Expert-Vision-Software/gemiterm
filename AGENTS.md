@@ -61,9 +61,9 @@ Auth is the only area with non-trivial history. Cookies are obtained by spawning
 - `src/services/playwright-cli-driver.ts` — `BunPlaywrightRunner`, argv builder, cookie-list output parser. Auto-detects between the `playwright-cli` binary and `bunx @playwright/cli`.
 - `src/services/cookie-monitor.ts` — polling loop, 2 s interval, 5 min default timeout. Login is detected by probing `a[href^="https://accounts.google.com/SignOutOptions"]` (not textarea/URL).
 - `src/services/auth-service.ts` — orchestrates the above for the `auth` command flow. The "Press Enter to launch browser..." prompt is one-shot, not blocking on Enter — that's intentional.
-- `src/services/cookie-storage-service.ts` — 7-day freshness window; composes `CookieStorage` via DI.
+- `src/services/cookie-session.ts` — the single cookie lifecycle module (`ensureSession`/`commit`/`sessionStatus`, two-tier validation, single expiry computation, injectable clock/rotator).
 
-Service-level test files: `tests/services/{playwright-cli-driver,cookie-monitor,auth-service,cookie-storage-service}.test.ts`.
+Service-level test files: `tests/services/{playwright-cli-driver,cookie-monitor,auth-service,cookie-session}.test.ts`.
 
 The full upstream API for the `playwright-cli` subprocess is documented in `docs/PLAYWRIGHT_CLI_API.md` (verified against `@playwright/cli`). Reach for `deepwiki` or the GitHub upstream when the docs are unclear.
 
