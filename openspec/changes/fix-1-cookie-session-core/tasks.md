@@ -4,8 +4,8 @@ Baseline: `bun test` -> 862 pass / 2 skip / 0 fail / 1748 expects / 56 files. Ru
 
 ## 1. Driver extensions (sensitive area, additive only)
 
-- [ ] 1.1 Add `openHeadless(url, profile, session?)` to `PlaywrightCliDriver` - same argv builder as `buildOpenHeadedArgs` minus the `--headed` flag; add `stateSave(session, outputPath)` wrapping `state-save <file>`; expose session `close(session)` via the existing `closeSession` path; extend `buildOpenHeadedArgs` consumers only where needed
-- [ ] 1.2 Extend `tests/services/playwright-cli-driver.test.ts` with argv-shape tests for the new methods (headless open has no `--headed`; `state-save` receives the target path); confirm existing driver tests unchanged
+- [x] 1.1 Add `openHeadless(url, profile, session?)` to `PlaywrightCliDriver` - same argv builder as `buildOpenHeadedArgs` minus the `--headed` flag; add `stateSave(session, outputPath)` wrapping `state-save <file>`; expose session `close(session)` via the existing `closeSession` path; extend `buildOpenHeadedArgs` consumers only where needed
+- [x] 1.2 Extend `tests/services/playwright-cli-driver.test.ts` with argv-shape tests for the new methods (headless open has no `--headed`; `state-save` receives the target path); confirm existing driver tests unchanged
 
 ## 2. CookieStore (CAS + lock, pure Bun fs)
 
