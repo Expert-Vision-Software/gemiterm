@@ -3,7 +3,8 @@ import type { Logger } from "../infrastructure/logger.ts";
 import { AuthenticationError } from "../core/errors.ts";
 import type { BrowserRefresher } from "./browser-refresher.ts";
 import type { ArmedSession } from "./cookie-session.ts";
-import { PSIDTS_COOKIE_NAME, findCookieValue } from "./auth-constants.ts";
+import { PSIDTS_COOKIE_NAME } from "./auth-constants.ts";
+import { findRoutableCookieValue } from "./cookie-validation.ts";
 
 export interface RecoveryDeps {
   refresher: Pick<BrowserRefresher, "rotatePsidts">;
@@ -23,7 +24,7 @@ export class RecoveryRung {
     let baseline: string | null = null;
     try {
       const { cookies } = await this.deps.cookieStore.load(profile);
-      baseline = findCookieValue(cookies, PSIDTS_COOKIE_NAME);
+      baseline = findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME);
     } catch {
       this.deps.logger.debug(`recovery: no stored jar for profile '${profile}'`);
     }

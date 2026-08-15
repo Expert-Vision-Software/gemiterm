@@ -5,7 +5,7 @@ import { AuthenticationError, LoginTimeoutError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
-import { CookieValidator } from "./cookie-validation.ts";
+import { CookieValidator, findRoutableCookieValue } from "./cookie-validation.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { SessionClassifier } from "./session-classifier.ts";
 import { BrowserRefresher, type RefresherDriver, type RotationResult } from "./browser-refresher.ts";
@@ -16,7 +16,6 @@ import {
   PSIDTS_COOKIE_NAME,
   PSID_COOKIE_NAME,
   filterToGeminiDomains,
-  findCookieValue,
 } from "./auth-constants.ts";
 import { sleep } from "./timing.ts";
 import { spawnDetachedRefreshRunner } from "./refresh-runner.ts";
@@ -53,17 +52,18 @@ export interface CookieSessionDeps {
 }
 
 function arm(cookies: Cookie[]): ArmedSession {
+  const config = toSdkCookieConfig(cookies);
   return {
-    secure_1psid: findCookieValue(cookies, PSID_COOKIE_NAME) ?? "",
-    secure_1psidts: findCookieValue(cookies, PSIDTS_COOKIE_NAME),
+    secure_1psid: config.secure1psid,
+    secure_1psidts: config.secure1psidts,
     cookies,
   };
 }
 
 export function toSdkCookieConfig(cookies: Cookie[]): { secure1psid: string; secure1psidts: string | null } {
   return {
-    secure1psid: findCookieValue(cookies, PSID_COOKIE_NAME) ?? "",
-    secure1psidts: findCookieValue(cookies, PSIDTS_COOKIE_NAME),
+    secure1psid: findRoutableCookieValue(cookies, PSID_COOKIE_NAME) ?? "",
+    secure1psidts: findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME),
   };
 }
 
@@ -140,7 +140,7 @@ export class CookieSession {
 
   async refresh(profile: string): Promise<RotationResult> {
     const { cookies } = await this.deps.cookieStore.load(profile);
-    const baseline = findCookieValue(cookies, PSIDTS_COOKIE_NAME);
+    const baseline = findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME);
     return await this.deps.refresher.rotatePsidts(profile, baseline);
   }
 

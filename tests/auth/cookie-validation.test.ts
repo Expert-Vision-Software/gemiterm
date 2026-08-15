@@ -1,6 +1,6 @@
 import { describe, test, expect, mock } from "bun:test";
 import type { Cookie } from "../../src/core/types.ts";
-import { CookieValidator, isRoutableTo } from "../../src/auth/cookie-validation.ts";
+import { CookieValidator, isRoutableTo, findRoutableCookieValue } from "../../src/auth/cookie-validation.ts";
 import { SessionValidationError } from "../../src/core/errors.ts";
 
 function cookie(overrides: Partial<Cookie> & { name: string }): Cookie {
@@ -77,6 +77,35 @@ describe("isRoutableTo", () => {
 
   test("session cookie (expires -1) is routable", () => {
     expect(isRoutableTo(cookie({ name: "X", domain: ".google.com", path: "/", expires: -1 }), target)).toBe(true);
+  });
+});
+
+describe("findRoutableCookieValue", () => {
+  const target = "https://gemini.google.com/app";
+
+  test("prefers the cookie routable to the target over an earlier same-name sibling", () => {
+    const jar = [
+      cookie({ name: "__Secure-1PSID", domain: ".youtube.com", value: "yt-psid" }),
+      cookie({ name: "__Secure-1PSID", domain: ".google.com", value: "g-psid" }),
+    ];
+    expect(findRoutableCookieValue(jar, "__Secure-1PSID", target)).toBe("g-psid");
+  });
+
+  test("prefers the routable cookie even when it appears later in the jar", () => {
+    const jar = [
+      cookie({ name: "__Secure-1PSIDTS", domain: ".youtube.com", value: "yt-ts" }),
+      cookie({ name: "__Secure-1PSIDTS", domain: ".google.com", value: "g-ts" }),
+    ];
+    expect(findRoutableCookieValue(jar, "__Secure-1PSIDTS", target)).toBe("g-ts");
+  });
+
+  test("falls back to the first name match when none is routable", () => {
+    const jar = [cookie({ name: "X", domain: ".youtube.com", value: "yt" })];
+    expect(findRoutableCookieValue(jar, "X", target)).toBe("yt");
+  });
+
+  test("returns null when the name is absent", () => {
+    expect(findRoutableCookieValue([], "__Secure-1PSID", target)).toBeNull();
   });
 });
 

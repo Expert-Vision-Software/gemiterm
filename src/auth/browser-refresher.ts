@@ -2,6 +2,7 @@ import type { Cookie } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { GEMINI_APP_URL, PSIDTS_COOKIE_NAME, filterToGeminiDomains } from "./auth-constants.ts";
+import { findRoutableCookieValue } from "./cookie-validation.ts";
 import { sleep } from "./timing.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -79,7 +80,7 @@ export class BrowserRefresher {
   private async pollPsidts(session: string): Promise<string | null> {
     try {
       const cookies = await this.driver.cookieList(session);
-      return cookies.find((c) => c.name === PSIDTS_COOKIE_NAME)?.value ?? null;
+      return findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME);
     } catch (err) {
       this.logger.debug(`cookie-list poll failed: ${err}`);
       return null;

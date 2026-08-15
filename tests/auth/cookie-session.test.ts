@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { Cookie } from "../../src/core/types.ts";
-import { CookieSession, createCookieSession } from "../../src/auth/cookie-session.ts";
+import { CookieSession, createCookieSession, toSdkCookieConfig } from "../../src/auth/cookie-session.ts";
 import { CookieStore } from "../../src/auth/cookie-store.ts";
 import { GEMINI_APP_URL } from "../../src/auth/auth-constants.ts";
 import { SessionValidationError, LoginTimeoutError } from "../../src/core/errors.ts";
@@ -128,6 +128,39 @@ describe("CookieSession.ensureSession", () => {
     const deps = makeDeps({ cookieStore: makeStore([cookie("SID", "s")]) });
     const session = makeSession(deps);
     await expect(session.ensureSession("p")).rejects.toBeInstanceOf(SessionValidationError);
+  });
+
+  test("arms with the google.com-scoped SDK cookies when the jar also has youtube.com duplicates", async () => {
+    const multiScope = [
+      cookie("__Secure-1PSIDTS", "yt-ts", ".youtube.com"),
+      cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
+      cookie("__Secure-1PSID", "g-psid", ".google.com"),
+      cookie("__Secure-1PSIDTS", "g-ts", ".google.com"),
+    ];
+    const deps = makeDeps({ cookieStore: makeStore(multiScope) });
+    const session = makeSession(deps);
+
+    const armed = await session.ensureSession("p");
+
+    expect(armed.secure_1psid).toBe("g-psid");
+    expect(armed.secure_1psidts).toBe("g-ts");
+  });
+});
+
+describe("toSdkCookieConfig", () => {
+  test("selects the cookie routable to gemini.google.com, not the youtube.com sibling", () => {
+    const jar = [
+      cookie("__Secure-1PSIDTS", "yt-ts", ".youtube.com"),
+      cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
+      cookie("__Secure-1PSID", "g-psid", ".google.com"),
+      cookie("__Secure-1PSIDTS", "g-ts", ".google.com"),
+    ];
+    expect(toSdkCookieConfig(jar)).toEqual({ secure1psid: "g-psid", secure1psidts: "g-ts" });
+  });
+
+  test("falls back to any name match when nothing is routable", () => {
+    const jar = [cookie("__Secure-1PSID", "x", ".example.com")];
+    expect(toSdkCookieConfig(jar)).toEqual({ secure1psid: "x", secure1psidts: null });
   });
 });
 

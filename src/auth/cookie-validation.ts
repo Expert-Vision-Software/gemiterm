@@ -37,6 +37,25 @@ export function isRoutableTo(cookie: Cookie, url: string): boolean {
   return domainMatches(host, cookie.domain) && pathMatches(path, cookie.path);
 }
 
+export function findRoutableCookieValue(
+  cookies: Cookie[],
+  name: string,
+  url: string = GEMINI_APP_URL,
+): string | null {
+  const routable = cookies.find(
+    (c) =>
+      c.name === name &&
+      typeof c.domain === "string" &&
+      typeof c.path === "string" &&
+      isRoutableTo(c, url),
+  );
+  if (routable) {
+    return routable.value;
+  }
+  const any = cookies.find((c) => c.name === name);
+  return any ? any.value : null;
+}
+
 export interface CookieValidatorDeps {
   logger: Logger;
 }

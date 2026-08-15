@@ -84,6 +84,17 @@ The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as 
 - **WHEN** `ensureSession("p")` is called and the stored jar contains only `__Secure-1PSID` + `__Secure-1PSIDTS`
 - **THEN** the call does not reject on jar shape (tier-2 warns at most) and arms the session
 
+### Requirement: SDK cookie selection prefers the gemini.google.com-routable scope
+The armed SDK config (`secure1psid`/`secure1psidts`) and the rotation baseline MUST be derived by selecting the cookie that is RFC-6265-routable to `gemini.google.com`, never the first cookie by name. A jar that holds `__Secure-1PSID`/`__Secure-1PSIDTS` at both `.youtube.com` and `.google.com` scopes MUST yield the `.google.com` values (the `.youtube.com` values are a different session and fail Gemini auth). When no cookie of the name is routable to `gemini.google.com`, selection MUST fall back to any name match rather than returning null for an otherwise-present cookie.
+
+#### Scenario: google.com scope wins over an earlier youtube.com sibling
+- **WHEN** a jar holds `__Secure-1PSID` and `__Secure-1PSIDTS` at `.youtube.com` (earlier in the jar) and at `.google.com` (later), with different values
+- **THEN** the armed SDK config and the refresh baseline resolve to the `.google.com` values
+
+#### Scenario: fallback to any name match when nothing is routable
+- **WHEN** a jar holds a same-name cookie whose domain is not routable to `gemini.google.com`
+- **THEN** selection falls back to that cookie's value (never `undefined`/`null` for a present cookie)
+
 ### Requirement: CookieSession.captureLogin captures the full browser jar (gate is not payload)
 `captureLogin(profile)` MUST open a headed browser (`https://gemini.google.com/app`) after printing a one-shot notification (containing `Opening headed browser` and the app URL, without blocking on input), poll the session's cookie list until BOTH `__Secure-1PSID` and `__Secure-1PSIDTS` are present (5-minute timeout), and then persist the COMPLETE browser storage state captured via `state-save` as the payload - filtered by domain (`.google.com`, `.youtube.com`, `accounts.google.com`) and by nothing else. No cookie-name filtering may exist in the capture path. The browser session MUST be closed in a `finally` block on every path. On success the method MUST print a confirmation containing the captured cookie count and the expiry derived from `__Secure-1PSIDTS.expires`; on timeout it MUST reject with a typed timeout error.
 

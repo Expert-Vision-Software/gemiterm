@@ -28,7 +28,3 @@ export function isAllowedGeminiDomain(domain: string): boolean {
 export function filterToGeminiDomains<T extends { domain: string }>(cookies: T[]): T[] {
   return cookies.filter((c) => isAllowedGeminiDomain(c.domain));
 }
-
-export function findCookieValue(cookies: { name: string; value: string }[], name: string): string | null {
-  return cookies.find((c) => c.name === name)?.value ?? null;
-}

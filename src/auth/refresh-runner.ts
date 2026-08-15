@@ -4,7 +4,8 @@ import { Logger } from "../infrastructure/logger.ts";
 import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { BrowserRefresher } from "./browser-refresher.ts";
-import { PSIDTS_COOKIE_NAME, findCookieValue } from "./auth-constants.ts";
+import { PSIDTS_COOKIE_NAME } from "./auth-constants.ts";
+import { findRoutableCookieValue } from "./cookie-validation.ts";
 import { joinPath } from "../infrastructure/path-utils.ts";
 
 export function refreshRunnerEntryPath(): string {
@@ -30,7 +31,7 @@ export async function runRefresh(profile: string, deps: RunRefreshDeps): Promise
   let baseline: string | null = null;
   try {
     const { cookies } = await deps.cookieStore.load(profile);
-    baseline = findCookieValue(cookies, PSIDTS_COOKIE_NAME);
+    baseline = findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME);
   } catch (err) {
     deps.logger.info(
       `refresh-runner: no stored jar for profile '${profile}' (${err instanceof Error ? err.message : String(err)}); refreshing with null baseline`,
