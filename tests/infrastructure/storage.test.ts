@@ -3,6 +3,8 @@ import { mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CookieStorage, ProfileManager } from "../../src/infrastructure/storage.ts";
+import { CookieSession } from "../../src/services/cookie-session.ts";
+import { Logger } from "../../src/infrastructure/logger.ts";
 import type { Cookie } from "../../src/core/types.ts";
 
 const TEST_DIR = join(tmpdir(), "gemiterm-test-storage");
@@ -303,6 +305,40 @@ describe("ProfileManager", () => {
     const status = manager.getStatus("missing");
     expect(status.exists).toBe(false);
     expect(status.isActive).toBe(false);
+  });
+
+  test("getStatus is active after a capture commit of session cookies (expires -1)", () => {
+    const storage = new CookieStorage();
+    const session = new CookieSession({ cookieStorage: storage, logger: new Logger("test") });
+    const mgr = new ProfileManager(storage, session);
+
+    session.commit("captured", [
+      {
+        name: "__Secure-1PSID",
+        value: "psid",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__Secure-1PSIDTS",
+        value: "ts",
+        domain: ".google.com",
+        path: "/",
+        expires: -1,
+        httpOnly: true,
+        secure: true,
+        sameSite: "Lax",
+      },
+    ]);
+
+    const status = mgr.getStatus("captured");
+    expect(status.exists).toBe(true);
+    expect(status.isActive).toBe(true);
+    expect(status.expiresAt).toBeNull();
   });
 
   test("getStatus marks the default profile", () => {

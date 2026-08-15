@@ -139,6 +139,25 @@ describe("CookieMonitor", () => {
       expect(monitor.isRunning).toBe(false);
     });
 
+    test("passes all cookies (including companions) to onCookiesFound", async () => {
+      const companions: Cookie[] = [
+        { name: "SID", value: "sid-abc", domain: ".google.com", path: "/", expires: -1, httpOnly: true, secure: true, sameSite: "Lax" },
+        { name: "NID", value: "nid-abc", domain: ".google.com", path: "/", expires: 1234567890, httpOnly: false, secure: true, sameSite: "None" },
+      ];
+      driver.evalJs.mockResolvedValue("true");
+      driver.cookieListFromState.mockResolvedValue([...authCookies, ...companions]);
+
+      const monitor = new CookieMonitor({ driver: driver as never, logger });
+      const callback = mock((_cookies: Cookie[]) => {});
+
+      await monitor.start("sess1", callback, 10_000);
+      await new Promise((r) => setTimeout(r, 2100));
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      const passed = callback.mock.calls[0]![0] as Cookie[];
+      expect(passed.map((c) => c.name)).toEqual(["__Secure-1PSID", "__Secure-1PSIDTS", "SID", "NID"]);
+    });
+
     test("stop() prevents further polling", async () => {
       driver.evalJs.mockResolvedValue("false");
 

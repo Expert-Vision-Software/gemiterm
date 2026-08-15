@@ -29,10 +29,10 @@ function cookie(name: string, value: string, expires: number, extra: Partial<Coo
   };
 }
 
-function makeStalePair(now = NOW): Cookie[] {
+function makeExpiredPair(now = NOW): Cookie[] {
   return [
-    cookie(PSID, "psid-value", Math.floor(now / 1000) + 365 * DAY),
-    cookie(PSIDTS, "psidts-value", Math.floor(now / 1000) + 3 * DAY),
+    cookie(PSID, "psid-value", Math.floor(now / 1000) - 30 * DAY),
+    cookie(PSIDTS, "psidts-value", Math.floor(now / 1000) - 30 * DAY),
   ];
 }
 
@@ -113,9 +113,9 @@ describe("CookieSession.validate", () => {
     expect(v.fresh).toBe(true);
   });
 
-  test("stale PSIDTS is recoverable, not terminal", () => {
+  test("expired pair is not fresh", () => {
     const { session } = buildHarness();
-    const v = session.validate(makeStalePair());
+    const v = session.validate(makeExpiredPair());
     expect(v.hasPrimary).toBe(true);
     expect(v.hasSecondary).toBe(true);
     expect(v.fresh).toBe(false);
@@ -139,31 +139,52 @@ describe("CookieSession.validate", () => {
     expect(v.fresh).toBe(true);
     expect(v.expiresAt).toBeNull();
   });
+
+  test("a short-lived PSIDTS does not make the session stale when PSID is long-lived", () => {
+    const { session } = buildHarness();
+    const v = session.validate([
+      cookie(PSID, "sid", Math.floor(NOW / 1000) + 365 * DAY),
+      cookie(PSIDTS, "youtube-ts", Math.floor(NOW / 1000) + 3 * DAY, { domain: ".youtube.com" }),
+      cookie(PSIDTS, "google-ts", Math.floor(NOW / 1000) + 365 * DAY, { domain: ".google.com" }),
+    ]);
+    expect(v.hasPrimary).toBe(true);
+    expect(v.hasSecondary).toBe(true);
+    expect(v.fresh).toBe(true);
+  });
+
+  test("a session-cookie PSIDTS (-1) among multiple PSIDTS cookies does not flip fresh to false", () => {
+    const { session } = buildHarness();
+    const freshTs = Math.floor(NOW / 1000) + 365 * DAY;
+    const v = session.validate([
+      cookie(PSID, "sid", Math.floor(NOW / 1000) + 365 * DAY),
+      cookie(PSIDTS, "youtube-ts", -1, { domain: ".youtube.com" }),
+      cookie(PSIDTS, "google-ts", freshTs, { domain: ".google.com" }),
+    ]);
+    expect(v.hasPrimary).toBe(true);
+    expect(v.hasSecondary).toBe(true);
+    expect(v.fresh).toBe(true);
+  });
 });
 
-describe("CookieSession 7-day threshold via fake clock", () => {
-  test("advancing the clock past the threshold flips fresh to stale", () => {
+describe("CookieSession not-expired via fake clock", () => {
+  test("advancing the clock past expiry flips fresh to stale", () => {
     const { session, setNow } = buildHarness();
     const cookies = [
       cookie(PSID, "sid", Math.floor(NOW / 1000) + 365 * DAY),
-      cookie(PSIDTS, "ts", Math.floor(NOW / 1000) + 8 * DAY),
+      cookie(PSIDTS, "ts", Math.floor(NOW / 1000) + 365 * DAY),
     ];
     expect(session.validate(cookies).fresh).toBe(true);
 
-    setNow(NOW + 2 * DAY * 1000);
+    setNow(NOW + 366 * DAY * 1000);
     expect(session.validate(cookies).fresh).toBe(false);
   });
 
-  test("expiry threshold is exactly 7 days out from the clock", () => {
-    const { session, setNow } = buildHarness();
-    setNow(NOW);
+  test("a pair whose tracked cookies are already expired is stale", () => {
+    const { session } = buildHarness();
     const cookies = [
-      cookie(PSID, "sid", Math.floor(NOW / 1000) + 365 * DAY),
-      cookie(PSIDTS, "ts", Math.floor(NOW / 1000) + 7 * DAY),
+      cookie(PSID, "sid", Math.floor(NOW / 1000) - 1),
+      cookie(PSIDTS, "ts", Math.floor(NOW / 1000) - 1),
     ];
-    expect(session.validate(cookies).fresh).toBe(true);
-
-    setNow(NOW + 1000);
     expect(session.validate(cookies).fresh).toBe(false);
   });
 });
@@ -204,9 +225,9 @@ describe("CookieSession.ensureSession", () => {
     await expect(session.ensureSession("default")).rejects.toThrow("gemiterm auth");
   });
 
-  test("throws AuthenticationError naming PSIDTS when it is stale (rotation disabled)", async () => {
+  test("throws AuthenticationError naming PSIDTS when the session is expired (rotation disabled)", async () => {
     const { session, storage } = buildHarness();
-    storage.save("default", makeStalePair());
+    storage.save("default", makeExpiredPair());
 
     await expect(session.ensureSession("default")).rejects.toThrow(PSIDTS);
     await expect(session.ensureSession("default")).rejects.toThrow("default");
@@ -217,10 +238,9 @@ describe("CookieSession.ensureSession", () => {
     await expect(session.ensureSession("ghost")).rejects.toThrow("No storage state found");
   });
 
-  test("absorb rescues a stale session without network", async () => {
+  test("absorb rescues an expired session without network", async () => {
     const { session, storage, rotateMock } = buildHarness({ rotationEnabled: true });
-    storage.save("default", makeStalePair());
-    const freshTs = cookie(PSIDTS, "fresh-ts", Math.floor(NOW / 1000) + 365 * DAY);
+    storage.save("default", makeExpiredPair());
 
     const result = await session.ensureSession("default", { [PSIDTS]: "fresh-ts" });
 
@@ -231,15 +251,15 @@ describe("CookieSession.ensureSession", () => {
 
   test("disabled rotation degrades to the actionable error without POST", async () => {
     const { session, rotateMock } = buildHarness({ rotationEnabled: false });
-    (session as unknown as { cookieStorage: CookieStorage }).cookieStorage.save("default", makeStalePair());
+    (session as unknown as { cookieStorage: CookieStorage }).cookieStorage.save("default", makeExpiredPair());
 
     await expect(session.ensureSession("default")).rejects.toThrow("gemiterm auth");
     expect(rotateMock).not.toHaveBeenCalled();
   });
 
-  test("enabled rotation recovers a stale session from the rotated PSIDTS", async () => {
+  test("enabled rotation recovers an expired session from the rotated PSIDTS", async () => {
     const { session, storage, rotateMock } = buildHarness({ rotationEnabled: true });
-    storage.save("default", makeStalePair());
+    storage.save("default", makeExpiredPair());
     rotateMock.mockResolvedValueOnce("rotated-ts");
 
     const result = await session.ensureSession("default");
@@ -251,7 +271,7 @@ describe("CookieSession.ensureSession", () => {
 
   test("failed rotation falls through to the error and leaves disk untouched", async () => {
     const { session, storage, rotateMock } = buildHarness({ rotationEnabled: true });
-    storage.save("default", makeStalePair());
+    storage.save("default", makeExpiredPair());
     const before = storage.load("default").map((c) => ({ ...c }));
     rotateMock.mockResolvedValueOnce(null);
 
@@ -270,21 +290,32 @@ describe("CookieSession.ensureSession", () => {
 });
 
 describe("CookieSession.commit (capture mode)", () => {
-  test("stamps tracked expiry to now + 7 days and preserves untracked metadata", () => {
-    const { session, storage } = buildHarness();
+  test("preserves captured expiry values and untracked metadata without stamping", () => {
+    const { session } = buildHarness();
+    const psidExpires = Math.floor(NOW / 1000) + 600;
+    const tsExpires = Math.floor(NOW / 1000) + 600;
     const captured = [
-      cookie(PSID, "sid", Math.floor(NOW / 1000) + 600, { httpOnly: false, sameSite: "None" }),
-      cookie(PSIDTS, "ts", Math.floor(NOW / 1000) + 600),
+      cookie(PSID, "sid", psidExpires, { httpOnly: false, sameSite: "None" }),
+      cookie(PSIDTS, "ts", tsExpires),
       cookie("NID", "nid", Math.floor(NOW / 1000) + 30 * DAY),
     ];
 
-    const stamped = session.commit("default", captured);
+    const committed = session.commit("default", captured);
 
-    const expected = Math.floor((NOW + 7 * DAY * 1000) / 1000);
-    expect(stamped.find((c) => c.name === PSID)?.expires).toBe(expected);
-    expect(stamped.find((c) => c.name === PSIDTS)?.expires).toBe(expected);
-    expect(stamped.find((c) => c.name === PSID)?.httpOnly).toBe(false);
-    expect(stamped.find((c) => c.name === "NID")?.expires).toBe(captured[2].expires);
+    expect(committed.find((c) => c.name === PSID)?.expires).toBe(psidExpires);
+    expect(committed.find((c) => c.name === PSIDTS)?.expires).toBe(tsExpires);
+    expect(committed.find((c) => c.name === PSID)?.httpOnly).toBe(false);
+    expect(committed.find((c) => c.name === "NID")?.expires).toBe(captured[2].expires);
+  });
+
+  test("capture of session cookies (expires -1) remains active via sessionStatus", () => {
+    const { session } = buildHarness();
+    session.commit("default", [cookie(PSID, "sid", -1), cookie(PSIDTS, "ts", -1)]);
+
+    const status = session.sessionStatus("default");
+
+    expect(status.active).toBe(true);
+    expect(status.fresh).toBe(true);
   });
 
   test("rejects a PSID-less capture and leaves disk untouched", () => {
@@ -368,19 +399,19 @@ describe("CookieSession.sessionStatus", () => {
     expect(status.expiresAt).not.toBeNull();
   });
 
-  test("returns fresh=false for a stale profile", () => {
+  test("returns fresh=false for an expired profile", () => {
     const { session, storage } = buildHarness();
-    storage.save("default", makeStalePair());
+    storage.save("default", makeExpiredPair());
     const status = session.sessionStatus("default");
     expect(status.fresh).toBe(false);
   });
 
-  test("active is true for a fresh profile and false for a stale profile", () => {
+  test("active is true for a fresh profile and false for an expired profile", () => {
     const { session, storage } = buildHarness();
     storage.save("default", makeFreshPair());
     expect(session.sessionStatus("default").active).toBe(true);
-    storage.save("stale", makeStalePair());
-    expect(session.sessionStatus("stale").active).toBe(false);
+    storage.save("expired", makeExpiredPair());
+    expect(session.sessionStatus("expired").active).toBe(false);
     expect(session.sessionStatus("ghost").active).toBe(false);
   });
 });

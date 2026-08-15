@@ -127,7 +127,6 @@ export class CookieSession {
     let secure1psid: string | null = null;
     let secure1psidts: string | null = null;
     let psidtsPresent = false;
-    let psidtsExpires = 0;
 
     for (const cookie of cookies) {
       if (cookie.name === PRIMARY_COOKIE_NAME && secure1psid === null) {
@@ -138,18 +137,15 @@ export class CookieSession {
         if (secure1psidts === null) {
           secure1psidts = cookie.value;
         }
-        psidtsExpires = cookie.expires;
       }
     }
 
+    const expiresAt = sessionExpiry(cookies);
     return {
       hasPrimary: !!secure1psid,
       hasSecondary: psidtsPresent && !!secure1psidts,
-      fresh:
-        !psidtsPresent ||
-        psidtsExpires <= 0 ||
-        psidtsExpires * 1000 >= now + COOKIE_EXPIRY_THRESHOLD_MS,
-      expiresAt: sessionExpiry(cookies),
+      fresh: expiresAt === null || expiresAt.getTime() > now,
+      expiresAt,
       secure1psid,
       secure1psidts,
     };
@@ -235,15 +231,7 @@ export class CookieSession {
   }
 
   private commitCapture(profile: string, entries: Cookie[]): Cookie[] {
-    const expirySec = Math.floor((this.clock() + COOKIE_EXPIRY_THRESHOLD_MS) / 1000);
-    const stamped = entries.map((cookie) => {
-      if (cookie.name === PRIMARY_COOKIE_NAME || cookie.name === SECONDARY_COOKIE_NAME) {
-        return { ...cookie, expires: expirySec };
-      }
-      return cookie;
-    });
-
-    const validation = this.validate(stamped);
+    const validation = this.validate(entries);
     if (!validation.hasPrimary) {
       throw new Error(`${PRIMARY_COOKIE_NAME} missing from captured cookies — retry 'gemiterm auth'`);
     }
@@ -254,13 +242,13 @@ export class CookieSession {
     } catch {
       persisted = null;
     }
-    if (persisted !== null && cookiesEquivalent(persisted, stamped)) {
+    if (persisted !== null && cookiesEquivalent(persisted, entries)) {
       this.logger.debug(`[cookie-session] capture unchanged for profile '${profile}', skipping write`);
-      return stamped;
+      return entries;
     }
 
-    this.cookieStorage.save(profile, stamped);
-    return stamped;
+    this.cookieStorage.save(profile, entries);
+    return entries;
   }
 
   private commitJarMerge(profile: string, jar: Record<string, string>): void {

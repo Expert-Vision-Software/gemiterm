@@ -5,7 +5,7 @@ The `AuthService.authenticate(profileName?)` method MUST be the single entry poi
 
 #### Scenario: Successful authentication returns cookies and expiry
 - **WHEN** `authenticate("test-profile")` is called and the cookie monitor reports both `__Secure-1PSID` and `__Secure-1PSIDTS` before the timeout
-- **THEN** the method resolves with an `AuthResult` whose `cookies` array has length 2, whose `expiresAt` comes from the single expiry computation (max positive `expires` across `__Secure-1PSID`/`__Secure-1PSIDTS`), the driver `openHeaded` is called exactly once with the Gemini app URL, the cookie monitor `start` is called exactly once, the session `commit` is called exactly once for the profile, and the driver `closeSession` is called exactly once with the profile name
+- **THEN** the method resolves with an `AuthResult` whose `cookies` array contains the captured cookies (both tracked names plus any companion cookies Google returned), whose `expiresAt` comes from the single expiry computation (max positive `expires` across `__Secure-1PSID`/`__Secure-1PSIDTS`), the driver `openHeaded` is called exactly once with the Gemini app URL, the cookie monitor `start` is called exactly once, the session `commit` is called exactly once for the profile, and the driver `closeSession` is called exactly once with the profile name
 
 #### Scenario: Captured cookies are validated at write time
 - **WHEN** the cookie monitor reports a set whose merge fails tier 1 validation (no usable `__Secure-1PSID`)
@@ -58,7 +58,7 @@ The `ProfileAuthManager.ensureAuthenticated(profileName?)` method MUST resolve t
 
 ### Requirement: CookieStorageService validates and computes cookie freshness
 **Reason**: Boolean single-tier validation is replaced by the two-tier model (primary `__Secure-1PSID` binding; recoverable secondary `__Secure-1PSIDTS` binding) owned by the `cookie-session` capability.
-**Migration**: Validation and freshness behavior is specified by the `cookie-session` requirements "Two-Tier Cookie Validation" (same 7-day threshold, same boolean outcomes per tier).
+**Migration**: Validation and freshness behavior is specified by the `cookie-session` requirements "Two-Tier Cookie Validation" (the single "not expired" rule — Google's `expires` is authoritative).
 
 ### Requirement: CookieStorageService computes cookie expiry
 **Reason**: One of three divergent expiry computations; unified into the single `cookie-session` requirement "Single Expiry Computation".

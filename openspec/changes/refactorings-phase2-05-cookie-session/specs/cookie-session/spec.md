@@ -2,7 +2,7 @@
 
 ### Requirement: CookieSession Module
 
-The system MUST provide a `CookieSession` class in `src/services/cookie-session.ts` that owns the entire cookie lifecycle behind a narrow interface: `ensureSession(profile)` (the only load path), `commit(profile, liveJar)` (the only persistence path), and `sessionStatus(profile)` (a pure read for status-style callers). The class MUST be constructed with injectable dependencies `{ cookieStorage, logger, clock?, rotator? }` where `clock` defaults to `Date.now` and `rotator` defaults to the in-repo `RotateCookies` POST. All cookie-name magic strings, the freshness threshold constant, and the expiry computation MUST live inside this module and nowhere else in `src/`.
+The system MUST provide a `CookieSession` class in `src/services/cookie-session.ts` that owns the entire cookie lifecycle behind a narrow interface: `ensureSession(profile)` (the only load path), `commit(profile, liveJar)` (the only persistence path), and `sessionStatus(profile)` (a pure read for status-style callers). The class MUST be constructed with injectable dependencies `{ cookieStorage, logger, clock?, rotator? }` where `clock` defaults to `Date.now` and `rotator` defaults to the in-repo `RotateCookies` POST. All cookie-name magic strings, the jar-merge stamp constant, and the expiry computation MUST live inside this module and nowhere else in `src/`.
 
 #### Scenario: Module surface
 
@@ -11,12 +11,12 @@ The system MUST provide a `CookieSession` class in `src/services/cookie-session.
 
 #### Scenario: Injectable clock drives freshness decisions
 
-- **WHEN** a `CookieSession` is constructed with a fake `clock` and a profile whose `__Secure-1PSIDTS` expires 3 days after the fake clock's value
-- **THEN** freshness is computed against the injected time, and advancing the fake clock past the threshold flips the same persisted cookies from fresh to stale without waiting real time
+- **WHEN** a `CookieSession` is constructed with a fake `clock` and a profile whose tracked cookies expire 3 days after the fake clock's value
+- **THEN** freshness is computed against the injected time, and advancing the fake clock past that expiry flips the same persisted cookies from fresh to stale without waiting real time
 
 ### Requirement: ensureSession Is the Only Load Path
 
-`CookieSession.ensureSession(profile)` MUST load the profile's persisted cookies, apply two-tier validation, run the recovery ladder when tier 2 is stale or missing, and resolve an `ActiveSession` carrying `{ cookies, secure1psid, secure1psidts, expiresAt }`. When tier 1 fails (no usable `__Secure-1PSID`) and the ladder cannot recover, the method MUST throw an `AuthenticationError` whose message names the profile and directs the user to `gemiterm auth`. No other module in `src/` may assemble per-profile API cookie pairs from persisted state except through this method.
+`CookieSession.ensureSession(profile)` MUST load the profile's persisted cookies, apply two-tier validation, run the recovery ladder when the session is not fresh (expired) or tier 2 is missing, and resolve an `ActiveSession` carrying `{ cookies, secure1psid, secure1psidts, expiresAt }`. When tier 1 fails (no usable `__Secure-1PSID`) and the ladder cannot recover, the method MUST throw an `AuthenticationError` whose message names the profile and directs the user to `gemiterm auth`. No other module in `src/` may assemble per-profile API cookie pairs from persisted state except through this method.
 
 #### Scenario: Valid persisted session resolves without writes
 
@@ -35,7 +35,12 @@ The system MUST provide a `CookieSession` class in `src/services/cookie-session.
 
 ### Requirement: commit Is the Only Persistence Path
 
-`CookieSession.commit(profile, liveJar)` MUST be the single way cookies are persisted anywhere in the codebase: it reads the persisted set, overlays the live jar's values onto matching cookie names (preserving each entry's domain/path/httpOnly/secure/sameSite metadata and every cookie name the jar does not track), validates the merged set, and writes only when the merged set passes tier 1 with a present (possibly stale) tier 2. When the merged set fails validation, the method MUST throw and leave the persisted file untouched. Persistence failures MUST NOT fail the triggering API operation (logged at debug level). `CookieStorage.save` MUST NOT be called from any `src/` module other than `CookieSession` (and `CookieStorage`'s own tests).
+`CookieSession.commit(profile, input)` MUST be the single way cookies are persisted anywhere in the codebase. In **capture mode** (`Cookie[]`, from `AuthService.extractCookies`), it writes the captured entries verbatim — preserving each cookie's authoritative `expires` and every companion cookie Google returned — after validating tier 1 (a usable `__Secure-1PSID`); otherwise it throws and leaves the persisted file untouched. In **jar-merge mode** (`{ jar }`, from `GeminiClientService`), it reads the persisted set, overlays the jar's values onto matching cookie names (preserving each entry's domain/path/httpOnly/secure/sameSite metadata and every cookie name the jar does not track), stamps the tracked entries' `expires` to `now + 7 days`, validates the merged set, and writes only when the merged set passes tier 1. Persistence failures MUST NOT fail the triggering API operation (logged at debug level). `CookieStorage.save` MUST NOT be called from any `src/` module other than `CookieSession` (and `CookieStorage`'s own tests).
+
+#### Scenario: Capture preserves expiry and companion cookies verbatim
+
+- **WHEN** `commit("default", [__Secure-1PSID (expires: -1), __Secure-1PSIDTS (expires: -1), SID, NID])` runs
+- **THEN** the saved file contains all four entries with their original `expires` values (session cookies stay `-1`) and no stamping occurs
 
 #### Scenario: Jar overlay preserves metadata and untracked names
 
@@ -59,17 +64,27 @@ The system MUST provide a `CookieSession` class in `src/services/cookie-session.
 
 ### Requirement: Two-Tier Cookie Validation
 
-Cookie validation MUST distinguish two tiers. Tier 1 (primary binding): the set contains a non-empty `__Secure-1PSID`; failure is terminal — no recovery rung can rescue the session. Tier 2 (secondary binding): the set contains a non-empty `__Secure-1PSIDTS` whose expiry is later than `now + 7 days` (the single freshness threshold); failure is recoverable via the recovery ladder. The freshness comparison MUST use the injected clock.
+Cookie validation MUST distinguish two tiers. Tier 1 (primary binding): the set contains a non-empty `__Secure-1PSID`; failure is terminal — no recovery rung can rescue the session. Tier 2 (secondary binding): the set contains a non-empty `__Secure-1PSIDTS`; failure is recoverable via the recovery ladder. Freshness is a single session-wide rule, independent of the tiers: the set is fresh when its single expiry (the max positive `expires` across `__Secure-1PSID` + `__Secure-1PSIDTS`, else `null`) is either `null` (session cookies) or later than the injected clock. Google's `expires` values are authoritative; there is no 7-day threshold.
 
-#### Scenario: Both tiers pass
+#### Scenario: Both tiers pass and the session is not expired
 
-- **WHEN** validation runs on a set with non-empty `__Secure-1PSID` and a `__Secure-1PSIDTS` expiring more than 7 days out
-- **THEN** tier 1 and tier 2 both pass
+- **WHEN** validation runs on a set with non-empty `__Secure-1PSID` and `__Secure-1PSIDTS` whose max expiry is in the future
+- **THEN** tier 1 and tier 2 both pass and the set is fresh
 
-#### Scenario: Stale secondary binding is recoverable, not terminal
+#### Scenario: Missing secondary binding is recoverable, not terminal
 
-- **WHEN** validation runs on a set with a valid `__Secure-1PSID` and a `__Secure-1PSIDTS` expiring within 7 days
-- **THEN** tier 1 passes and tier 2 reports stale-recoverable
+- **WHEN** validation runs on a set with a valid `__Secure-1PSID` and no `__Secure-1PSIDTS`
+- **THEN** tier 1 passes and tier 2 reports recoverable
+
+#### Scenario: Expired cookies are not fresh
+
+- **WHEN** validation runs on a set whose tracked cookies' max expiry is in the past
+- **THEN** the set is not fresh
+
+#### Scenario: Session cookies are always fresh
+
+- **WHEN** validation runs on a set whose `__Secure-1PSID` and `__Secure-1PSIDTS` both have `expires <= 0`
+- **THEN** the set is fresh and its expiry is `null`
 
 #### Scenario: Missing primary binding is terminal
 
@@ -78,40 +93,40 @@ Cookie validation MUST distinguish two tiers. Tier 1 (primary binding): the set 
 
 ### Requirement: Typed Recovery Ladder
 
-`ensureSession` MUST attempt recovery in a fixed rung order when tier 2 is stale or missing: (1) trust the persisted set when both tiers pass; (2) absorb — `commit` a caller-supplied live jar when it holds newer tracked values than disk, then re-validate; (3) rotate — POST `RotateCookies`, `commit` the rotated `__Secure-1PSIDTS`, re-validate; (4) fail — throw `AuthenticationError` naming the profile and the failing binding, directing to `gemiterm auth`. Each rung MUST log its outcome at debug level. A failed rung MUST fall through to the next; a failed rotation MUST NOT invalidate an otherwise tier-2-valid session.
+`ensureSession` MUST attempt recovery in a fixed rung order when the persisted session is not fresh (expired) or tier 2 is missing: (1) trust the persisted set when it is fresh and both tiers pass; (2) absorb — `commit` a caller-supplied live jar when it holds newer tracked values than disk, then re-validate; (3) rotate — POST `RotateCookies`, `commit` the rotated `__Secure-1PSIDTS`, re-validate; (4) fail — throw `AuthenticationError` naming the profile and the failing binding, directing to `gemiterm auth`. Each rung MUST log its outcome at debug level. A failed rung MUST fall through to the next; a failed rotation MUST NOT invalidate an otherwise not-expired session.
 
 #### Scenario: Ladder order is fixed
 
-- **WHEN** tier 2 is stale and both an absorbable live jar and a working rotator are available
+- **WHEN** the session is expired and both an absorbable live jar and a working rotator are available
 - **THEN** rung 2 (absorb) is attempted before rung 3 (rotate)
 
 #### Scenario: Absorb rescues without network
 
-- **WHEN** tier 2 is stale on disk but the caller-supplied jar holds a fresh `__Secure-1PSIDTS`
-- **THEN** `commit` persists the fresh value, re-validation passes, and no rotation POST is made
+- **WHEN** the session is expired on disk but the caller-supplied jar holds a newer tracked value
+- **THEN** `commit` persists the newer value (stamped to `now + 7 days`), re-validation passes, and no rotation POST is made
 
-#### Scenario: Failed rotation preserves a working session
+#### Scenario: Failed rotation falls through
 
-- **WHEN** tier 2 passes marginally and the rotation POST fails
-- **THEN** `ensureSession` still resolves with the persisted session and the failure is logged at debug level
+- **WHEN** the session is expired and the rotation POST returns no value
+- **THEN** `ensureSession` falls through to rung 4 and throws the actionable `AuthenticationError`; the failure is logged at debug level
 
 #### Scenario: Terminal failure names the binding
 
-- **WHEN** all applicable rungs are exhausted with tier 2 still failing
-- **THEN** the thrown `AuthenticationError` names the profile and identifies `__Secure-1PSIDTS` as the failing binding
+- **WHEN** all applicable rungs are exhausted without recovering the session
+- **THEN** the thrown `AuthenticationError` names the profile and identifies the failing binding (`__Secure-1PSIDTS` when PSID is present, else `__Secure-1PSID`)
 
 ### Requirement: In-Repo RotateCookies Rotation
 
-Proactive rotation MUST be implemented in-repo (the `gemini-web-sdk` exposes no rotation API) as a POST to `https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/RotateCookies` carrying a `Cookie` header built from the current tracked values, parsing the response for a rotated `__Secure-1PSIDTS`. Rotation MUST be attempted at most once per `ensureSession` invocation, only when tier 2 is stale or missing. Until the exact request envelope is verified against a live session (implementation task gate), rung 3 MUST be internally disabled, degrading the ladder to rungs 1→2→4 with behavior identical to the pre-change baseline. Rotation failures (network, non-success status, unparseable body) MUST count as a failed rung, never as a session invalidation.
+Proactive rotation MUST be implemented in-repo (the `gemini-web-sdk` exposes no rotation API) as a POST to `https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/RotateCookies` carrying a `Cookie` header built from the current tracked values, parsing the response for a rotated `__Secure-1PSIDTS`. Rotation MUST be attempted at most once per `ensureSession` invocation, only when the session is not fresh (expired) or tier 2 is missing. Until the exact request envelope is verified against a live session (implementation task gate), rung 3 MUST be internally disabled, degrading the ladder to rungs 1→2→4 with behavior identical to the pre-change baseline. Rotation failures (network, non-success status, unparseable body) MUST count as a failed rung, never as a session invalidation.
 
-#### Scenario: Stale tier 2 triggers one rotation attempt
+#### Scenario: Expired session triggers one rotation attempt
 
-- **WHEN** tier 2 is stale, rungs 1–2 cannot recover, and rung 3 is enabled
+- **WHEN** the session is expired, rungs 1–2 cannot recover, and rung 3 is enabled
 - **THEN** exactly one `RotateCookies` POST is made and its rotated `__Secure-1PSIDTS` is committed on success
 
 #### Scenario: Disabled rung degrades to baseline behavior
 
-- **WHEN** rung 3 is disabled and tier 2 is stale with no absorbable jar
+- **WHEN** rung 3 is disabled and the session is expired with no absorbable jar
 - **THEN** no POST is made and `ensureSession` throws the actionable `AuthenticationError`, matching pre-change behavior
 
 ### Requirement: Single Expiry Computation

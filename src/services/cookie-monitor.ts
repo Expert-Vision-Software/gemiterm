@@ -154,6 +154,6 @@ export class CookieMonitor {
     }
 
     this.stop();
-    onCookiesFound(authCookies);
+    onCookiesFound(cookies);
   }
 }
