@@ -128,23 +128,11 @@ export class ProfileManager {
       };
     }
     const status = this.session.sessionStatus(name);
-    if (!status.loaded) {
-      return {
-        name,
-        exists: true,
-        isActive: false,
-        expiresAt: null,
-        lastUsedAt,
-        isDefault: name === defaultName,
-      };
-    }
-    const isActive = status.hasPrimary && status.hasSecondary && status.fresh;
-    const expiresAt = status.expiresAt === null ? null : status.expiresAt.toISOString();
     return {
       name,
       exists: true,
-      isActive,
-      expiresAt,
+      isActive: status.active,
+      expiresAt: status.expiresAt === null ? null : status.expiresAt.toISOString(),
       lastUsedAt,
       isDefault: name === defaultName,
     };
@@ -160,8 +148,7 @@ export class ProfileManager {
   }
 
   hasValidCookies(profileName: string): boolean {
-    const status = this.session.sessionStatus(profileName);
-    return status.loaded && status.hasPrimary && status.hasSecondary && status.fresh;
+    return this.session.sessionStatus(profileName).active;
   }
 
   loadCookiesForApi(profileName: string): { secure1psid: string; secure1psidts: string | null } {
@@ -178,7 +165,7 @@ export class ProfileManager {
       );
     }
     return {
-      secure1psid: validation.secure1psid ?? "",
+      secure1psid: validation.secure1psid!,
       secure1psidts: validation.secure1psidts,
     };
   }

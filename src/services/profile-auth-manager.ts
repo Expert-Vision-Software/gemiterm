@@ -45,11 +45,7 @@ export class ProfileAuthManager {
   }
 
   getActiveProfiles(): string[] {
-    const profiles = this.profileManager.list();
-    return profiles.filter((name) => {
-      const status = this.session.sessionStatus(name);
-      return status.loaded && status.hasPrimary && status.hasSecondary && status.fresh;
-    });
+    return this.profileManager.list().filter((name) => this.session.sessionStatus(name).active);
   }
 
   async findProfileForConversation(conversationId: string): Promise<string | null> {
