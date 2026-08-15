@@ -17,14 +17,14 @@ import { getPackageJson } from "../infrastructure/path-utils.ts";
 import { parseGlobalArgs, printVersion, printHelp } from "../infrastructure/cli-parser.ts";
 import { AuthenticationError } from "../core/errors.ts";
 
-const pkg = getPackageJson(import.meta.url);
+const pkgPromise = getPackageJson(import.meta.url);
 
 interface CliServices {
   profileAuthManager: ProfileAuthManager;
   profileLifecycle: ProfileLifecycle;
   exportStrategies: { single: SingleExport; batch: BatchExport };
-  getGeminiClient: () => GeminiClientService;
-  listProfiles: () => string[];
+  getGeminiClient: () => Promise<GeminiClientService>;
+  listProfiles: () => Promise<string[]>;
 }
 
 async function setupServices(): Promise<CliServices> {
@@ -47,15 +47,15 @@ async function setupServices(): Promise<CliServices> {
 
   let geminiClient: GeminiClientService | null = null;
 
-  function getGeminiClient(): GeminiClientService {
+  async function getGeminiClient(): Promise<GeminiClientService> {
     if (geminiClient) return geminiClient;
-    const profiles = listProfiles();
+    const profiles = await listProfiles();
     if (profiles.length === 0) {
       throw new AuthenticationError();
     }
-    const profileName = getDefaultProfileName();
+    const profileName = await getDefaultProfileName();
     try {
-      const cookieData = profileManager.loadCookiesForApi(profileName);
+      const cookieData = await profileManager.loadCookiesForApi(profileName);
       geminiClient = new GeminiClientService(
         { secure1psid: cookieData.secure1psid, secure1psidts: cookieData.secure1psidts },
         logger,
@@ -79,7 +79,7 @@ async function setupServices(): Promise<CliServices> {
     }),
     batch: new BatchExport({
       fetchChat: (id, profile) => fetchChatForRequest(getGeminiClient, id, profile),
-      listChatsForProfile: (name, options) => getGeminiClient().forProfile(name).listChats(options),
+      listChatsForProfile: async (name, options) => await (await (await getGeminiClient()).forProfile(name)).listChats(options),
       listProfiles,
       logger: new Logger("export-all-command"),
     }),
@@ -109,6 +109,7 @@ async function main(): Promise<void> {
   }
 
   if (flags.version) {
+    const pkg = await pkgPromise;
     printVersion(pkg.version);
     process.exit(0);
   }

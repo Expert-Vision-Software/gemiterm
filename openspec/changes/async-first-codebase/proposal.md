@@ -30,8 +30,8 @@ _(none — this change converts existing capabilities' interfaces to async)_
 
 ## Impact
 
-- **Code**: `src/infrastructure/{io,path-utils,config,storage}.ts` (conversion cores); `src/cli/index.ts` (wiring + `getPackageJson` call site); `src/cli/utils/{gemini-queries,chat-output,prompt-file}.ts`; `src/cli/command-registry.ts` (context type); `src/services/{auth-service,chat-metadata-storage,export-strategy,profile-lifecycle,profile-auth-manager,playwright-cli-driver}.ts` (await ripple only).
-- **Not changed**: prompt layer (`prompts.ts` facade, interactive REPL), Gemini HTTP client internals, Playwright subprocess protocol, on-disk formats, CLI output bytes, non-interactive `list` output paths (guarded by `tests/integration/commands/list.test.ts`).
+- **Code**: `src/infrastructure/{io,path-utils,config,storage}.ts` (conversion cores); `src/cli/index.ts` (wiring + `getPackageJson` call site); `src/cli/utils/{gemini-queries,chat-output,prompt-file,chat-session,profile-resolution}.ts`; `src/cli/command-registry.ts` (context type); `src/services/{auth-service,chat-metadata-storage,export-strategy,profile-lifecycle,profile-auth-manager,playwright-cli-driver}.ts` (await ripple only). Forced ripple from the async `CookieStorage`/`loadCookiesForApi` contracts: `src/services/{cookie-storage-service,gemini-client-wrapper}.ts` — signature-level only (`forProfile`, `loadCookiesForProfile`, `persistRefreshedCookies` become async); the Gemini HTTP/SDK internals are unchanged.
+- **Not changed**: prompt layer (`prompts.ts` facade, interactive REPL), Gemini HTTP/SDK client internals, Playwright subprocess protocol, on-disk formats, CLI output bytes, non-interactive `list` output paths (guarded by `tests/integration/commands/list.test.ts`).
 - **Tests**: broad `await` ripple across `tests/` mirroring `src/`; baseline 657 pass must hold.
 - **Dependencies**: none added or removed (`node:fs/promises` is stdlib).
 - **Sensitive areas**: `playwright-cli-driver.ts` touched only mechanically (await `readJsonFile`/`removeDir`); re-run `tests/services/playwright-cli-driver.test.ts` per AGENTS.md.

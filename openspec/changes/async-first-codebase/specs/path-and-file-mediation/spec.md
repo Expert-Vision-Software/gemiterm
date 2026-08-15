@@ -6,7 +6,7 @@
 
 The system MUST provide `src/infrastructure/io.ts` as the canonical home for all file-system operations. No other source file in `src/` MAY import from `node:fs` or `node:fs/promises` directly. The CI lint check enforces this rule.
 
-The `io.ts` module MUST export the following 11 functions plus one error class: `ensureDir`, `existsFile`, `readTextFile`, `safeReadTextFile`, `writeTextFile`, `readJsonFile`, `writeJsonFile`, `removeDir`, `renameDir`, `isDirectory`, `listSubdirectories`, and `IOError`. Every exported function MUST be `async` and return a `Promise` of its previous sync return type. Implementations MUST be backed by `node:fs/promises` (never the `*Sync` variants). Error wrapping semantics (`IOError` with `cause`) and observable behavior (messages, safe-return defaults, parent-dir creation on writes) MUST be identical to the sync versions.
+The `io.ts` module MUST export the following 13 functions plus one error class: `ensureDir`, `existsFile`, `readTextFile`, `safeReadTextFile`, `writeTextFile`, `readJsonFile`, `writeJsonFile`, `removeDir`, `removeFile`, `renameDir`, `isDirectory`, `listSubdirectories`, `getFileMtime`, and `IOError`. Every exported function MUST be `async` and return a `Promise` of its previous sync return type. Implementations MUST be backed by `node:fs/promises` (never the `*Sync` variants). Error wrapping semantics (`IOError` with `cause`) and observable behavior (messages, safe-return defaults, parent-dir creation on writes) MUST be identical to the sync versions.
 
 #### Scenario: A new src/ file wants to read a file
 
@@ -78,7 +78,7 @@ The system MUST provide `getPackageJson(): Promise<{ name: string; version: stri
 #### Scenario: Normal call
 
 - **WHEN** `await getPackageJson()` is called from a file under the repository root
-- **THEN** it resolves the parsed `package.json` object, with `name === "gemiterm"` and `version === "2.0.0"`
+- **THEN** it resolves the parsed `package.json` object, with `name === "gemiterm"` and `version` equal to the repo's current `package.json` version
 
 #### Scenario: `package.json` missing or unparseable
 

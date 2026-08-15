@@ -76,54 +76,54 @@ describe("CookieStorage", () => {
     storage = new CookieStorage();
   });
 
-  test("saves and loads cookies for a profile", () => {
+  test("saves and loads cookies for a profile", async () => {
     const cookies = makeValidCookies();
-    storage.save("test-profile", cookies);
+    await storage.save("test-profile", cookies);
 
-    const loaded = storage.load("test-profile");
+    const loaded = await storage.load("test-profile");
     expect(loaded).toHaveLength(2);
     expect(loaded[0].name).toBe("__Secure-1PSID");
     expect(loaded[1].name).toBe("__Secure-1PSIDTS");
   });
 
-  test("throws when loading non-existent profile", () => {
-    expect(() => storage.load("nonexistent")).toThrow("No storage state found");
+  test("throws when loading non-existent profile", async () => {
+    await expect(storage.load("nonexistent")).rejects.toThrow("No storage state found");
   });
 
-  test("deletes profile directory", () => {
-    storage.save("to-delete", makeValidCookies());
+  test("deletes profile directory", async () => {
+    await storage.save("to-delete", makeValidCookies());
     expect(existsSync(join(TEST_DIR, "profiles", "to-delete"))).toBe(true);
 
-    storage.delete("to-delete");
+    await storage.delete("to-delete");
     expect(existsSync(join(TEST_DIR, "profiles", "to-delete"))).toBe(false);
   });
 
-  test("delete is a no-op for non-existent profile", () => {
-    expect(() => storage.delete("nonexistent")).not.toThrow();
+  test("delete is a no-op for non-existent profile", async () => {
+    await expect(storage.delete("nonexistent")).resolves.toBeUndefined();
   });
 
-  test("list returns empty array when no profiles exist", () => {
-    expect(storage.list()).toEqual([]);
+  test("list returns empty array when no profiles exist", async () => {
+    expect(await storage.list()).toEqual([]);
   });
 
-  test("list returns saved profile names", () => {
-    storage.save("alpha", makeValidCookies());
-    storage.save("beta", makeValidCookies());
+  test("list returns saved profile names", async () => {
+    await storage.save("alpha", makeValidCookies());
+    await storage.save("beta", makeValidCookies());
 
-    const names = storage.list();
+    const names = await storage.list();
     expect(names).toContain("alpha");
     expect(names).toContain("beta");
   });
 
-  test("overwrites existing cookies on save", () => {
-    storage.save("overwrite", makeValidCookies());
+  test("overwrites existing cookies on save", async () => {
+    await storage.save("overwrite", makeValidCookies());
     const newCookies = [
       { ...makeValidCookies()[0], value: "new-value" },
       { ...makeValidCookies()[1], value: "new-ts-value" },
     ];
-    storage.save("overwrite", newCookies);
+    await storage.save("overwrite", newCookies);
 
-    const loaded = storage.load("overwrite");
+    const loaded = await storage.load("overwrite");
     expect(loaded[0].value).toBe("new-value");
   });
 });
@@ -135,87 +135,87 @@ describe("ProfileManager", () => {
     manager = new ProfileManager();
   });
 
-  test("create creates profile directory", () => {
-    manager.create("new-profile");
+  test("create creates profile directory", async () => {
+    await manager.create("new-profile");
     expect(existsSync(join(TEST_DIR, "profiles", "new-profile"))).toBe(true);
   });
 
-  test("create sets first profile as default", () => {
-    manager.create("first");
-    expect(manager.getDefault()).toBe("first");
+  test("create sets first profile as default", async () => {
+    await manager.create("first");
+    expect(await manager.getDefault()).toBe("first");
   });
 
-  test("create does not change default if profiles already exist", () => {
-    manager.create("first");
-    manager.create("second");
-    expect(manager.getDefault()).toBe("first");
+  test("create does not change default if profiles already exist", async () => {
+    await manager.create("first");
+    await manager.create("second");
+    expect(await manager.getDefault()).toBe("first");
   });
 
-  test("create throws if profile already exists", () => {
-    manager.create("dup");
-    expect(() => manager.create("dup")).toThrow("already exists");
+  test("create throws if profile already exists", async () => {
+    await manager.create("dup");
+    await expect(manager.create("dup")).rejects.toThrow("already exists");
   });
 
-  test("delete removes profile directory and resets default", () => {
-    manager.create("p1");
-    manager.create("p2");
-    manager.setDefault("p1");
+  test("delete removes profile directory and resets default", async () => {
+    await manager.create("p1");
+    await manager.create("p2");
+    await manager.setDefault("p1");
 
-    manager.delete("p1");
-    expect(manager.getDefault()).toBe("p2");
-    expect(manager.list()).not.toContain("p1");
+    await manager.delete("p1");
+    expect(await manager.getDefault()).toBe("p2");
+    expect(await manager.list()).not.toContain("p1");
   });
 
-  test("delete resets default to remaining profile", () => {
-    manager.create("solo");
-    manager.delete("solo");
-    expect(manager.list()).toEqual([]);
+  test("delete resets default to remaining profile", async () => {
+    await manager.create("solo");
+    await manager.delete("solo");
+    expect(await manager.list()).toEqual([]);
   });
 
-  test("rename moves profile directory", () => {
-    manager.create("old-name");
-    manager.rename("old-name", "new-name");
+  test("rename moves profile directory", async () => {
+    await manager.create("old-name");
+    await manager.rename("old-name", "new-name");
 
-    expect(manager.list()).toContain("new-name");
-    expect(manager.list()).not.toContain("old-name");
+    expect(await manager.list()).toContain("new-name");
+    expect(await manager.list()).not.toContain("old-name");
     expect(existsSync(join(TEST_DIR, "profiles", "new-name"))).toBe(true);
     expect(existsSync(join(TEST_DIR, "profiles", "old-name"))).toBe(false);
   });
 
-  test("rename updates default if renamed profile was default", () => {
-    manager.create("default-profile");
-    manager.rename("default-profile", "renamed");
+  test("rename updates default if renamed profile was default", async () => {
+    await manager.create("default-profile");
+    await manager.rename("default-profile", "renamed");
 
-    expect(manager.getDefault()).toBe("renamed");
+    expect(await manager.getDefault()).toBe("renamed");
   });
 
-  test("rename throws if source does not exist", () => {
-    expect(() => manager.rename("nope", "dest")).toThrow("does not exist");
+  test("rename throws if source does not exist", async () => {
+    await expect(manager.rename("nope", "dest")).rejects.toThrow("does not exist");
   });
 
-  test("rename throws if destination already exists", () => {
-    manager.create("a");
-    manager.create("b");
-    expect(() => manager.rename("a", "b")).toThrow("already exists");
+  test("rename throws if destination already exists", async () => {
+    await manager.create("a");
+    await manager.create("b");
+    await expect(manager.rename("a", "b")).rejects.toThrow("already exists");
   });
 
-  test("setDefault throws if profile does not exist", () => {
-    expect(() => manager.setDefault("ghost")).toThrow("does not exist");
+  test("setDefault throws if profile does not exist", async () => {
+    await expect(manager.setDefault("ghost")).rejects.toThrow("does not exist");
   });
 
-  test("setDefault sets the default profile name", () => {
-    manager.create("p1");
-    manager.create("p2");
-    manager.setDefault("p2");
-    expect(manager.getDefault()).toBe("p2");
+  test("setDefault sets the default profile name", async () => {
+    await manager.create("p1");
+    await manager.create("p2");
+    await manager.setDefault("p2");
+    expect(await manager.getDefault()).toBe("p2");
   });
 
-  test("getStatus returns correct data for existing valid profile", () => {
+  test("getStatus returns correct data for existing valid profile", async () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
-    storage.save("active", makeValidCookies());
+    await storage.save("active", makeValidCookies());
 
-    const status = mgr.getStatus("active");
+    const status = await mgr.getStatus("active");
     expect(status.exists).toBe(true);
     expect(status.isActive).toBe(true);
     expect(status.expiresAt).not.toBeNull();
@@ -223,17 +223,17 @@ describe("ProfileManager", () => {
     expect(status.isDefault).toBe(false);
   });
 
-  test("getStatus returns inactive for expired cookies", () => {
+  test("getStatus returns inactive for expired cookies", async () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
-    storage.save("expired", makeExpiredCookies());
+    await storage.save("expired", makeExpiredCookies());
 
-    const status = mgr.getStatus("expired");
+    const status = await mgr.getStatus("expired");
     expect(status.exists).toBe(true);
     expect(status.isActive).toBe(false);
   });
 
-  test("getStatus returns active for session cookies (expires: -1)", () => {
+  test("getStatus returns active for session cookies (expires: -1)", async () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
     const sessionCookies: Cookie[] = [
@@ -258,33 +258,33 @@ describe("ProfileManager", () => {
         sameSite: "Lax",
       },
     ];
-    storage.save("session", sessionCookies);
+    await storage.save("session", sessionCookies);
 
-    const status = mgr.getStatus("session");
+    const status = await mgr.getStatus("session");
     expect(status.exists).toBe(true);
     expect(status.isActive).toBe(true);
     expect(status.expiresAt).toBeNull();
   });
 
-  test("getStatus returns not exists for missing profile", () => {
-    const status = manager.getStatus("missing");
+  test("getStatus returns not exists for missing profile", async () => {
+    const status = await manager.getStatus("missing");
     expect(status.exists).toBe(false);
     expect(status.isActive).toBe(false);
   });
 
-  test("getStatus marks the default profile", () => {
-    manager.create("def");
-    const status = manager.getStatus("def");
+  test("getStatus marks the default profile", async () => {
+    await manager.create("def");
+    const status = await manager.getStatus("def");
     expect(status.isDefault).toBe(true);
   });
 
-  test("getAllStatuses returns all profile statuses", () => {
+  test("getAllStatuses returns all profile statuses", async () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
-    storage.save("active", makeValidCookies());
-    storage.save("expired", makeExpiredCookies());
+    await storage.save("active", makeValidCookies());
+    await storage.save("expired", makeExpiredCookies());
 
-    const statuses = mgr.getAllStatuses();
+    const statuses = await mgr.getAllStatuses();
     expect(statuses).toHaveLength(2);
     const active = statuses.find((s) => s.name === "active")!;
     const expired = statuses.find((s) => s.name === "expired")!;
@@ -292,45 +292,45 @@ describe("ProfileManager", () => {
     expect(expired.isActive).toBe(false);
   });
 
-  test("hasValidCookies returns true for fresh cookies", () => {
+  test("hasValidCookies returns true for fresh cookies", async () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
-    storage.save("fresh", makeValidCookies());
+    await storage.save("fresh", makeValidCookies());
 
-    expect(mgr.hasValidCookies("fresh")).toBe(true);
+    expect(await mgr.hasValidCookies("fresh")).toBe(true);
   });
 
-  test("hasValidCookies returns false for expired cookies", () => {
+  test("hasValidCookies returns false for expired cookies", async () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
-    storage.save("stale", makeExpiredCookies());
+    await storage.save("stale", makeExpiredCookies());
 
-    expect(mgr.hasValidCookies("stale")).toBe(false);
+    expect(await mgr.hasValidCookies("stale")).toBe(false);
   });
 
-  test("hasValidCookies returns false for missing profile", () => {
-    expect(manager.hasValidCookies("nope")).toBe(false);
+  test("hasValidCookies returns false for missing profile", async () => {
+    expect(await manager.hasValidCookies("nope")).toBe(false);
   });
 
-  test("loadCookiesForApi returns cookie values", () => {
+  test("loadCookiesForApi returns cookie values", async () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
-    storage.save("api-test", makeValidCookies());
+    await storage.save("api-test", makeValidCookies());
 
-    const result = mgr.loadCookiesForApi("api-test");
+    const result = await mgr.loadCookiesForApi("api-test");
     expect(result.secure1psid).toBe("test-psid-value");
     expect(result.secure1psidts).toBe("test-psidts-value");
   });
 
-  test("loadCookiesForApi throws for expired cookies", () => {
+  test("loadCookiesForApi throws for expired cookies", async () => {
     const storage = new CookieStorage();
     const mgr = new ProfileManager(storage);
-    storage.save("expired-api", makeExpiredCookies());
+    await storage.save("expired-api", makeExpiredCookies());
 
-    expect(() => mgr.loadCookiesForApi("expired-api")).toThrow("expired");
+    await expect(mgr.loadCookiesForApi("expired-api")).rejects.toThrow("expired");
   });
 
-  test("loadCookiesForApi throws for missing profile", () => {
-    expect(() => manager.loadCookiesForApi("ghost")).toThrow("No storage state found");
+  test("loadCookiesForApi throws for missing profile", async () => {
+    await expect(manager.loadCookiesForApi("ghost")).rejects.toThrow("No storage state found");
   });
 });

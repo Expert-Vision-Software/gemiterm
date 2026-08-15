@@ -20,8 +20,8 @@ export interface CliCommandContext {
   profileAuthManager: ProfileAuthManager;
   profileLifecycle: ProfileLifecycle;
   exportStrategies: { single: ExportStrategy; batch: ExportStrategy };
-  getGeminiClient: () => GeminiClientService;
-  listProfiles: () => string[];
+  getGeminiClient: () => Promise<GeminiClientService>;
+  listProfiles: () => Promise<string[]>;
 }
 
 export interface CliCommand {

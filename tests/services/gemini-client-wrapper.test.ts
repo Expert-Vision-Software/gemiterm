@@ -361,7 +361,7 @@ describe("GeminiClientService", () => {
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
-      const profileService = service.forProfile("work");
+      const profileService = await service.forProfile("work");
 
       const chats = await profileService.listChats();
 
@@ -448,7 +448,7 @@ describe("GeminiClientService", () => {
 
       await service.fetchChat("conv-abc");
 
-      const saved = chatMetadata.lookup("testprofile", "conv-abc");
+      const saved = await chatMetadata.lookup("testprofile", "conv-abc");
       expect(saved).toEqual({ rid: "r_model1", rcid: "rc_model1", ctx: null });
     });
 
@@ -485,7 +485,7 @@ describe("GeminiClientService", () => {
 
       await service.fetchChat("conv-empty");
 
-      const saved = chatMetadata.lookup("testprofile-empty", "conv-empty");
+      const saved = await chatMetadata.lookup("testprofile-empty", "conv-empty");
       expect(saved).toBeNull();
     });
   });
@@ -554,7 +554,7 @@ describe("GeminiClientService", () => {
       const storage = createMockCookieStorage(profileCookies);
       const css = new CookieStorageService({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
-      chatMetadata.save("testprofile", "existing-conv-xyz", { rid: "rid-xyz", rcid: "rcid-xyz", ctx: null });
+      await chatMetadata.save("testprofile", "existing-conv-xyz", { rid: "rid-xyz", rcid: "rcid-xyz", ctx: null });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "sid" }, logger, css, "testprofile", d, chatMetadata);
@@ -614,7 +614,7 @@ describe("GeminiClientService", () => {
       const storage = createMockCookieStorage(profileCookies);
       const css = new CookieStorageService({ cookieStorage: storage, logger });
       const chatMetadata = new ChatMetadataStorage(logger);
-      chatMetadata.save("testprofile", "existing-conv-xyz", { rid: "rid-xyz", rcid: "rcid-xyz", ctx: null });
+      await chatMetadata.save("testprofile", "existing-conv-xyz", { rid: "rid-xyz", rcid: "rcid-xyz", ctx: null });
 
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "sid" }, logger, css, "testprofile", d, chatMetadata);
@@ -737,7 +737,7 @@ describe("GeminiClientService", () => {
 
       await service.sendMessage("existing-conv-xyz", "hello");
 
-      const saved = chatMetadata.lookup("testprofile", "existing-conv-xyz");
+      const saved = await chatMetadata.lookup("testprofile", "existing-conv-xyz");
       expect(saved).toEqual({ rid: "new-rid", rcid: "new-rcid", ctx: null });
     });
 
@@ -858,7 +858,7 @@ describe("GeminiClientService", () => {
       const result = await service.startNewChat("Hello Gemini");
 
       expect(result.conversationId).toBe("generated-cid");
-      const saved = chatMetadata.lookup("testprofile", "generated-cid");
+      const saved = await chatMetadata.lookup("testprofile", "generated-cid");
       expect(saved).toEqual({ rid: "rid-a", rcid: "rcid-a", ctx: null });
     });
 
@@ -907,7 +907,7 @@ describe("GeminiClientService", () => {
 
       await service.startNewChat("Hello Gemini");
 
-      const saved = chatMetadata.lookup("testprofile", "generated-cid");
+      const saved = await chatMetadata.lookup("testprofile", "generated-cid");
       expect(saved).toBeNull();
     });
   });
@@ -1110,7 +1110,7 @@ describe("GeminiClientService", () => {
       const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
       const callCountBefore = mockClientConstructorCallCount;
 
-      service.forProfile("work");
+      await service.forProfile("work");
       const newCallCount = mockClientConstructorCallCount;
 
       expect(newCallCount - callCountBefore).toBe(1);
@@ -1134,7 +1134,7 @@ describe("GeminiClientService", () => {
       const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
       const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
 
-      const profileService = service.forProfile("work");
+      const profileService = await service.forProfile("work");
       await profileService.listChats();
 
       expect(receivedSid).toBe("work-sid");
@@ -1253,7 +1253,7 @@ describe("persistRefreshedCookies", () => {
 
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
     const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
-    const profileService = service.forProfile("work");
+    const profileService = await service.forProfile("work");
 
     await profileService.listChats();
 
@@ -1288,7 +1288,7 @@ describe("persistRefreshedCookies", () => {
     const d = installGeminiReverseMock({ chats: [createMockChatRow()] });
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
     const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
-    const profileService = service.forProfile("work");
+    const profileService = await service.forProfile("work");
 
     await profileService.listChats();
 
@@ -1336,7 +1336,7 @@ describe("persistRefreshedCookies", () => {
 
     const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
     const service = new GeminiClientService({ secure1psid: "main-sid" }, logger, css, undefined, d);
-    const profileService = service.forProfile("work");
+    const profileService = await service.forProfile("work");
 
     const chats = await profileService.listChats();
 

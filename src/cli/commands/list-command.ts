@@ -102,7 +102,7 @@ export class ListCommand implements CliCommand {
     }
 
     const includeProfileColumn =
-      options.allProfiles || Boolean(options.profile) || context.listProfiles().length > 1;
+      options.allProfiles || Boolean(options.profile) || (await context.listProfiles()).length > 1;
 
     await render(
       { kind: "chat-list", chats, includeProfileColumn },

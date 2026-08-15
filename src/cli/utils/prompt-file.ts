@@ -5,7 +5,7 @@ import { checkArgLength } from "./long-arg-guard.ts";
 
 export async function loadPromptFromFile(filePath: string): Promise<string> {
   try {
-    return readTextFile(filePath);
+    return await readTextFile(filePath);
   } catch (err) {
     if (err instanceof IOError) {
       throw new Error(`Could not read prompt file '${filePath}': ${err.message}`);
@@ -17,7 +17,7 @@ export async function loadPromptFromFile(filePath: string): Promise<string> {
 export async function spillOverToTempFile(content: string): Promise<string> {
   const path = getTempFilePath("gemiterm-arg-spill", ".txt");
   try {
-    writeTextFile(path, content);
+    await writeTextFile(path, content);
   } catch (err) {
     if (err instanceof IOError) {
       throw new Error(`Could not spill message to temp file: ${err.message}`);
@@ -59,7 +59,7 @@ export async function loadEffectivePrompt(
     const loaded = await loadPromptFromFile(effectivePromptFile);
     if (isSpillover) {
       try {
-        removeFile(effectivePromptFile);
+        await removeFile(effectivePromptFile);
       } catch {
       }
     }

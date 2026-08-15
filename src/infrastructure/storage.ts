@@ -49,30 +49,30 @@ function checkCookieFreshness(cookies: Cookie[]): boolean {
 }
 
 export class CookieStorage {
-  save(profileName: string, cookies: Cookie[]): void {
+  async save(profileName: string, cookies: Cookie[]): Promise<void> {
     const filePath = getProfilePath(profileName);
     const state: StorageState = { cookies };
-    writeTextFile(filePath, JSON.stringify(state, null, 2));
+    await writeTextFile(filePath, JSON.stringify(state, null, 2));
   }
 
-  load(profileName: string): Cookie[] {
+  async load(profileName: string): Promise<Cookie[]> {
     const filePath = getProfilePath(profileName);
-    if (!existsFile(filePath)) {
+    if (!(await existsFile(filePath))) {
       throw new Error(
         `No storage state found for profile '${profileName}'. Run 'gemiterm auth' to authenticate.`,
       );
     }
-    const state = readJsonFile<StorageState>(filePath);
+    const state = await readJsonFile<StorageState>(filePath);
     return state.cookies ?? [];
   }
 
-  delete(profileName: string): void {
+  async delete(profileName: string): Promise<void> {
     const dir = getProfileDir(profileName);
-    removeDir(dir);
+    await removeDir(dir);
   }
 
-  list(): string[] {
-    return listProfiles();
+  async list(): Promise<string[]> {
+    return await listProfiles();
   }
 }
 
@@ -83,68 +83,68 @@ export class ProfileManager {
     this.cookieStorage = cookieStorage ?? new CookieStorage();
   }
 
-  create(profileName: string): void {
+  async create(profileName: string): Promise<void> {
     const dir = getProfileDir(profileName);
-    if (existsFile(dir)) {
+    if (await existsFile(dir)) {
       throw new Error(`Profile '${profileName}' already exists.`);
     }
-    const isFirst = listProfiles().length === 0;
-    ensureDir(dir);
+    const isFirst = (await listProfiles()).length === 0;
+    await ensureDir(dir);
     if (isFirst) {
-      setDefaultProfileName(profileName);
+      await setDefaultProfileName(profileName);
     }
   }
 
-  delete(name: string): void {
-    this.cookieStorage.delete(name);
-    if (getDefaultProfileName() === name) {
-      const remaining = listProfiles();
+  async delete(name: string): Promise<void> {
+    await this.cookieStorage.delete(name);
+    if ((await getDefaultProfileName()) === name) {
+      const remaining = await listProfiles();
       if (remaining.length > 0) {
-        setDefaultProfileName(remaining[0]);
+        await setDefaultProfileName(remaining[0]);
       } else {
         const marker = getDefaultProfileMarkerPath();
-        if (existsFile(marker)) {
-          removeDir(marker);
+        if (await existsFile(marker)) {
+          await removeDir(marker);
         }
       }
     }
   }
 
-  rename(oldName: string, newName: string): void {
+  async rename(oldName: string, newName: string): Promise<void> {
     const oldDir = getProfileDir(oldName);
     const newDir = getProfileDir(newName);
-    if (!existsFile(oldDir)) {
+    if (!(await existsFile(oldDir))) {
       throw new Error(`Profile '${oldName}' does not exist.`);
     }
-    if (existsFile(newDir)) {
+    if (await existsFile(newDir)) {
       throw new Error(`Profile '${newName}' already exists.`);
     }
-    renameDir(oldDir, newDir);
-    if (getDefaultProfileName() === oldName) {
-      setDefaultProfileName(newName);
+    await renameDir(oldDir, newDir);
+    if ((await getDefaultProfileName()) === oldName) {
+      await setDefaultProfileName(newName);
     }
   }
 
-  setDefault(name: string): void {
-    if (!existsFile(getProfileDir(name))) {
+  async setDefault(name: string): Promise<void> {
+    if (!(await existsFile(getProfileDir(name)))) {
       throw new Error(`Profile '${name}' does not exist.`);
     }
-    setDefaultProfileName(name);
+    await setDefaultProfileName(name);
   }
 
-  getDefault(): string {
-    return getDefaultProfileName();
+  async getDefault(): Promise<string> {
+    return await getDefaultProfileName();
   }
 
-  list(): string[] {
-    return listProfiles();
+  async list(): Promise<string[]> {
+    return await listProfiles();
   }
 
-  getStatus(name: string): ProfileStatus {
-    const defaultName = getDefaultProfileName();
+  async getStatus(name: string): Promise<ProfileStatus> {
+    const defaultName = await getDefaultProfileName();
     const filePath = getProfilePath(name);
-    const lastUsedAt = getFileMtime(filePath)?.toISOString() ?? null;
-    if (!existsFile(filePath)) {
+    const lastUsedAt = (await getFileMtime(filePath))?.toISOString() ?? null;
+    if (!(await existsFile(filePath))) {
       return {
         name,
         exists: false,
@@ -155,7 +155,7 @@ export class ProfileManager {
       };
     }
     try {
-      const cookies = this.cookieStorage.load(name);
+      const cookies = await this.cookieStorage.load(name);
       const hasValidCookies = validateCookies(cookies);
       const expiresMs = getCookieExpiryTimestamp(cookies);
       const isActive = hasValidCookies && (expiresMs === null || expiresMs > Date.now());
@@ -183,26 +183,28 @@ export class ProfileManager {
     }
   }
 
-  getAllStatuses(): ProfileStatus[] {
-    const defaultName = getDefaultProfileName();
-    const profiles = listProfiles();
-    return profiles.map((name) => {
-      const status = this.getStatus(name);
-      return { ...status, isDefault: name === defaultName };
-    });
+  async getAllStatuses(): Promise<ProfileStatus[]> {
+    const defaultName = await getDefaultProfileName();
+    const profiles = await listProfiles();
+    const statuses: ProfileStatus[] = [];
+    for (const name of profiles) {
+      const status = await this.getStatus(name);
+      statuses.push({ ...status, isDefault: name === defaultName });
+    }
+    return statuses;
   }
 
-  hasValidCookies(profileName: string): boolean {
+  async hasValidCookies(profileName: string): Promise<boolean> {
     try {
-      const cookies = this.cookieStorage.load(profileName);
+      const cookies = await this.cookieStorage.load(profileName);
       return validateCookies(cookies) && checkCookieFreshness(cookies);
     } catch {
       return false;
     }
   }
 
-  loadCookiesForApi(profileName: string): { secure1psid: string; secure1psidts: string | null } {
-    const cookies = this.cookieStorage.load(profileName);
+  async loadCookiesForApi(profileName: string): Promise<{ secure1psid: string; secure1psidts: string | null }> {
+    const cookies = await this.cookieStorage.load(profileName);
     if (!checkCookieFreshness(cookies)) {
       throw new Error(
         `Session for profile '${profileName}' appears expired. Run 'gemiterm auth' to re-authenticate.`,

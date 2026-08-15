@@ -123,13 +123,13 @@ export class ProfileLifecycle {
 
   private async list(): Promise<void> {
     this.logger.debug("Listing all profiles");
-    const profileNames = listProfiles();
+    const profileNames = await listProfiles();
     if (profileNames.length === 0) {
       console.log(chalk.dim("No profiles found. Run 'gemiterm auth' to create one."));
       return;
     }
 
-    const statuses = this.collectStatuses(profileNames);
+    const statuses = await this.collectStatuses(profileNames);
     this.renderProfileTable(statuses);
 
     const active = statuses.filter((s) => s.isActive);
@@ -137,7 +137,7 @@ export class ProfileLifecycle {
   }
 
   private async status(): Promise<ProfileLifecycleResult> {
-    ensureConfigDir();
+    await ensureConfigDir();
 
     const configDir = getConfigDir();
     this.logger.debug("Config directory:", configDir);
@@ -145,14 +145,14 @@ export class ProfileLifecycle {
     console.log(`  Directory: ${chalk.cyan(configDir)}`);
     console.log("");
 
-    const profileNames = listProfiles();
+    const profileNames = await listProfiles();
     this.logger.debug("Profile scan found:", profileNames);
     if (profileNames.length === 0) {
       console.log(chalk.dim("No profiles found. Run 'gemiterm login' to create one."));
       return { exitCode: 2 };
     }
 
-    const statuses = this.collectStatuses(profileNames);
+    const statuses = await this.collectStatuses(profileNames);
     this.renderProfileTable(statuses);
 
     const active = statuses.filter((s) => s.isActive);
@@ -167,18 +167,18 @@ export class ProfileLifecycle {
     validateProfileName(params.name);
     this.logger.debug("Adding profile:", params.name);
 
-    if (listProfiles().includes(params.name)) {
+    if ((await listProfiles()).includes(params.name)) {
       throw new GemitermError(`Profile '${params.name}' already exists.`);
     }
 
-    this.profileManager.create(params.name);
+    await this.profileManager.create(params.name);
     console.log(chalk.green(`Profile '${params.name}' created.`));
 
     await this.authenticateWithProfile(params.name, false);
   }
 
   private async delete(params: ProfileDeleteParams): Promise<void> {
-    const profiles = listProfiles();
+    const profiles = await listProfiles();
     if (!profiles.includes(params.name)) {
       throw new GemitermError(`Profile '${params.name}' does not exist.`);
     }
@@ -193,13 +193,13 @@ export class ProfileLifecycle {
       }
     }
 
-    this.profileManager.delete(params.name);
+    await this.profileManager.delete(params.name);
     this.logger.info(`Deleted profile: ${params.name}`);
     console.log(chalk.green(`Profile '${params.name}' deleted.`));
   }
 
   private async rename(params: ProfileRenameParams): Promise<void> {
-    const profiles = listProfiles();
+    const profiles = await listProfiles();
     if (!profiles.includes(params.oldName)) {
       throw new GemitermError(`Profile '${params.oldName}' does not exist.`);
     }
@@ -211,28 +211,28 @@ export class ProfileLifecycle {
       throw new GemitermError(`Profile '${params.newName}' already exists.`);
     }
 
-    this.profileManager.rename(params.oldName, params.newName);
+    await this.profileManager.rename(params.oldName, params.newName);
     this.logger.info(`Renamed profile: ${params.oldName} → ${params.newName}`);
     console.log(chalk.green(`Profile renamed: ${params.oldName} → ${params.newName}`));
   }
 
   private async setDefault(params: ProfileSetDefaultParams): Promise<void> {
-    const profiles = listProfiles();
+    const profiles = await listProfiles();
     if (!profiles.includes(params.name)) {
       throw new GemitermError(`Profile '${params.name}' does not exist.`);
     }
 
     this.logger.debug("Setting default profile:", params.name);
 
-    this.profileManager.setDefault(params.name);
-    setDefaultProfileName(params.name);
+    await this.profileManager.setDefault(params.name);
+    await setDefaultProfileName(params.name);
     this.logger.info(`Set default profile: ${params.name}`);
     console.log(chalk.green(`Default profile set to '${params.name}'.`));
   }
 
   private async auth(params: ProfileAuthParams): Promise<void> {
     if (params.renewProfile) {
-      const profiles = listProfiles();
+      const profiles = await listProfiles();
       if (!profiles.includes(params.renewProfile)) {
         throw new GemitermError(`Profile '${params.renewProfile}' does not exist.`);
       }
@@ -242,7 +242,7 @@ export class ProfileLifecycle {
     }
 
     if (params.profileName) {
-      const profiles = listProfiles();
+      const profiles = await listProfiles();
       if (!profiles.includes(params.profileName)) {
         throw new GemitermError(`Profile '${params.profileName}' does not exist.`);
       }
@@ -251,12 +251,12 @@ export class ProfileLifecycle {
       return;
     }
 
-    const profiles = listProfiles();
+    const profiles = await listProfiles();
     this.logger.debug("Found profiles", profiles);
 
     if (profiles.length === 0) {
       this.logger.debug("No profiles exist, creating first profile and authenticating");
-      await this.authenticateWithProfile(getDefaultProfileName(), true);
+      await this.authenticateWithProfile(await getDefaultProfileName(), true);
       return;
     }
 
@@ -285,7 +285,10 @@ export class ProfileLifecycle {
     console.log(chalk.bold("\nProfile Management"));
     console.log("");
 
-    const statuses = profiles.map((name) => this.profileManager.getStatus(name));
+    const statuses: ProfileStatus[] = [];
+    for (const name of profiles) {
+      statuses.push(await this.profileManager.getStatus(name));
+    }
     console.log(formatProfileTable(statuses));
 
     const options = [
@@ -311,10 +314,10 @@ export class ProfileLifecycle {
           validate: (v) => PROFILE_NAME_RE.test(v) || "Invalid profile name",
         });
         validateProfileName(name.trim());
-        if (listProfiles().includes(name.trim())) {
+        if ((await listProfiles()).includes(name.trim())) {
           throw new GemitermError(`Profile '${name.trim()}' already exists.`);
         }
-        this.profileManager.create(name.trim());
+        await this.profileManager.create(name.trim());
         console.log(chalk.green(`Profile '${name.trim()}' created.`));
         return { type: "auth", profileName: name.trim() };
       }
@@ -326,7 +329,7 @@ export class ProfileLifecycle {
         }
         const confirmAnswer = await this.promptInput(`Delete profile '${trimmed}'? [y/N]`);
         if (confirmAnswer.toLowerCase().startsWith("y")) {
-          this.profileManager.delete(trimmed);
+          await this.profileManager.delete(trimmed);
           console.log(chalk.green(`Profile '${trimmed}' deleted.`));
         } else {
           console.log(chalk.dim("Cancelled."));
@@ -339,8 +342,8 @@ export class ProfileLifecycle {
         if (!profiles.includes(trimmed)) {
           throw new GemitermError(`Profile '${trimmed}' does not exist.`);
         }
-        this.profileManager.setDefault(trimmed);
-        setDefaultProfileName(trimmed);
+        await this.profileManager.setDefault(trimmed);
+        await setDefaultProfileName(trimmed);
         console.log(chalk.green(`Default profile set to '${trimmed}'.`));
         return null;
       }
@@ -355,7 +358,7 @@ export class ProfileLifecycle {
         });
         const newTrimmed = newName.trim();
         validateProfileName(newTrimmed);
-        this.profileManager.rename(oldTrimmed, newTrimmed);
+        await this.profileManager.rename(oldTrimmed, newTrimmed);
         console.log(chalk.green(`Profile renamed: ${oldTrimmed} → ${newTrimmed}`));
         return { type: "auth", profileName: newTrimmed };
       }
@@ -378,19 +381,19 @@ export class ProfileLifecycle {
     createFirst: boolean,
   ): Promise<void> {
     if (createFirst) {
-      this.profileManager.create(profileName);
+      await this.profileManager.create(profileName);
       console.log(chalk.dim(`Created profile: ${profileName}`));
     }
 
     await this.authService.authenticate(profileName);
   }
 
-  private collectStatuses(profileNames: string[]): ProfileStatus[] {
-    const defaultName = getDefaultProfileName();
+  private async collectStatuses(profileNames: string[]): Promise<ProfileStatus[]> {
+    const defaultName = await getDefaultProfileName();
     const statuses: ProfileStatus[] = [];
     for (const name of profileNames) {
       try {
-        const status = this.profileManager.getStatus(name);
+        const status = await this.profileManager.getStatus(name);
         statuses.push({ ...status, isDefault: name === defaultName });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

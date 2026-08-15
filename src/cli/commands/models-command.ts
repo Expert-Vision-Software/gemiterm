@@ -20,7 +20,7 @@ export class ModelsCommand implements CliCommand {
       return;
     }
 
-    const models = await context.getGeminiClient().listModels();
+    const models = await (await context.getGeminiClient()).listModels();
 
     console.log("Available Gemini models:");
     for (const model of models) {

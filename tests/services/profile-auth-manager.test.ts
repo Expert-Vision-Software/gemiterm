@@ -110,98 +110,98 @@ afterEach(() => {
 
 describe("ProfileAuthManager", () => {
   describe("ensureAuthenticated", () => {
-    test("returns cookies for a profile with valid session", () => {
+    test("returns cookies for a profile with valid session", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeValidCookies());
+      await manager.create("default");
+      await storage.save("default", makeValidCookies());
 
       const mgr = createManager(manager);
-      const cookies = mgr.ensureAuthenticated("default");
+      const cookies = await mgr.ensureAuthenticated("default");
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
       expect(cookies.secure_1psidts).toBe("test-psidts-value");
     });
 
-    test("throws AuthenticationError when no valid cookies", () => {
+    test("throws AuthenticationError when no valid cookies", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("default");
+      await manager.create("default");
 
       const mgr = createManager(manager);
 
-      expect(() => mgr.ensureAuthenticated("default")).toThrow("No valid session");
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
     });
 
-    test("throws AuthenticationError with expired cookies", () => {
+    test("throws AuthenticationError with expired cookies", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeExpiredCookies());
+      await manager.create("default");
+      await storage.save("default", makeExpiredCookies());
 
       const mgr = createManager(manager);
 
-      expect(() => mgr.ensureAuthenticated("default")).toThrow("No valid session");
+      await expect(mgr.ensureAuthenticated("default")).rejects.toThrow("No valid session");
     });
 
-    test("throws on invalid profile name", () => {
+    test("throws on invalid profile name", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       const mgr = createManager(manager);
 
-      expect(() => mgr.ensureAuthenticated("bad name!")).toThrow("invalid characters");
+      await expect(mgr.ensureAuthenticated("bad name!")).rejects.toThrow("invalid characters");
     });
 
-    test("uses default profile when none specified", () => {
+    test("uses default profile when none specified", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("default");
-      storage.save("default", makeValidCookies());
+      await manager.create("default");
+      await storage.save("default", makeValidCookies());
 
       const markerDir = join(TEST_DIR, "config");
       mkdirSync(markerDir, { recursive: true });
       writeFileSync(join(markerDir, "default-profile"), "default", "utf-8");
 
       const mgr = createManager(manager);
-      const cookies = mgr.ensureAuthenticated();
+      const cookies = await mgr.ensureAuthenticated();
 
       expect(cookies.secure_1psid).toBe("test-psid-value");
     });
   });
 
   describe("getActiveProfiles", () => {
-    test("returns profiles with valid cookies", () => {
+    test("returns profiles with valid cookies", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("active");
-      manager.create("expired");
-      storage.save("active", makeValidCookies());
-      storage.save("expired", makeExpiredCookies());
+      await manager.create("active");
+      await manager.create("expired");
+      await storage.save("active", makeValidCookies());
+      await storage.save("expired", makeExpiredCookies());
 
       const mgr = createManager(manager);
-      const active = mgr.getActiveProfiles();
+      const active = await mgr.getActiveProfiles();
 
       expect(active).toContain("active");
       expect(active).not.toContain("expired");
     });
 
-    test("returns empty array when no profiles have valid cookies", () => {
+    test("returns empty array when no profiles have valid cookies", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("p1");
-      storage.save("p1", makeExpiredCookies());
+      await manager.create("p1");
+      await storage.save("p1", makeExpiredCookies());
 
       const mgr = createManager(manager);
-      const active = mgr.getActiveProfiles();
+      const active = await mgr.getActiveProfiles();
 
       expect(active).toEqual([]);
     });
 
-    test("returns empty array when no profiles exist", () => {
+    test("returns empty array when no profiles exist", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
       const mgr = createManager(manager);
-      const active = mgr.getActiveProfiles();
+      const active = await mgr.getActiveProfiles();
 
       expect(active).toEqual([]);
     });
@@ -211,10 +211,10 @@ describe("ProfileAuthManager", () => {
     test("returns the profile that owns the conversation", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("work");
-      manager.create("personal");
-      storage.save("work", makeValidCookies());
-      storage.save("personal", makeValidCookies());
+      await manager.create("work");
+      await manager.create("personal");
+      await storage.save("work", makeValidCookies());
+      await storage.save("personal", makeValidCookies());
 
       const mockGeminiClient = {
         async deleteChat() { return; },
@@ -235,8 +235,8 @@ describe("ProfileAuthManager", () => {
     test("returns null when no profile owns the conversation", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("p1");
-      storage.save("p1", makeExpiredCookies());
+      await manager.create("p1");
+      await storage.save("p1", makeExpiredCookies());
 
       const mockGeminiClient = {
         async deleteChat() { return; },
@@ -265,10 +265,10 @@ describe("ProfileAuthManager", () => {
     test("returns null when conversation is not in any profile", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("work");
-      manager.create("personal");
-      storage.save("work", makeValidCookies());
-      storage.save("personal", makeValidCookies());
+      await manager.create("work");
+      await manager.create("personal");
+      await storage.save("work", makeValidCookies());
+      await storage.save("personal", makeValidCookies());
 
       const mockGeminiClient = {
         async deleteChat() { return; },
@@ -287,12 +287,12 @@ describe("ProfileAuthManager", () => {
     test("returns first profile in list order when multiple profiles report ownership", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("profile1");
-      manager.create("profile2");
-      manager.create("profile3");
-      storage.save("profile1", makeValidCookies());
-      storage.save("profile2", makeValidCookies());
-      storage.save("profile3", makeValidCookies());
+      await manager.create("profile1");
+      await manager.create("profile2");
+      await manager.create("profile3");
+      await storage.save("profile1", makeValidCookies());
+      await storage.save("profile2", makeValidCookies());
+      await storage.save("profile3", makeValidCookies());
 
       const mockGeminiClient = {
         async deleteChat() { return; },
@@ -313,8 +313,8 @@ describe("ProfileAuthManager", () => {
     test("passes the conversationId argument to the lookup helper", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("work");
-      storage.save("work", makeValidCookies());
+      await manager.create("work");
+      await storage.save("work", makeValidCookies());
 
       const calls: Array<[string, string]> = [];
       const mockGeminiClient = {
@@ -337,10 +337,10 @@ describe("ProfileAuthManager", () => {
     test("does not probe profiles whose cookies are expired", async () => {
       const storage = new CookieStorage();
       const manager = new ProfileManager(storage);
-      manager.create("alive");
-      manager.create("dead");
-      storage.save("alive", makeValidCookies());
-      storage.save("dead", makeExpiredCookies());
+      await manager.create("alive");
+      await manager.create("dead");
+      await storage.save("alive", makeValidCookies());
+      await storage.save("dead", makeExpiredCookies());
 
       const probedNames: string[] = [];
       const mockGeminiClient = {

@@ -7,7 +7,7 @@ export interface StartChatSessionParams {
   effectiveMessage: string | null;
   conversationId?: string | null;
   profileName?: string | null;
-  getGeminiClient: () => GeminiClientService;
+  getGeminiClient: () => Promise<GeminiClientService>;
   logger: Logger;
   onFirstTurn?: (conversationId: string) => void;
   onInteractiveTurn?: (conversationId: string, isFirst: boolean) => void;
@@ -26,18 +26,18 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
     beforeInteractiveLoop,
   } = params;
 
-  const resolveClient = (): GeminiClientService =>
-    profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
+  const resolveClient = async (): Promise<GeminiClientService> =>
+    profileName ? await (await getGeminiClient()).forProfile(profileName) : await getGeminiClient();
 
   if (effectiveMessage) {
     if (conversationId) {
       logger.debug(`Sending message to ${conversationId}`);
-      const response = await resolveClient().sendMessage(conversationId, effectiveMessage);
+      const response = await (await resolveClient()).sendMessage(conversationId, effectiveMessage);
       console.log(chalk.blue.bold("Model:"));
       console.log(response);
     } else {
       logger.debug("Starting new chat with message");
-      const result = await resolveClient().startNewChat(effectiveMessage);
+      const result = await (await resolveClient()).startNewChat(effectiveMessage);
       onFirstTurn?.(result.conversationId);
       console.log(chalk.blue.bold("Model:"));
       console.log(result.response);
@@ -52,12 +52,12 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
   const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
     if (sessionConversationId) {
       logger.debug(`Sending message to ${sessionConversationId}`);
-      const response = await resolveClient().sendMessage(sessionConversationId, message);
+      const response = await (await resolveClient()).sendMessage(sessionConversationId, message);
       onInteractiveTurn?.(sessionConversationId, false);
       return { response };
     }
 
-    const result = await resolveClient().startNewChat(message);
+    const result = await (await resolveClient()).startNewChat(message);
     sessionConversationId = result.conversationId;
     onInteractiveTurn?.(sessionConversationId, true);
     return { response: result.response };

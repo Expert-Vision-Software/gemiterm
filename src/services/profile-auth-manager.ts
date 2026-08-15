@@ -31,27 +31,33 @@ export class ProfileAuthManager {
     this.geminiClient = deps.geminiClient;
   }
 
-  ensureAuthenticated(profileName?: string): LoadedCookies {
-    const name = profileName ?? getDefaultProfileName();
+  async ensureAuthenticated(profileName?: string): Promise<LoadedCookies> {
+    const name = profileName ?? await getDefaultProfileName();
     validateProfileName(name);
 
-    if (!this.profileManager.hasValidCookies(name)) {
+    if (!(await this.profileManager.hasValidCookies(name))) {
       throw new AuthenticationError(
         `No valid session for profile '${name}'. Run 'gemiterm login' to authenticate.`,
       );
     }
 
     this.logger.info(`Profile '${name}' is authenticated`);
-    return this.cookieStorageService.loadCookiesForProfile(name);
+    return await this.cookieStorageService.loadCookiesForProfile(name);
   }
 
-  getActiveProfiles(): string[] {
-    const profiles = this.profileManager.list();
-    return profiles.filter((name) => this.profileManager.hasValidCookies(name));
+  async getActiveProfiles(): Promise<string[]> {
+    const profiles = await this.profileManager.list();
+    const active: string[] = [];
+    for (const name of profiles) {
+      if (await this.profileManager.hasValidCookies(name)) {
+        active.push(name);
+      }
+    }
+    return active;
   }
 
   async findProfileForConversation(conversationId: string): Promise<string | null> {
-    const profiles = this.getActiveProfiles();
+    const profiles = await this.getActiveProfiles();
     for (const name of profiles) {
       try {
         const hasConversation = await this.geminiClient.profileHasConversation(name, conversationId);

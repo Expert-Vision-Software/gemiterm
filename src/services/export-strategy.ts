@@ -118,7 +118,7 @@ export class SingleExport implements ExportStrategy {
       format: input.format,
       includeMetadata: options.includeMetadata ?? false,
     });
-    writeTextFile(out, content);
+    await writeTextFile(out, content);
     return [{ id: input.conversationId, title: input.conversationId, filePath: out, success: true }];
   }
 
@@ -137,7 +137,7 @@ export class SingleExport implements ExportStrategy {
           format: input.format,
           includeMetadata: options.includeMetadata ?? false,
         });
-        writeTextFile(filePath, content);
+        await writeTextFile(filePath, content);
         results.push({ id: conversationId, title: conversationId, filePath, success: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -152,7 +152,7 @@ export class SingleExport implements ExportStrategy {
 interface BatchExportDeps {
   fetchChat: FetchChat;
   listChatsForProfile: (profileName: string, options: ListChatOptions) => Promise<ChatInfo[]>;
-  listProfiles: () => string[];
+  listProfiles: () => Promise<string[]>;
   logger: Logger;
 }
 
@@ -189,7 +189,7 @@ export class BatchExport implements ExportStrategy {
     console.log(chalk.bold(`Found ${chats.length} conversation${chats.length !== 1 ? "s" : ""} to export.`));
     console.log("");
 
-    ensureDir(outDir);
+    await ensureDir(outDir);
 
     const results: ExportResult[] = [];
 
@@ -210,7 +210,7 @@ export class BatchExport implements ExportStrategy {
           includeMetadata: options.includeMetadata ?? false,
         });
 
-        writeTextFile(filePath, content);
+        await writeTextFile(filePath, content);
 
         results.push({ id: chat.id, title: chat.title, filePath, success: true });
         process.stdout.write(chalk.green(" OK\n"));
@@ -222,13 +222,13 @@ export class BatchExport implements ExportStrategy {
       }
     }
 
-    this.writeIndex(outDir, results, options.includeMetadata ?? false);
+    await this.writeIndex(outDir, results, options.includeMetadata ?? false);
     this.printSummary(results, outDir);
     return results;
   }
 
   private async listChatsAcrossProfiles(): Promise<ChatInfo[]> {
-    const profileNames = this.listProfiles();
+    const profileNames = await this.listProfiles();
     const options: ListChatOptions = {};
     const settled = await Promise.allSettled(
       profileNames.map((name) => this.listChatsForProfile(name, options)),
@@ -246,7 +246,7 @@ export class BatchExport implements ExportStrategy {
     return chats.sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  private writeIndex(outDir: string, results: ExportResult[], includeMetadata: boolean): void {
+  private async writeIndex(outDir: string, results: ExportResult[], includeMetadata: boolean): Promise<void> {
     const lines: string[] = [];
 
     lines.push("# Exported Conversations");
@@ -282,7 +282,7 @@ export class BatchExport implements ExportStrategy {
     }
 
     const indexPath = joinPath(outDir, "index.md");
-    writeTextFile(indexPath, lines.join("\n"));
+    await writeTextFile(indexPath, lines.join("\n"));
   }
 
   private printSummary(results: ExportResult[], outDir: string): void {

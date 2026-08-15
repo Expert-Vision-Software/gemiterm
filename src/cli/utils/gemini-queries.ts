@@ -13,21 +13,21 @@ export interface ListChatsRequest {
 const logger = new Logger("gemini-queries");
 
 export async function listChatsForRequest(
-  getGeminiClient: () => GeminiClientService,
-  listProfiles: () => string[],
+  getGeminiClient: () => Promise<GeminiClientService>,
+  listProfiles: () => Promise<string[]>,
   request: ListChatsRequest,
 ): Promise<ChatInfo[]> {
   const { limit, offset, search, profile } = request;
   const options = { limit, offset, search };
-  const client = getGeminiClient();
+  const client = await getGeminiClient();
 
   if (profile) {
-    return client.forProfile(profile).listChats(options);
+    return (await client.forProfile(profile)).listChats(options);
   }
 
-  const profileNames = listProfiles();
+  const profileNames = await listProfiles();
   const settled = await Promise.allSettled(
-    profileNames.map((name) => client.forProfile(name).listChats(options)),
+    profileNames.map(async (name) => await (await client.forProfile(name)).listChats(options)),
   );
 
   const chats: ChatInfo[] = [];
@@ -45,12 +45,12 @@ export async function listChatsForRequest(
 }
 
 export async function fetchChatForRequest(
-  getGeminiClient: () => GeminiClientService,
+  getGeminiClient: () => Promise<GeminiClientService>,
   conversationId: string,
   profileName?: string,
 ): Promise<Message[]> {
-  const client = getGeminiClient();
+  const client = await getGeminiClient();
   return profileName
-    ? client.forProfile(profileName).fetchChat(conversationId)
+    ? (await client.forProfile(profileName)).fetchChat(conversationId)
     : client.fetchChat(conversationId);
 }

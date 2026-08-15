@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { join, resolve } from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import {
   resolvePath,
   getConfigDir,
@@ -272,53 +273,55 @@ describe("path-utils", () => {
       }
     });
 
-    test("returns false on Windows", () => {
+    test("returns false on Windows", async () => {
       Object.defineProperty(process, "platform", { value: "win32", configurable: true });
       delete process.env.WSL_DISTRO_NAME;
-      expect(isWSL()).toBe(false);
+      expect(await isWSL()).toBe(false);
     });
 
-    test("returns false on macOS", () => {
+    test("returns false on macOS", async () => {
       Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
       delete process.env.WSL_DISTRO_NAME;
-      expect(isWSL()).toBe(false);
+      expect(await isWSL()).toBe(false);
     });
 
-    test("returns true on Linux when WSL_DISTRO_NAME is set and non-empty", () => {
+    test("returns true on Linux when WSL_DISTRO_NAME is set and non-empty", async () => {
       Object.defineProperty(process, "platform", { value: "linux", configurable: true });
       process.env.WSL_DISTRO_NAME = "Ubuntu";
-      expect(isWSL()).toBe(true);
+      expect(await isWSL()).toBe(true);
     });
 
-    test("returns false on Linux when WSL_DISTRO_NAME is unset and no /proc/version marker", () => {
+    test("returns false on Linux when WSL_DISTRO_NAME is unset and no /proc/version marker", async () => {
       Object.defineProperty(process, "platform", { value: "linux", configurable: true });
       delete process.env.WSL_DISTRO_NAME;
-      const existsSpy = spyOn(fs, "existsSync").mockReturnValue(false);
+      const readFileSpy = spyOn(fsp, "readFile").mockRejectedValue(
+        new Error("ENOENT: /proc/version does not exist"),
+      );
       try {
-        expect(isWSL()).toBe(false);
+        expect(await isWSL()).toBe(false);
       } finally {
-        existsSpy.mockRestore();
+        readFileSpy.mockRestore();
       }
     });
   });
 
   describe("getProjectRoot", () => {
-    test("returns the repo root when called from a file under the repo", () => {
-      const root = getProjectRoot(import.meta.url);
+    test("returns the repo root when called from a file under the repo", async () => {
+      const root = await getProjectRoot(import.meta.url);
       expect(root).toBeTruthy();
       expect(fs.existsSync(join(root, "package.json"))).toBe(true);
     });
 
-    test("is idempotent — multiple calls return the same path", () => {
-      const a = getProjectRoot(import.meta.url);
-      const b = getProjectRoot(import.meta.url);
+    test("is idempotent — multiple calls return the same path", async () => {
+      const a = await getProjectRoot(import.meta.url);
+      const b = await getProjectRoot(import.meta.url);
       expect(a).toBe(b);
     });
   });
 
   describe("getPackageJson", () => {
-    test("returns the parsed package.json with name and version", () => {
-      const pkg = getPackageJson(import.meta.url);
+    test("returns the parsed package.json with name and version", async () => {
+      const pkg = await getPackageJson(import.meta.url);
       expect(pkg.name).toBe("gemiterm");
     });
   });
