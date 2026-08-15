@@ -2,7 +2,6 @@ import { describe, test, expect, beforeEach, mock } from "bun:test";
 import {
   CookieSession,
   sessionExpiry,
-  psidtsExpiry,
   type CookieRotator,
   type CookieValidation,
 } from "../../src/services/cookie-session.ts";
@@ -181,16 +180,6 @@ describe("expiry computation", () => {
   test("no positive expiry yields null", () => {
     expect(sessionExpiry([cookie(PSID, "sid", -1), cookie(PSIDTS, "ts", -1)])).toBeNull();
     expect(sessionExpiry([])).toBeNull();
-  });
-
-  test("psidtsExpiry reads only the secondary binding", () => {
-    const ts = Math.floor(NOW / 1000) + 30 * DAY;
-    const psid = Math.floor(NOW / 1000) + 365 * DAY;
-    const expiry = psidtsExpiry([cookie(PSID, "sid", psid), cookie(PSIDTS, "ts", ts)]);
-    expect(expiry).not.toBeNull();
-    expect(expiry!.getTime()).toBe(ts * 1000);
-
-    expect(psidtsExpiry([cookie(PSID, "sid", psid)])).toBeNull();
   });
 });
 
@@ -384,6 +373,15 @@ describe("CookieSession.sessionStatus", () => {
     storage.save("default", makeStalePair());
     const status = session.sessionStatus("default");
     expect(status.fresh).toBe(false);
+  });
+
+  test("active is true for a fresh profile and false for a stale profile", () => {
+    const { session, storage } = buildHarness();
+    storage.save("default", makeFreshPair());
+    expect(session.sessionStatus("default").active).toBe(true);
+    storage.save("stale", makeStalePair());
+    expect(session.sessionStatus("stale").active).toBe(false);
+    expect(session.sessionStatus("ghost").active).toBe(false);
   });
 });
 

@@ -34,6 +34,7 @@ export interface CookieValidation {
 
 export interface SessionStatus extends CookieValidation {
   loaded: boolean;
+  active: boolean;
   cookies: Cookie[];
 }
 
@@ -63,15 +64,6 @@ export function sessionExpiry(cookies: Cookie[]): Date | null {
     }
   }
   return maxMs === null ? null : new Date(maxMs);
-}
-
-export function psidtsExpiry(cookies: Cookie[]): Date | null {
-  for (const cookie of cookies) {
-    if (cookie.name === SECONDARY_COOKIE_NAME && cookie.expires > 0) {
-      return new Date(cookie.expires * 1000);
-    }
-  }
-  return null;
 }
 
 function cookiesEquivalent(a: Cookie[], b: Cookie[]): boolean {
@@ -136,7 +128,6 @@ export class CookieSession {
     let secure1psidts: string | null = null;
     let psidtsPresent = false;
     let psidtsExpires = 0;
-    let maxPositiveMs: number | null = null;
 
     for (const cookie of cookies) {
       if (cookie.name === PRIMARY_COOKIE_NAME && secure1psid === null) {
@@ -149,15 +140,6 @@ export class CookieSession {
         }
         psidtsExpires = cookie.expires;
       }
-      if (
-        (cookie.name === PRIMARY_COOKIE_NAME || cookie.name === SECONDARY_COOKIE_NAME) &&
-        cookie.expires > 0
-      ) {
-        const ms = cookie.expires * 1000;
-        if (maxPositiveMs === null || ms > maxPositiveMs) {
-          maxPositiveMs = ms;
-        }
-      }
     }
 
     return {
@@ -167,7 +149,7 @@ export class CookieSession {
         !psidtsPresent ||
         psidtsExpires <= 0 ||
         psidtsExpires * 1000 >= now + COOKIE_EXPIRY_THRESHOLD_MS,
-      expiresAt: maxPositiveMs === null ? null : new Date(maxPositiveMs),
+      expiresAt: sessionExpiry(cookies),
       secure1psid,
       secure1psidts,
     };
@@ -176,10 +158,17 @@ export class CookieSession {
   sessionStatus(profile: string): SessionStatus {
     try {
       const cookies = this.cookieStorage.load(profile);
-      return { loaded: true, cookies, ...this.validate(cookies) };
+      const validation = this.validate(cookies);
+      return {
+        loaded: true,
+        cookies,
+        ...validation,
+        active: validation.hasPrimary && validation.hasSecondary && validation.fresh,
+      };
     } catch {
       return {
         loaded: false,
+        active: false,
         cookies: [],
         hasPrimary: false,
         hasSecondary: false,
@@ -256,7 +245,7 @@ export class CookieSession {
 
     const validation = this.validate(stamped);
     if (!validation.hasPrimary) {
-      throw new Error(`__Secure-1PSID missing from captured cookies — retry 'gemiterm auth'`);
+      throw new Error(`${PRIMARY_COOKIE_NAME} missing from captured cookies — retry 'gemiterm auth'`);
     }
 
     let persisted: Cookie[] | null = null;

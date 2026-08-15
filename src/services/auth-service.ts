@@ -4,7 +4,7 @@ import type { Logger } from "../infrastructure/logger.ts";
 import type { PlaywrightCliDriver } from "./playwright-cli-driver.ts";
 import type { CookieMonitor } from "./cookie-monitor.ts";
 import type { CookieSession } from "./cookie-session.ts";
-import { PRIMARY_COOKIE_NAME, psidtsExpiry } from "./cookie-session.ts";
+import { PRIMARY_COOKIE_NAME, sessionExpiry } from "./cookie-session.ts";
 import { ensureConfigDir, getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { getProfilePath } from "../infrastructure/path-utils.ts";
@@ -57,7 +57,7 @@ export class AuthService {
 
       const cookies = await this.waitForLogin(name, DEFAULT_AUTH_TIMEOUT_MS);
       const committed = await this.extractCookies(name, cookies);
-      const expiresAt = psidtsExpiry(committed);
+      const expiresAt = sessionExpiry(committed);
       this.confirmAuthSuccess(cookies.length, expiresAt, cookies);
       return { cookies, expiresAt };
     } finally {
@@ -100,7 +100,7 @@ export class AuthService {
 
       const cookies = await this.waitForLogin(name, DEFAULT_AUTH_TIMEOUT_MS);
       const committed = await this.extractCookies(name, cookies);
-      const expiresAt = psidtsExpiry(committed);
+      const expiresAt = sessionExpiry(committed);
       this.confirmRenewSuccess(cookies.length, expiresAt, cookies);
       return { cookies, expiresAt };
     } finally {
