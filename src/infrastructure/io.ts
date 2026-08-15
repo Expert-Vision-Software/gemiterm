@@ -149,7 +149,6 @@ async function writeTextFileAtomic(path: string, content: string): Promise<void>
     try {
       await rm(tmp, { force: true });
     } catch {
-      // best-effort cleanup of the temp file
     }
     throw wrap("writeTextFileAtomic", absolute, err instanceof Error ? err : undefined);
   }

@@ -1,8 +1,8 @@
 import type { Cookie } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
 import { CookieStore } from "./cookie-store.ts";
-import { GEMINI_APP_URL, PSIDTS_COOKIE_NAME } from "./auth-constants.ts";
-import { filterToGeminiDomains } from "./auth-constants.ts";
+import { GEMINI_APP_URL, PSIDTS_COOKIE_NAME, filterToGeminiDomains } from "./auth-constants.ts";
+import { sleep } from "./timing.ts";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
@@ -24,10 +24,6 @@ export interface BrowserRefresherDeps {
   cookieStore: CookieStore;
   logger: Logger;
   pollIntervalMs?: number;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class BrowserRefresher {

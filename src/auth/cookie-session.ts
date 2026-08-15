@@ -5,13 +5,21 @@ import { AuthenticationError, LoginTimeoutError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
-import { joinPath } from "../infrastructure/path-utils.ts";
 import { CookieValidator } from "./cookie-validation.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { SessionClassifier } from "./session-classifier.ts";
-import { BrowserRefresher, type RotationResult } from "./browser-refresher.ts";
+import { BrowserRefresher, type RefresherDriver, type RotationResult } from "./browser-refresher.ts";
 import { RecoveryRung } from "./recovery.ts";
-import { GEMINI_APP_URL, PSIDTS_COOKIE_NAME, PSID_COOKIE_NAME, filterToGeminiDomains } from "./auth-constants.ts";
+import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
+import {
+  GEMINI_APP_URL,
+  PSIDTS_COOKIE_NAME,
+  PSID_COOKIE_NAME,
+  filterToGeminiDomains,
+  findCookieValue,
+} from "./auth-constants.ts";
+import { sleep } from "./timing.ts";
+import { spawnDetachedRefreshRunner } from "./refresh-runner.ts";
 
 const STALE_JAR_MS = 30 * 60 * 1000;
 const DEFAULT_LOGIN_TIMEOUT_MS = 300_000;
@@ -44,17 +52,22 @@ export interface CookieSessionDeps {
   pollIntervalMs?: number;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function arm(cookies: Cookie[]): ArmedSession {
-  const psid = cookies.find((c) => c.name === PSID_COOKIE_NAME)?.value ?? "";
-  const psidts = cookies.find((c) => c.name === PSIDTS_COOKIE_NAME)?.value ?? null;
-  return { secure_1psid: psid, secure_1psidts: psidts, cookies };
+  return {
+    secure_1psid: findCookieValue(cookies, PSID_COOKIE_NAME) ?? "",
+    secure_1psidts: findCookieValue(cookies, PSIDTS_COOKIE_NAME),
+    cookies,
+  };
 }
 
-function psidtsExpiry(cookies: Cookie[]): Date | null {
+export function toSdkCookieConfig(cookies: Cookie[]): { secure1psid: string; secure1psidts: string | null } {
+  return {
+    secure1psid: findCookieValue(cookies, PSID_COOKIE_NAME) ?? "",
+    secure1psidts: findCookieValue(cookies, PSIDTS_COOKIE_NAME),
+  };
+}
+
+export function psidtsExpiry(cookies: Cookie[]): Date | null {
   for (const cookie of cookies) {
     if (cookie.name === PSIDTS_COOKIE_NAME && cookie.expires > 0) {
       return new Date(cookie.expires * 1000);
@@ -127,7 +140,7 @@ export class CookieSession {
 
   async refresh(profile: string): Promise<RotationResult> {
     const { cookies } = await this.deps.cookieStore.load(profile);
-    const baseline = cookies.find((c) => c.name === PSIDTS_COOKIE_NAME)?.value ?? null;
+    const baseline = findCookieValue(cookies, PSIDTS_COOKIE_NAME);
     return await this.deps.refresher.rotatePsidts(profile, baseline);
   }
 
@@ -208,4 +221,69 @@ export class CookieSession {
     const hasSid = cookies.some((c) => c.name === PSID_COOKIE_NAME);
     console.log(chalk.dim(`   Has ${PSID_COOKIE_NAME}: ${hasSid ? "✅" : "❌"}`));
   }
+}
+
+export interface ProbeClient {
+  listChats(options?: { limit?: number }): Promise<{ id: string }[]>;
+}
+
+export interface CreateCookieSessionDeps {
+  logger: Logger;
+  driver?: CaptureDriver & RefresherDriver;
+  cookieStore?: CookieStore;
+  listProfiles: () => Promise<string[]>;
+  spawnRefreshRunner?: (profile: string) => void;
+  createProbeClient: (
+    config: { secure1psid: string; secure1psidts: string | null },
+    profile: string,
+  ) => ProbeClient | Promise<ProbeClient>;
+}
+
+export function createCookieSession(deps: CreateCookieSessionDeps): CookieSession {
+  const logger = deps.logger;
+  const cookieStore = deps.cookieStore ?? new CookieStore();
+  const driver = deps.driver ?? new PlaywrightCliDriver();
+  const refresher = new BrowserRefresher({ driver, cookieStore, logger });
+
+  const makeProbeClient = async (profile: string): Promise<ProbeClient> => {
+    const { cookies } = await cookieStore.load(profile);
+    return await deps.createProbeClient(toSdkCookieConfig(cookies), profile);
+  };
+
+  const classifier = new SessionClassifier({
+    cookieStore,
+    probeChats: async (profile) =>
+      await makeProbeClient(profile).then((c) => c.listChats({ limit: 1 })).catch(() => []),
+  });
+
+  let session!: CookieSession;
+  const recovery = new RecoveryRung({
+    refresher,
+    cookieStore,
+    logger,
+    rearm: async (profile) => session.ensureSession(profile),
+  });
+
+  session = new CookieSession({
+    cookieStore,
+    validator: new CookieValidator({ logger }),
+    refresher,
+    classifier,
+    recovery,
+    logger,
+    spawnRefreshRunner: deps.spawnRefreshRunner ?? spawnDetachedRefreshRunner,
+    listProfiles: deps.listProfiles,
+    conversationLookup: {
+      profileHasConversation: async (profileName, conversationId) => {
+        try {
+          const chats = await makeProbeClient(profileName).then((c) => c.listChats());
+          return chats.some((chat) => chat.id === conversationId);
+        } catch {
+          return false;
+        }
+      },
+    },
+    driver,
+  });
+  return session;
 }

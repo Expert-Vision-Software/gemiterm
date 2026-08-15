@@ -1,5 +1,14 @@
 import { describe, test, expect, mock } from "bun:test";
-import { runRefresh } from "../../src/auth/refresh-runner.ts";
+import { existsSync } from "node:fs";
+import { runRefresh, refreshRunnerEntryPath } from "../../src/auth/refresh-runner.ts";
+
+describe("refreshRunnerEntryPath", () => {
+  test("resolves to the actual refresh-runner.ts file next to the module", () => {
+    const normalized = refreshRunnerEntryPath().replaceAll("\\", "/");
+    expect(normalized.endsWith("src/auth/refresh-runner.ts")).toBe(true);
+    expect(existsSync(refreshRunnerEntryPath())).toBe(true);
+  });
+});
 
 function makeLogger() {
   return {

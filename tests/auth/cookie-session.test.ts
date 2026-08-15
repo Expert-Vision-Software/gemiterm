@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { Cookie } from "../../src/core/types.ts";
-import { CookieSession } from "../../src/auth/cookie-session.ts";
+import { CookieSession, createCookieSession } from "../../src/auth/cookie-session.ts";
+import { CookieStore } from "../../src/auth/cookie-store.ts";
 import { GEMINI_APP_URL } from "../../src/auth/auth-constants.ts";
 import { SessionValidationError, LoginTimeoutError } from "../../src/core/errors.ts";
 import { CookieValidator } from "../../src/auth/cookie-validation.ts";
@@ -235,5 +236,36 @@ describe("CookieSession delegation", () => {
     const deps = makeDeps();
     const session = makeSession(deps);
     expect(typeof session.recover).toBe("function");
+  });
+});
+
+describe("createCookieSession factory", () => {
+  test("wires real collaborators; probe path loads jar and delegates to the probe client", async () => {
+    const jar = [cookie("__Secure-1PSID", "psid"), cookie("__Secure-1PSIDTS", "ts")];
+    const dir = join(TEST_DIR, "profiles", "facade-p");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "storage_state.json"), JSON.stringify({ cookies: jar }), "utf-8");
+
+    const listChats = mock(async (options?: { limit?: number }) =>
+      options?.limit === 1 ? [{ id: "c1" }] : [{ id: "c1" }, { id: "c2" }],
+    );
+    const logger = makeLogger();
+    const session = createCookieSession({
+      logger: logger as never,
+      cookieStore: new CookieStore(),
+      listProfiles: async () => ["facade-p"],
+      spawnRefreshRunner: () => {},
+      createProbeClient: (config) => {
+        expect(config.secure1psid).toBe("psid");
+        expect(config.secure1psidts).toBe("ts");
+        return { listChats };
+      },
+    });
+
+    expect(await session.probe("facade-p")).toBe("live");
+    expect(await session.activeProfiles()).toEqual(["facade-p"]);
+    expect(await session.findProfileForConversation("c1")).toBe("facade-p");
+    expect(await session.findProfileForConversation("missing")).toBeNull();
+    expect(listChats).toHaveBeenCalled();
   });
 });

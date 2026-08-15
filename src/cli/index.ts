@@ -6,18 +6,13 @@ import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import { ProfileLifecycle } from "../services/profile-lifecycle.ts";
 import { SingleExport, BatchExport } from "../services/export-strategy.ts";
 import { fetchChatForRequest } from "./utils/gemini-queries.ts";
-import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
 import { ProfileManager, CookieStorage } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts";
-import { getPackageJson, joinPath } from "../infrastructure/path-utils.ts";
+import { getPackageJson } from "../infrastructure/path-utils.ts";
 import { parseGlobalArgs, printVersion, printHelp } from "../infrastructure/cli-parser.ts";
 import { AuthenticationError } from "../core/errors.ts";
-import { CookieSession } from "../auth/cookie-session.ts";
-import { CookieValidator } from "../auth/cookie-validation.ts";
-import { CookieStore } from "../auth/cookie-store.ts";
-import { SessionClassifier } from "../auth/session-classifier.ts";
-import { BrowserRefresher } from "../auth/browser-refresher.ts";
-import { RecoveryRung } from "../auth/recovery.ts";
+import { createCookieSession } from "../auth/cookie-session.ts";
+import type { CookieSession } from "../auth/cookie-session.ts";
 
 const pkgPromise = getPackageJson(import.meta.url);
 
@@ -31,71 +26,18 @@ interface CliServices {
 
 async function setupServices(): Promise<CliServices> {
   const logger = new Logger("cli");
-  const cookieStore = new CookieStore();
   const profileManager = new ProfileManager(new CookieStorage());
-  const validator = new CookieValidator({ logger });
-  const driver = new PlaywrightCliDriver();
-  const refresher = new BrowserRefresher({ driver, cookieStore, logger });
 
-  let cookieSession!: CookieSession;
-  const recovery = new RecoveryRung({
-    refresher,
-    cookieStore,
+  const cookieSession = createCookieSession({
     logger,
-    rearm: async (profile) => cookieSession.ensureSession(profile),
-  });
-
-  const spawnRefreshRunner = (profile: string): void => {
-    try {
-      const runnerPath = joinPath(import.meta.dir, "refresh-runner.ts");
-      const proc = Bun.spawn([process.execPath, runnerPath, profile], {
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "ignore",
-      });
-      proc.exited.catch(() => {});
-    } catch (err) {
-      logger.warn(`Failed to spawn detached refresh-runner for '${profile}': ${err}`);
-    }
-  };
-
-  const probeClient = async (profile: string): Promise<GeminiClientService> => {
-    const { cookies } = await cookieStore.load(profile);
-    const map = new Map(cookies.map((c) => [c.name, c.value]));
-    return new GeminiClientService(
-      { secure1psid: map.get("__Secure-1PSID") ?? "", secure1psidts: map.get("__Secure-1PSIDTS") ?? null },
-      logger,
-      undefined,
-      profile,
-    );
-  };
-
-  const classifier = new SessionClassifier({
-    cookieStore,
-    probeChats: async (profile) =>
-      await (await probeClient(profile)).listChats({ limit: 1 }).catch(() => []),
-  });
-
-  cookieSession = new CookieSession({
-    cookieStore,
-    validator,
-    refresher,
-    classifier,
-    recovery,
-    logger,
-    spawnRefreshRunner,
     listProfiles,
-    conversationLookup: {
-      profileHasConversation: async (profileName, conversationId) => {
-        try {
-          const chats = await (await probeClient(profileName)).listChats();
-          return chats.some((chat) => chat.id === conversationId);
-        } catch {
-          return false;
-        }
-      },
-    },
-    driver,
+    createProbeClient: (config, profile) =>
+      new GeminiClientService(
+        { secure1psid: config.secure1psid, secure1psidts: config.secure1psidts },
+        logger,
+        undefined,
+        profile,
+      ),
   });
 
   const profileLifecycle = new ProfileLifecycle({

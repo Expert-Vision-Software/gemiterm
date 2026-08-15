@@ -9,6 +9,7 @@ import {
   writeTextFileAtomic,
 } from "../infrastructure/io.ts";
 import { getProfileLockPath, getProfilePath } from "../infrastructure/path-utils.ts";
+import { sleep } from "./timing.ts";
 
 const LOCK_RETRY_MS = 100;
 const STALE_LOCK_MS = 120_000;
@@ -35,10 +36,6 @@ interface StorageState {
 
 function cookieKey(c: Pick<Cookie, "name" | "domain" | "path">): string {
   return `${c.name}|${c.domain}|${c.path}`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function readDiskCookies(filePath: string): Promise<Cookie[]> {
@@ -150,7 +147,7 @@ export class CookieStore {
           merged.push(diskCookie);
         }
       } else if (snapValue !== undefined && diskCookie.value === snapValue) {
-        // this process deleted the entry and no concurrent writer touched it: omit
+        continue;
       } else {
         merged.push(diskCookie);
       }
