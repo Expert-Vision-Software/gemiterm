@@ -27,16 +27,16 @@ describe("fetch command integration", () => {
   beforeEach(() => {
     command = new FetchCommand();
     client = makeClient();
-    const profileAuthManager = {
-      getActiveProfiles: mock(() => ["default"]),
+    const cookieSession = {
+      activeProfiles: mock(() => ["default"]),
       findProfileForConversation: mock(() => Promise.resolve(null)),
-      ensureAuthenticated: mock(() => {
+      ensureSession: mock(() => {
         throw new Error("not used");
       }),
     };
     context = {
       verbose: false,
-      profileAuthManager: profileAuthManager as any,
+      cookieSession: cookieSession as any,
       getGeminiClient: () => client,
       listProfiles: () => [],
     };
@@ -258,28 +258,28 @@ describe("fetch command integration", () => {
 
   describe("multi-profile routing", () => {
     test("auto-discovers owning profile and forwards it to forProfile", async () => {
-      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
-      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.cookieSession as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
 
       await command.execute(["conv-evs"], context);
 
       expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
       expect(client.fetchChat).toHaveBeenCalledWith("conv-evs");
-      expect((context.profileAuthManager as any).findProfileForConversation).toHaveBeenCalledWith("conv-evs");
+      expect((context.cookieSession as any).findProfileForConversation).toHaveBeenCalledWith("conv-evs");
     });
 
     test("--profile overrides auto-discovery", async () => {
-      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
-      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("dhb-work");
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.cookieSession as any).findProfileForConversation.mockResolvedValue("dhb-work");
 
       await command.execute(["conv-x", "--profile", "evs-diegohb"], context);
 
       expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
-      expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
+      expect((context.cookieSession as any).findProfileForConversation).not.toHaveBeenCalled();
     });
 
     test("-p short flag also overrides discovery", async () => {
-      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
 
       await command.execute(["conv-x", "-p", "evs-diegohb"], context);
 
@@ -287,18 +287,18 @@ describe("fetch command integration", () => {
     });
 
     test("omits forProfile when only one profile is active", async () => {
-      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["default"]);
-      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue(null);
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["default"]);
+      (context.cookieSession as any).findProfileForConversation.mockResolvedValue(null);
 
       await command.execute(["conv-1"], context);
 
       expect(client.fetchChat).toHaveBeenCalledWith("conv-1");
       expect(client.forProfile).not.toHaveBeenCalled();
-      expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
+      expect((context.cookieSession as any).findProfileForConversation).not.toHaveBeenCalled();
     });
 
     test("throws AuthenticationError when --profile names a profile with no valid session", async () => {
-      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work"]);
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work"]);
 
       await expect(
         command.execute(["conv-x", "--profile", "expired-profile"], context),
@@ -306,8 +306,8 @@ describe("fetch command integration", () => {
     });
 
     test("throws AuthenticationError when no active profile owns the conversation and --profile is not given", async () => {
-      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
-      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue(null);
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.cookieSession as any).findProfileForConversation.mockResolvedValue(null);
 
       await expect(command.execute(["conv-orphan"], context)).rejects.toThrow(
         /Could not find a profile that owns conversation/,

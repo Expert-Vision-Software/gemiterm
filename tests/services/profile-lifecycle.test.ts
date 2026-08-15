@@ -2,10 +2,8 @@ import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:
 import { ProfileLifecycle } from "../../src/services/profile-lifecycle.ts";
 import type { ProfileStatus } from "../../src/core/types.ts";
 import type { Logger } from "../../src/infrastructure/logger.ts";
-import type { ProfileManager, CookieStorage } from "../../src/infrastructure/storage.ts";
-import type { AuthService } from "../../src/services/auth-service.ts";
-import type { PlaywrightCliDriver } from "../../src/services/playwright-cli-driver.ts";
-import type { CookieMonitor } from "../../src/services/cookie-monitor.ts";
+import type { ProfileManager } from "../../src/infrastructure/storage.ts";
+import type { CookieSession } from "../../src/auth/cookie-session.ts";
 import { GemitermError } from "../../src/core/errors.ts";
 import * as configModule from "../../src/infrastructure/config.ts";
 import * as formattersModule from "../../src/infrastructure/formatters.ts";
@@ -20,7 +18,7 @@ interface FakeLogger extends Logger {
 interface LifecycleHarness {
   lifecycle: ProfileLifecycle;
   profileManager: ProfileManager;
-  authService: AuthService;
+  cookieSession: CookieSession;
   logger: FakeLogger;
   logSpy: ReturnType<typeof spyOn>;
 }
@@ -47,12 +45,11 @@ function makeProfileManager(overrides: Partial<ProfileManager> = {}): ProfileMan
   } as unknown as ProfileManager;
 }
 
-function makeAuthService(overrides: Partial<AuthService> = {}): AuthService {
+function makeCookieSession(overrides: Partial<CookieSession> = {}): CookieSession {
   return {
-    authenticate: mock(async () => ({ cookies: [], expiresAt: null })),
-    renew: mock(async () => ({ cookies: [], expiresAt: null })),
+    captureLogin: mock(async () => ({ cookies: [], expiresAt: null })),
     ...overrides,
-  } as unknown as AuthService;
+  } as unknown as CookieSession;
 }
 
 function makeLogger(): FakeLogger {
@@ -67,23 +64,20 @@ function makeLogger(): FakeLogger {
 function makeLifecycle(
   overrides: {
     profileManager?: ProfileManager;
-    authService?: AuthService;
+    cookieSession?: CookieSession;
     logger?: FakeLogger;
   } = {},
 ): LifecycleHarness {
   const logger = overrides.logger ?? makeLogger();
   const profileManager = overrides.profileManager ?? makeProfileManager();
-  const authService = overrides.authService ?? makeAuthService();
+  const cookieSession = overrides.cookieSession ?? makeCookieSession();
   const lifecycle = new ProfileLifecycle({
-    cookieStorage: {} as CookieStorage,
     profileManager,
-    driver: {} as PlaywrightCliDriver,
-    cookieMonitor: {} as CookieMonitor,
-    authService,
+    cookieSession,
     logger,
   });
   const logSpy = spyOn(console, "log").mockImplementation(() => {});
-  return { lifecycle, profileManager, authService, logger, logSpy };
+  return { lifecycle, profileManager, cookieSession, logger, logSpy };
 }
 
 let promptsModule: typeof import("../../src/cli/utils/prompts.ts");
@@ -216,15 +210,15 @@ describe("ProfileLifecycle", () => {
 
     test("creates the profile and delegates the login flow", async () => {
       const profileManager = makeProfileManager();
-      const authService = makeAuthService();
-      const { lifecycle } = makeLifecycle({ profileManager, authService });
+      const cookieSession = makeCookieSession();
+      const { lifecycle } = makeLifecycle({ profileManager, cookieSession });
 
       spyOn(configModule, "listProfiles").mockReturnValue([]);
 
       await lifecycle.manageProfiles("create", { name: "new-profile" });
 
       expect(profileManager.create).toHaveBeenCalledWith("new-profile");
-      expect(authService.authenticate).toHaveBeenCalledWith("new-profile");
+      expect(cookieSession.captureLogin).toHaveBeenCalledWith("new-profile");
     });
 
     test("throws when the profile already exists", async () => {
@@ -340,8 +334,8 @@ describe("ProfileLifecycle", () => {
   describe("auth action", () => {
     test("creates and authenticates the default profile when none exist", async () => {
       const profileManager = makeProfileManager();
-      const authService = makeAuthService();
-      const { lifecycle } = makeLifecycle({ profileManager, authService });
+      const cookieSession = makeCookieSession();
+      const { lifecycle } = makeLifecycle({ profileManager, cookieSession });
 
       spyOn(configModule, "listProfiles").mockReturnValue([]);
       spyOn(configModule, "getDefaultProfileName").mockReturnValue("default");
@@ -349,57 +343,57 @@ describe("ProfileLifecycle", () => {
       await lifecycle.manageProfiles("auth", {});
 
       expect(profileManager.create).toHaveBeenCalledWith("default");
-      expect(authService.authenticate).toHaveBeenCalledWith("default");
+      expect(cookieSession.captureLogin).toHaveBeenCalledWith("default");
     });
 
     test("authenticates the single profile directly", async () => {
       const profileManager = makeProfileManager();
-      const authService = makeAuthService();
-      const { lifecycle } = makeLifecycle({ profileManager, authService });
+      const cookieSession = makeCookieSession();
+      const { lifecycle } = makeLifecycle({ profileManager, cookieSession });
 
       spyOn(configModule, "listProfiles").mockReturnValue(["solo"]);
 
       await lifecycle.manageProfiles("auth", {});
 
       expect(profileManager.create).not.toHaveBeenCalled();
-      expect(authService.authenticate).toHaveBeenCalledWith("solo");
+      expect(cookieSession.captureLogin).toHaveBeenCalledWith("solo");
     });
 
     test("renews a named profile", async () => {
-      const authService = makeAuthService();
-      const { lifecycle } = makeLifecycle({ authService });
+      const cookieSession = makeCookieSession();
+      const { lifecycle } = makeLifecycle({ cookieSession });
 
       spyOn(configModule, "listProfiles").mockReturnValue(["p1"]);
 
       await lifecycle.manageProfiles("auth", { renewProfile: "p1" });
 
-      expect(authService.renew).toHaveBeenCalledWith("p1");
+      expect(cookieSession.captureLogin).toHaveBeenCalledWith("p1", { mode: "renew" });
     });
 
     test("authenticates directly when a profileName is provided", async () => {
-      const authService = makeAuthService();
-      const { lifecycle } = makeLifecycle({ authService });
+      const cookieSession = makeCookieSession();
+      const { lifecycle } = makeLifecycle({ cookieSession });
 
       spyOn(configModule, "listProfiles").mockReturnValue(["p1", "p2"]);
 
       await lifecycle.manageProfiles("auth", { profileName: "p1" });
 
-      expect(authService.authenticate).toHaveBeenCalledWith("p1");
+      expect(cookieSession.captureLogin).toHaveBeenCalledWith("p1");
     });
 
     test("shows the menu and exits with the default when X is selected", async () => {
       const profileManager = makeProfileManager({
         getStatus: mock((name: string) => makeStatus(name, { isDefault: name === "p1" })),
       });
-      const authService = makeAuthService();
-      const { lifecycle, logSpy } = makeLifecycle({ profileManager, authService });
+      const cookieSession = makeCookieSession();
+      const { lifecycle, logSpy } = makeLifecycle({ profileManager, cookieSession });
 
       spyOn(configModule, "listProfiles").mockReturnValue(["p1", "p2"]);
       spyOn(promptsModule, "text").mockResolvedValue("X");
 
       await lifecycle.manageProfiles("auth", {});
 
-      expect(authService.authenticate).not.toHaveBeenCalled();
+      expect(cookieSession.captureLogin).not.toHaveBeenCalled();
       expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining("Continuing with current default"),
       );

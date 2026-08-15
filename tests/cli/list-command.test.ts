@@ -30,7 +30,7 @@ describe("ListCommand", () => {
     client = makeClient();
     context = {
       verbose: false,
-      profileAuthManager: {} as unknown as CliCommandContext["profileAuthManager"],
+      cookieSession: {} as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => ["default"],
     };
@@ -233,7 +233,7 @@ describe("ListCommand --interactive flag", () => {
     client = makeClient();
     context = {
       verbose: false,
-      profileAuthManager: {} as unknown as CliCommandContext["profileAuthManager"],
+      cookieSession: {} as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => ["default"],
     };

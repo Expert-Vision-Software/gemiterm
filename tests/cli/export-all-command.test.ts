@@ -62,7 +62,7 @@ describe("ExportAllCommand", () => {
     mkdirSync(tempDir, { recursive: true });
     context = {
       verbose: false,
-      profileAuthManager: {} as CliCommandContext["profileAuthManager"],
+      cookieSession: {} as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
       exportStrategies: {

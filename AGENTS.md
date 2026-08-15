@@ -56,11 +56,20 @@ Test count and the v2.0.0 release date (2026-06-08) are in `CHANGELOG.md`. Updat
 
 ## Sensitive area — do not modify lightly
 
-Auth is the only area with non-trivial history. Cookies are obtained by spawning `playwright-cli` (`@playwright/cli`) and polling with a JS probe for the Google sign-out link. The four files below are the regression-test gate; if you change any of them, re-read the affected service-level test before committing:
+Auth is the only area with non-trivial history. The auth surface is the `src/auth/` module, composed around a single `CookieSession` facade (`src/auth/cookie-session.ts`) wired in `src/cli/index.ts`. The architecture (2026-08 "fix-1" cutover, evidence in `docs/cookie-ablation-findings.md`):
 
-- `src/services/playwright-cli-driver.ts` — `BunPlaywrightRunner`, argv builder, cookie-list output parser. Auto-detects between the `playwright-cli` binary and `bunx @playwright/cli`.
+- `src/auth/cookie-session.ts` — the only auth surface consumed by the CLI: `ensureSession` (arm from disk, spawn detached refresh when jar mtime > 30 min), `captureLogin` (headed capture; the gate is PSID+PSIDTS *presence*, the payload is the **complete** domain-filtered jar — gate is not payload), `probe`, `refresh`, `activeProfiles`, `findProfileForConversation`. All collaborators injectable via `CookieSessionDeps`; no file outside `src/auth/` may import the collaborators directly.
+- `src/auth/cookie-store.ts` — snapshot/delta CAS saves (stale-overwrite-fresh prevention) + cross-process `storage_state.json.lock` (exclusive-create, CAS fail-open 10 s, full-jar fail-closed 90 s via `LockUnavailableError`, 120 s stale-lock steal). Pure Bun `node:fs` semantics via `infrastructure/io.ts` — no shell commands, no `flock`.
+- `src/auth/browser-refresher.ts` — the only PSIDTS rotation engine: headless persistent-profile page load, poll `cookie-list`, `state-save`, persist full jar. `src/auth/refresh-runner.ts` is the standalone detached entry point.
+- `src/auth/cookie-validation.ts` — two-tier validation (tier-1 raise: PSIDTS RFC-6265-routable to `gemini.google.com` + PSID present; tier-2 warn-once: companions absent).
+- `src/auth/session-classifier.ts` — read-only `live | phantom | dead` oracle (init-GET tokens + `listChats({limit:1})`). Never uses SDK `models()` (static table).
+- `src/services/playwright-cli-driver.ts` — `BunPlaywrightRunner`, argv builders (`openHeaded` / `openHeadless`), `stateSave`, cookie-list output parser. Auto-detects between the `playwright-cli` binary and `bunx @playwright/cli`.
 
-Service-level test files: `tests/services/playwright-cli-driver.test.ts`.
+**Hard rule (the H6 lesson): no cookie-name filtering anywhere in capture or persistence.** Jars are filtered by domain only (`.google.com`, `.youtube.com`, `accounts.google.com` — `src/auth/auth-constants.ts:filterToGeminiDomains`). Enforced by `tests/auth/full-jar-contract.test.ts` (greppable pin).
+
+Deleted in the fix-1 cutover (do not resurrect): `src/services/{auth-service,cookie-monitor,cookie-storage-service,profile-auth-manager}.ts` and their tests. `GeminiClientService` keeps its 2-cookie SDK construction (fed from `ensureSession` via a `ProfileCookieLoader`); it no longer persists cookies itself — rotation belongs to the refresher.
+
+Service-level test files: `tests/services/playwright-cli-driver.test.ts`, `tests/auth/*.test.ts`. Re-read the affected test before committing any change to these.
 
 The full upstream API for the `playwright-cli` subprocess is documented in `docs/PLAYWRIGHT_CLI_API.md` (verified against `@playwright/cli`). Reach for `deepwiki` or the GitHub upstream when the docs are unclear.
 
@@ -89,9 +98,9 @@ The `gemiterm list -i` (or `--interactive`) flag is the **only** entry point to 
 
 If you need a new path or file-system helper, add it to the appropriate module and consume it from there. Do not bypass the mediation. To add a new exemption, update the file list in **both** `scripts/lint-path-mediation.sh` and `.github/workflows/test.yml` and the `if` block in `scripts/lint-path-mediation.ps1`, with a comment explaining why.
 
-The `io.ts` surface to use: `writeTextFile`, `readTextFile`, `readJsonFile`, `writeJsonFile`, `ensureDir`, `existsFile`, `removeDir`, `renameDir`, `isDirectory`, `listSubdirectories`, `safeReadTextFile`. Add new helpers only when at least 2 call sites need them. Errors from `io.ts` throw `IOError` with a `cause` field — do not catch and re-throw the raw `node:fs` error.
+The `io.ts` surface to use: `writeTextFile`, `readTextFile`, `readJsonFile`, `writeJsonFile`, `ensureDir`, `existsFile`, `removeDir`, `removeFile`, `renameDir`, `isDirectory`, `listSubdirectories`, `safeReadTextFile`, `writeFileExclusive`, `writeTextFileAtomic`, `getFileMtime`. Add new helpers only when at least 2 call sites need them. Errors from `io.ts` throw `IOError` with a `cause` field — do not catch and re-throw the raw `node:fs` error.
 
-The `path-utils.ts` surface: `resolvePath`, `joinPath`, `dirnamePath`, `getConfigDir`, `getProfilesDir`, `getProfilePath`, `getProfileDir`, `getDefaultProfileMarkerPath`, `getTempFilePath`, `isWSL`, `getProjectRoot`, `getPackageJson`. Config dir resolution: `GEMITERM_CONFIG_DIR` env -> `%APPDATA%\gemiterm` (Windows) -> `~/gemiterm` (POSIX). v1.4.1 -> v2.0.0 upgrade preserves this dir unchanged.
+The `path-utils.ts` surface: `resolvePath`, `joinPath`, `dirnamePath`, `getConfigDir`, `getProfilesDir`, `getProfilePath`, `getProfileLockPath`, `getProfileDir`, `getDefaultProfileMarkerPath`, `getTempFilePath`, `isWSL`, `getProjectRoot`, `getPackageJson`. Config dir resolution: `GEMITERM_CONFIG_DIR` env -> `%APPDATA%\gemiterm` (Windows) -> `~/gemiterm` (POSIX). v1.4.1 -> v2.0.0 upgrade preserves this dir unchanged.
 
 General style: no comments unless explicitly asked. Conventional-commits, commit frequently, never push. Default to delegating to subagents (sequential when output feeds the next step, parallel otherwise). Run `bun test` after any non-trivial change and confirm the baseline is intact.
 

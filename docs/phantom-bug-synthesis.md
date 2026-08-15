@@ -693,3 +693,13 @@ The phantom check is skipped for `allProfiles` queries (profiles aggregate, per-
 - §"2026-08-11 — Reactive phantom detection" — the classifier design survives; detection now knows dead-vs-phantom boundary exactly (tokens ✗ vs tokens ✓ + 0 chats).
 - §"The 4-cookie discovery" — capture fix was necessary hygiene but was never the dormancy mechanism.
 
+## 2026-08-15 — fix-1 implemented: CookieSession core landed (`fix-1-cookie-session-core`)
+
+**Implemented by:** OpenSpec change `fix-1-cookie-session-core` (first of the three-change auth replacement; branch `notebooklm-grilled-auth-fix`).
+
+**What landed:** the auth surface is now `src/auth/` composed around the `CookieSession` facade — `ensureSession` (arm-first; spawns detached `refresh-runner` when jar mtime > 30 min, never blocks the current command), `captureLogin` (headed, gate = PSID+PSIDTS presence, payload = complete domain-filtered jar — the gate-is-not-payload rule is now structural), `probe`/`activeProfiles` (read-only classifier: init-GET tokens + `listChats({limit:1})`), `refresh` + the refresh-and-retry-once `RecoveryRung` (throws `AuthenticationError`, preserving the headed re-login prompt contract for fix-2 wiring). `BrowserRefresher` is the only PSIDTS rotation engine (headless persistent-profile page load → poll `cookie-list` → `state-save` → full-jar write through the CAS `CookieStore`). Storage: snapshot/delta compare-and-swap saves + cross-process `storage_state.json.lock` (exclusive-create `wx`, CAS fail-open 10 s, full-jar fail-closed 90 s, 120 s stale-lock steal — pure Bun fs, no shell). Validation: tier-1 raises when PSIDTS is not RFC-6265-routable to `gemini.google.com`; tier-2 warns once on companion-less jars. Deleted: `src/services/{auth-service,cookie-monitor,cookie-storage-service,profile-auth-manager}.ts`; `GeminiClientService` no longer persists cookies (fed 2-cookie via `ProfileCookieLoader` from `ensureSession`).
+
+**Hard rule made structural:** no cookie-name filtering exists in any capture or persistence path — jars are filtered by domain only (`.google.com`, `.youtube.com`, `accounts.google.com`), pinned by `tests/auth/full-jar-contract.test.ts` (greppable: no `REQUIRED_COOKIES`-style sets under `src/auth/`).
+
+**Verified:** full suite 846 pass / 2 skip / 0 fail / 1759 expects / 59 files (baseline 862/2/0/1748/56; net = +60 new auth/pin tests, −76 deleted-service tests); `tsc --noEmit` clean; path-mediation lint clean; non-interactive `list` byte-equivalence intact. Live verification (fresh capture → `gemiterm list` → idle > 1 h → `gemiterm list`) is the user-assisted gate tracked in the change's task 7.4.
+

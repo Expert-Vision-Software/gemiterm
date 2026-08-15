@@ -33,16 +33,16 @@ Baseline: `bun test` -> 862 pass / 2 skip / 0 fail / 1748 expects / 56 files. Ru
 
 ## 6. Cutover wiring + legacy deletion
 
-- [ ] 6.1 Rewire `src/cli/index.ts` + `src/cli/command-registry.ts`: replace `ProfileAuthManager` on the context with `CookieSession`; update `getGeminiClient` construction to arm via `ensureSession`; keep `GeminiClientService`'s 2-cookie construction untouched
-- [ ] 6.2 Rewire `src/services/profile-lifecycle.ts` login/create actions to `captureLogin`; preserve all existing menu flows, prompts, and output text (auth command requirements in the `auth` spec must stay green)
-- [ ] 6.3 Replace `findProfileForConversation`/active-profiles consumers with facade equivalents (classifier-backed `activeProfiles`, unchanged conversation-routing semantics)
-- [ ] 6.4 Delete `src/services/{auth-service,cookie-monitor,cookie-storage-service,profile-auth-manager}.ts`; delete their test files; remove the duplicated `COOKIE_EXPIRY_THRESHOLD_MS` copies from `gemini-client-wrapper.ts` and `infrastructure/storage.ts` where now dead
-- [ ] 6.5 Update AGENTS.md sensitive-area section: document `src/auth/` as the auth surface, the playwright-cli headless/state-save methods, and the deleted-files list
+- [x] 6.1 Rewire `src/cli/index.ts` + `src/cli/command-registry.ts`: replace `ProfileAuthManager` on the context with `CookieSession`; update `getGeminiClient` construction to arm via `ensureSession`; keep `GeminiClientService`'s 2-cookie construction untouched
+- [x] 6.2 Rewire `src/services/profile-lifecycle.ts` login/create actions to `captureLogin`; preserve all existing menu flows, prompts, and output text (auth command requirements in the `auth` spec must stay green)
+- [x] 6.3 Replace `findProfileForConversation`/active-profiles consumers with facade equivalents (classifier-backed `activeProfiles`, unchanged conversation-routing semantics)
+- [x] 6.4 Delete `src/services/{auth-service,cookie-monitor,cookie-storage-service,profile-auth-manager}.ts`; delete their test files; remove the duplicated `COOKIE_EXPIRY_THRESHOLD_MS` copies from `gemini-client-wrapper.ts` and `infrastructure/storage.ts` where now dead
+- [x] 6.5 Update AGENTS.md sensitive-area section: document `src/auth/` as the auth surface, the playwright-cli headless/state-save methods, and the deleted-files list
 
 ## 7. Regression pins + verification
 
-- [ ] 7.1 Port the full-jar contract pins: no cookie-name filtering anywhere under `src/auth/` (greppable rule: no `REQUIRED_COOKIES`/`COOKIE_NAMES_OF_INTEREST`-style sets); capture payload preserves companions
-- [ ] 7.2 Full suite green with net test count recorded here (baseline 862/2/0/1748 - expect net-positive from new pins, net-negative from deleted-service tests); `bun run typecheck` clean; `bun run lint:mediation` clean
-- [ ] 7.3 `tests/integration/commands/list.test.ts` byte-equivalence green (non-interactive `list` output unchanged)
+- [x] 7.1 Port the full-jar contract pins: no cookie-name filtering anywhere under `src/auth/` (greppable rule: no `REQUIRED_COOKIES`/`COOKIE_NAMES_OF_INTEREST`-style sets); capture payload preserves companions
+- [x] 7.2 Full suite green with net test count recorded here (baseline 862/2/0/1748 - expect net-positive from new pins, net-negative from deleted-service tests); `bun run typecheck` clean; `bun run lint:mediation` clean. **Recorded: 849 pass / 2 skip / 0 fail / 1776 expects / 60 files** (net: +63 new auth + pin tests incl. 3 full-jar-contract pins; −76 deleted-service/persistence tests: 4 service files, persistRefreshedCookies describe, storage freshness/API tests)
+- [x] 7.3 `tests/integration/commands/list.test.ts` byte-equivalence green (non-interactive `list` output unchanged)
 - [ ] 7.4 Live verification (user-assisted): fresh `gemiterm auth` capture yields a full-domain-filtered jar (~40 cookies); `gemiterm list` works; idle > 1 h then `gemiterm list` still returns chats (the phantom-bug kill test - historically fails within ~1 h 15 m); request a freshly authenticated profile from the user at this step
-- [ ] 7.5 Append the implementation entry to `docs/phantom-bug-synthesis.md` (write-once ledger convention)
+- [x] 7.5 Append the implementation entry to `docs/phantom-bug-synthesis.md` (write-once ledger convention)

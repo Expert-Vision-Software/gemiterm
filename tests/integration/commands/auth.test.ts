@@ -3,9 +3,7 @@ import { AuthCommand } from "../../../src/cli/commands/auth-command.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import { ProfileLifecycle } from "../../../src/services/profile-lifecycle.ts";
 import { CookieStorage, ProfileManager } from "../../../src/infrastructure/storage.ts";
-import type { AuthService } from "../../../src/services/auth-service.ts";
-import type { PlaywrightCliDriver } from "../../../src/services/playwright-cli-driver.ts";
-import type { CookieMonitor } from "../../../src/services/cookie-monitor.ts";
+import type { CookieSession } from "../../../src/auth/cookie-session.ts";
 import { Logger } from "../../../src/infrastructure/logger.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
@@ -17,7 +15,7 @@ describe("auth command integration", () => {
   let context: CliCommandContext;
   let logSpy: ReturnType<typeof spyOn>;
   let originalEnv: Record<string, string | undefined>;
-  let authService: AuthService;
+  let cookieSession: CookieSession;
 
   beforeEach(async () => {
     command = new AuthCommand();
@@ -29,17 +27,13 @@ describe("auth command integration", () => {
 
     const cookieStorage = new CookieStorage();
     const profileManager = new ProfileManager(cookieStorage);
-    authService = {
-      authenticate: mock(async () => ({ cookies: [], expiresAt: null })),
-      renew: mock(async () => ({ cookies: [], expiresAt: null })),
-    } as unknown as AuthService;
+    cookieSession = {
+      captureLogin: mock(async () => ({ cookies: [], expiresAt: null })),
+    } as unknown as CookieSession;
 
     const lifecycle = new ProfileLifecycle({
-      cookieStorage,
       profileManager,
-      driver: {} as PlaywrightCliDriver,
-      cookieMonitor: {} as CookieMonitor,
-      authService,
+      cookieSession,
       logger: new Logger("test"),
     });
 
@@ -73,7 +67,7 @@ describe("auth command integration", () => {
 
       await command.execute([], context);
 
-      expect(authService.authenticate).toHaveBeenCalledWith("default");
+      expect(cookieSession.captureLogin).toHaveBeenCalledWith("default");
     });
 
     test("authenticates with the only profile when one exists", async () => {
@@ -81,12 +75,12 @@ describe("auth command integration", () => {
 
       await command.execute([], context);
 
-      expect(authService.authenticate).toHaveBeenCalledWith("solo");
+      expect(cookieSession.captureLogin).toHaveBeenCalledWith("solo");
     });
 
     test("propagates authentication errors", async () => {
       spyOn(configModule, "listProfiles").mockReturnValue(["default"]);
-      (authService.authenticate as ReturnType<typeof mock>).mockRejectedValueOnce(
+      (cookieSession.captureLogin as ReturnType<typeof mock>).mockRejectedValueOnce(
         new Error("Browser launch failed"),
       );
 
@@ -136,7 +130,7 @@ describe("auth command integration", () => {
 
       await command.execute([], context);
 
-      expect(authService.authenticate).toHaveBeenCalledWith("p3");
+      expect(cookieSession.captureLogin).toHaveBeenCalledWith("p3");
     });
 
     test("exiting menu continues with default profile", async () => {
@@ -159,7 +153,7 @@ describe("auth command integration", () => {
 
       await command.execute([], context);
 
-      expect(authService.authenticate).toHaveBeenCalledWith("brand-new");
+      expect(cookieSession.captureLogin).toHaveBeenCalledWith("brand-new");
     });
   });
 });

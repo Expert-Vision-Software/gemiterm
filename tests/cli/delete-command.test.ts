@@ -23,11 +23,11 @@ describe("DeleteCommand", () => {
     client = makeClient();
     context = {
       verbose: false,
-      profileAuthManager: {
-        getActiveProfiles: mock(() => ["default"]),
+      cookieSession: {
+        activeProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => null),
-        ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
-      } as unknown as CliCommandContext["profileAuthManager"],
+        ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+      } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
     };
@@ -108,7 +108,7 @@ describe("DeleteCommand", () => {
   });
 
   test("--profile forwards the profile name into DELETE_CONVERSATION payload", async () => {
-    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["evs-diegohb"]);
+    (context.cookieSession as any).activeProfiles.mockReturnValue(["evs-diegohb"]);
 
     await command.execute(["abc123", "--force", "--profile", "evs-diegohb"], context);
 
@@ -117,12 +117,12 @@ describe("DeleteCommand", () => {
   });
 
   test("auto-discovers owning profile and forwards it into DELETE_CONVERSATION payload", async () => {
-    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
-    (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
+    (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+    (context.cookieSession as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
 
     await command.execute(["abc123", "--force"], context);
 
-    expect((context.profileAuthManager as any).findProfileForConversation).toHaveBeenCalledWith("abc123");
+    expect((context.cookieSession as any).findProfileForConversation).toHaveBeenCalledWith("abc123");
     expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
     expect(client.deleteChat).toHaveBeenCalledWith("abc123");
   });

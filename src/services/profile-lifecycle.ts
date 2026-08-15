@@ -1,10 +1,8 @@
 import chalk from "chalk";
 import type { ProfileStatus } from "../core/types.ts";
 import type { Logger } from "../infrastructure/logger.ts";
-import type { CookieStorage, ProfileManager } from "../infrastructure/storage.ts";
-import type { PlaywrightCliDriver } from "./playwright-cli-driver.ts";
-import type { CookieMonitor } from "./cookie-monitor.ts";
-import type { AuthService } from "./auth-service.ts";
+import type { ProfileManager } from "../infrastructure/storage.ts";
+import type { CookieSession } from "../auth/cookie-session.ts";
 import {
   listProfiles,
   getDefaultProfileName,
@@ -69,11 +67,8 @@ export interface ProfileStatusResult {
 export type ProfileLifecycleResult = void | ProfileStatusResult;
 
 export interface ProfileLifecycleDeps {
-  cookieStorage: CookieStorage;
   profileManager: ProfileManager;
-  driver: PlaywrightCliDriver;
-  cookieMonitor: CookieMonitor;
-  authService: AuthService;
+  cookieSession: CookieSession;
   logger: Logger;
 }
 
@@ -86,12 +81,12 @@ const PROFILE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 
 export class ProfileLifecycle {
   private readonly profileManager: ProfileManager;
-  private readonly authService: AuthService;
+  private readonly cookieSession: CookieSession;
   private readonly logger: Logger;
 
   constructor(deps: ProfileLifecycleDeps) {
     this.profileManager = deps.profileManager;
-    this.authService = deps.authService;
+    this.cookieSession = deps.cookieSession;
     this.logger = deps.logger;
   }
 
@@ -237,7 +232,7 @@ export class ProfileLifecycle {
         throw new GemitermError(`Profile '${params.renewProfile}' does not exist.`);
       }
       this.logger.debug("Renewing profile:", params.renewProfile);
-      await this.authService.renew(params.renewProfile);
+      await this.cookieSession.captureLogin(params.renewProfile, { mode: "renew" });
       return;
     }
 
@@ -277,7 +272,7 @@ export class ProfileLifecycle {
       await this.authenticateWithProfile(selected.profileName, false);
     } else if (selected.type === "renew") {
       this.logger.debug("Renewing profile", selected.profileName);
-      await this.authService.renew(selected.profileName);
+      await this.cookieSession.captureLogin(selected.profileName, { mode: "renew" });
     }
   }
 
@@ -385,7 +380,7 @@ export class ProfileLifecycle {
       console.log(chalk.dim(`Created profile: ${profileName}`));
     }
 
-    await this.authService.authenticate(profileName);
+    await this.cookieSession.captureLogin(profileName);
   }
 
   private async collectStatuses(profileNames: string[]): Promise<ProfileStatus[]> {

@@ -28,11 +28,11 @@ describe("ContinueCommand", () => {
     client = makeClient();
     context = {
       verbose: false,
-      profileAuthManager: {
-        getActiveProfiles: mock(() => ["default"]),
+      cookieSession: {
+        activeProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => null),
-        ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
-      } as unknown as CliCommandContext["profileAuthManager"],
+        ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+      } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
     };
@@ -106,7 +106,7 @@ describe("ContinueCommand", () => {
   });
 
   test("--profile forwards the resolved profile into SEND_MESSAGE payload", async () => {
-    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["default"]);
+    (context.cookieSession as any).activeProfiles.mockReturnValue(["default"]);
 
     client.sendMessage = mock(async () => "ok");
 
@@ -117,7 +117,7 @@ describe("ContinueCommand", () => {
   });
 
   test("interactive mode forwards resolved profileName into FETCH_CHAT (printLastMessage)", async () => {
-    (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["evs-diegohb"]);
+    (context.cookieSession as any).activeProfiles.mockReturnValue(["evs-diegohb"]);
 
     client.fetchChat = mock(async () => [
       { role: "user" as const, content: "old q" },

@@ -2,9 +2,7 @@ import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:
 import { StatusCommand } from "../../../src/cli/commands/status-command.ts";
 import { ProfileLifecycle } from "../../../src/services/profile-lifecycle.ts";
 import { CookieStorage, ProfileManager } from "../../../src/infrastructure/storage.ts";
-import type { AuthService } from "../../../src/services/auth-service.ts";
-import type { PlaywrightCliDriver } from "../../../src/services/playwright-cli-driver.ts";
-import type { CookieMonitor } from "../../../src/services/cookie-monitor.ts";
+import type { CookieSession } from "../../../src/auth/cookie-session.ts";
 import { Logger } from "../../../src/infrastructure/logger.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
@@ -36,11 +34,8 @@ describe("status command integration", () => {
     const cookieStorage = new CookieStorage();
     const profileManager = new ProfileManager(cookieStorage);
     const lifecycle = new ProfileLifecycle({
-      cookieStorage,
       profileManager,
-      driver: {} as PlaywrightCliDriver,
-      cookieMonitor: {} as CookieMonitor,
-      authService: {} as AuthService,
+      cookieSession: {} as CookieSession,
       logger: new Logger("test"),
     });
 

@@ -6,7 +6,7 @@ export async function resolveProfile(
   conversationId: string,
   explicitProfile?: string,
 ): Promise<string | null> {
-  const activeProfiles = await context.profileAuthManager.getActiveProfiles();
+  const activeProfiles = await context.cookieSession.activeProfiles();
 
   if (explicitProfile) {
     if (!activeProfiles.includes(explicitProfile)) {
@@ -21,7 +21,7 @@ export async function resolveProfile(
     return null;
   }
 
-  const profileName = await context.profileAuthManager.findProfileForConversation(conversationId);
+  const profileName = await context.cookieSession.findProfileForConversation(conversationId);
   if (profileName === null) {
     throw new AuthenticationError(
       `Could not find a profile that owns conversation '${conversationId}'. Run 'gemiterm list --all-profiles' to see which profile it belongs to, or pass --profile <name> to specify it explicitly.`,

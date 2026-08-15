@@ -26,7 +26,7 @@ describe("list command integration", () => {
     client = makeClient();
     context = {
       verbose: false,
-      profileAuthManager: {} as unknown as CliCommandContext["profileAuthManager"],
+      cookieSession: {} as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => ["default"],
     };
