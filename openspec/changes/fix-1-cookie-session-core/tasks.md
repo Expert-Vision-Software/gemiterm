@@ -27,9 +27,9 @@ Baseline: `bun test` -> 862 pass / 2 skip / 0 fail / 1748 expects / 56 files. Ru
 
 ## 5. CookieSession facade + recovery
 
-- [ ] 5.1 Create `src/auth/cookie-session.ts`: `ensureSession(profile)` (load -> tier validation -> arm; if jar mtime > 30 min, spawn detached `refresh-runner`; return armed cookies), `captureLogin(profile)` (headed open -> gate poll on PSID+PSIDTS presence -> full-jar `state-save` payload -> persist via full-jar writer -> expiry computed from PSIDTS), `probe(profile)` (delegate to classifier), `refresh(profile)` (synchronous refresher); deps-object `CookieSessionDeps` with all collaborators injectable
-- [ ] 5.2 Create `src/auth/recovery.ts`: refresh-and-retry-once rung (synchronous refresh -> CAS persist -> re-arm once -> `AuthenticationError` on failure), typed and exported for fix-2 wiring
-- [ ] 5.3 RED-first tests: facade arms from disk with zero network calls in the fresh path (gate: no refresher/classifier invocation when jar is fresh); stale-mtime path spawns the detached runner exactly once; captureLogin gate-is-not-payload (callback payload contains cookies beyond the gate set); recovery retries exactly once then throws
+- [x] 5.1 Create `src/auth/cookie-session.ts`: `ensureSession(profile)` (load -> tier validation -> arm; if jar mtime > 30 min, spawn detached `refresh-runner`; return armed cookies), `captureLogin(profile)` (headed open -> gate poll on PSID+PSIDTS presence -> full-jar `state-save` payload -> persist via full-jar writer -> expiry computed from PSIDTS), `probe(profile)` (delegate to classifier), `refresh(profile)` (synchronous refresher); deps-object `CookieSessionDeps` with all collaborators injectable
+- [x] 5.2 Create `src/auth/recovery.ts`: refresh-and-retry-once rung (synchronous refresh -> CAS persist -> re-arm once -> `AuthenticationError` on failure), typed and exported for fix-2 wiring
+- [x] 5.3 RED-first tests: facade arms from disk with zero network calls in the fresh path (gate: no refresher/classifier invocation when jar is fresh); stale-mtime path spawns the detached runner exactly once; captureLogin gate-is-not-payload (callback payload contains cookies beyond the gate set); recovery retries exactly once then throws
 
 ## 6. Cutover wiring + legacy deletion
 
