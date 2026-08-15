@@ -11,9 +11,6 @@ import {
   CancellationError,
 } from "../../../src/cli/utils/prompts.ts";
 import { GemitermError } from "../../../src/core/errors.ts";
-import { render } from "@inquirer/testing";
-import { input } from "@inquirer/prompts";
-import { ExitPromptError } from "@inquirer/core";
 
 describe("TTY gate", () => {
   let stdinDescriptor: PropertyDescriptor | undefined;
@@ -134,66 +131,77 @@ describe("abort signal", () => {
   });
 });
 
-describe("text delegates to @inquirer/input", () => {
-  afterEach(() => {
-    mock.restore();
-  });
+describe("text raw terminal input", () => {
+  const dataListeners: Array<(buf: Buffer) => void> = [];
+  let isTtyDescriptor: PropertyDescriptor | undefined;
+  let addedSetRawMode = false;
 
-  test("returns the typed value", async () => {
-    const { answer, events } = await render(input, { message: "Your name" });
-    events.type("Alice");
-    events.keypress("enter");
-    await expect(answer).resolves.toBe("Alice");
-  });
-
-  test("uses the default on empty submit", async () => {
-    const { answer, events } = await render(input, { message: "Path", default: "default.md" });
-    events.keypress("enter");
-    await expect(answer).resolves.toBe("default.md");
-  });
-
-  test("forwards config and maps ExitPromptError to CancellationError", async () => {
-    const inputMock = mock(async () => {
-      throw new ExitPromptError("cancelled");
-    });
-    mock.module("@inquirer/prompts", () => ({
-      input: inputMock,
-      confirm: () => {
-        throw new Error("unused");
-      },
-      select: () => {
-        throw new Error("unused");
-      },
-    }));
-
-    const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+  beforeEach(() => {
+    dataListeners.length = 0;
+    isTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
     Object.defineProperty(process.stdin, "isTTY", {
       value: true,
       configurable: true,
       writable: true,
     });
-    try {
-      const validate = (v: string) => v.length > 0 || "required";
-      await expect(text({ message: "hi", default: "d", validate })).rejects.toBeInstanceOf(
-        CancellationError,
-      );
-      expect(inputMock).toHaveBeenCalledTimes(1);
-      const config = inputMock.mock.calls[0][0] as {
-        message: string;
-        default?: string;
-        validate?: unknown;
-        theme?: unknown;
-      };
-      expect(config.message).toBe("hi");
-      expect(config.default).toBe("d");
-      expect(config.validate).toBe(validate);
-      expect(config.theme).toBeDefined();
-    } finally {
-      if (stdinDescriptor) {
-        Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
-      } else {
-        Reflect.deleteProperty(process.stdin, "isTTY");
-      }
+    if (typeof process.stdin.setRawMode !== "function") {
+      Object.defineProperty(process.stdin, "setRawMode", {
+        value: () => process.stdin,
+        configurable: true,
+        writable: true,
+      });
+      addedSetRawMode = true;
     }
+    spyOn(process.stdin, "on").mockImplementation((event: string, cb: unknown) => {
+      if (event === "data") {
+        dataListeners.push(cb as (buf: Buffer) => void);
+      }
+      return process.stdin as never;
+    });
+    spyOn(process.stdin, "removeListener").mockImplementation(() => process.stdin as never);
+    spyOn(process.stdin, "resume").mockImplementation(() => process.stdin as never);
+    spyOn(process.stdout, "write").mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    mock.restore();
+    if (addedSetRawMode) {
+      Reflect.deleteProperty(process.stdin, "setRawMode");
+      addedSetRawMode = false;
+    }
+    if (isTtyDescriptor) {
+      Object.defineProperty(process.stdin, "isTTY", isTtyDescriptor);
+    } else {
+      Reflect.deleteProperty(process.stdin, "isTTY");
+    }
+  });
+
+  test("returns typed text and deletes on backspace", async () => {
+    const promise = text({ message: "You" });
+    const type = dataListeners[0]!;
+    type(Buffer.from("HelloX"));
+    type(Buffer.from([0x7f]));
+    type(Buffer.from("\r"));
+    await expect(promise).resolves.toBe("Hello");
+  });
+
+  test("uses the default on empty submit", async () => {
+    const promise = text({ message: "Path", default: "default.md" });
+    dataListeners[0]!(Buffer.from("\r"));
+    await expect(promise).resolves.toBe("default.md");
+  });
+
+  test("rejects with CancellationError on Ctrl-C", async () => {
+    const promise = text({ message: "You" });
+    dataListeners[0]!(Buffer.from([0x03]));
+    await expect(promise).rejects.toBeInstanceOf(CancellationError);
+  });
+
+  test("re-prompts on invalid submit and resolves once valid", async () => {
+    const validate = (v: string) => (v.length > 0 ? true : "required");
+    const promise = text({ message: "Name", validate });
+    dataListeners[0]!(Buffer.from("\r"));
+    dataListeners[0]!(Buffer.from("ok\r"));
+    await expect(promise).resolves.toBe("ok");
   });
 });
