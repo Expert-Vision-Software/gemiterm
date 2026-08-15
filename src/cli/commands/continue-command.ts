@@ -3,9 +3,10 @@ import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
 import { fetchChatForRequest } from "../utils/gemini-queries.ts";
-import { runInteractiveLoop, type MessageHandlerResult } from "../utils/interactive-prompt.ts";
 import { loadEffectivePrompt } from "../utils/prompt-file.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
+import { invokeCommand } from "../utils/command-invoker.ts";
+import { startChatSession } from "../utils/chat-session.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 
 interface ContinueCommandOptions {
@@ -82,7 +83,8 @@ export class ContinueCommand implements CliCommand {
     }
 
     if (!conversationId) {
-      await this.invokeListCommand(context);
+      console.log(chalk.dim("No conversation ID specified. Listing conversations:\n"));
+      await invokeCommand("list", [], context);
       return;
     }
 
@@ -90,45 +92,16 @@ export class ContinueCommand implements CliCommand {
 
     message = await loadEffectivePrompt(message, options.promptFile);
 
-    if (message) {
-      await this.sendNonInteractive(context.getGeminiClient, conversationId, message, logger, profileName);
-    } else {
-      await this.startInteractive(context.getGeminiClient, conversationId, logger, profileName);
-    }
-  }
-
-  private async sendNonInteractive(
-    getGeminiClient: () => GeminiClientService,
-    conversationId: string,
-    message: string,
-    logger: Logger,
-    profileName: string | null,
-  ): Promise<void> {
-    logger.debug(`Sending message to ${conversationId}`);
-    const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
-    const response = await client.sendMessage(conversationId, message);
-
-    console.log(chalk.blue.bold("Model:"));
-    console.log(response);
-  }
-
-  private async startInteractive(
-    getGeminiClient: () => GeminiClientService,
-    conversationId: string,
-    logger: Logger,
-    profileName: string | null,
-  ): Promise<void> {
-    await this.printLastMessage(getGeminiClient, conversationId, profileName);
-
-    const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
-      logger.debug(`Sending message to ${conversationId}`);
-      const client = profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
-      const response = await client.sendMessage(conversationId, message);
-
-      return { response };
-    };
-
-    await runInteractiveLoop(messageHandler, { profileName });
+    await startChatSession({
+      effectiveMessage: message,
+      conversationId,
+      profileName,
+      getGeminiClient: context.getGeminiClient,
+      logger,
+      beforeInteractiveLoop: async () => {
+        await this.printLastMessage(context.getGeminiClient, conversationId, profileName);
+      },
+    });
   }
 
   private async printLastMessage(
@@ -143,20 +116,6 @@ export class ContinueCommand implements CliCommand {
       console.log(chalk.blue.bold("Last response:"));
       console.log(lastModelMessage.content);
       console.log("");
-    }
-  }
-
-  private async invokeListCommand(context: CliCommandContext): Promise<void> {
-    const { CommandRegistry } = await import("../command-registry.ts");
-    const registry = new CommandRegistry();
-    registry.registerAllCommands();
-
-    const listHandler = registry.getHandler("list");
-    if (listHandler) {
-      console.log(chalk.dim("No conversation ID specified. Listing conversations:\n"));
-      await listHandler.execute([], context);
-    } else {
-      throw new Error("Could not invoke list command.");
     }
   }
 

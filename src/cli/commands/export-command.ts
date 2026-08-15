@@ -2,14 +2,10 @@ import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { fetchChatForRequest } from "../utils/gemini-queries.ts";
-import {
-  formatChatAsMarkdown,
-  formatChatAsJson,
-} from "../../infrastructure/formatters.ts";
 import { validateConversationId } from "../../infrastructure/validators.ts";
-import { writeTextFile } from "../../infrastructure/io.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
+import { render } from "../utils/chat-output.ts";
 
 interface ExportCommandOptions {
   help: boolean;
@@ -67,14 +63,18 @@ export class ExportCommand implements CliCommand {
       logger.debug(`Fetching chat for export: ${conversationId}`);
       const messages = await fetchChatForRequest(context.getGeminiClient, conversationId, profileName ?? undefined);
 
-      const outputPath = options.out || this.defaultFilename(conversationId, options.format);
+      const results = await render(
+        {
+          kind: "conversation",
+          conversationId,
+          messages,
+          includeMetadata: options.includeMetadata,
+        },
+        { format: options.format, out: options.out || undefined },
+        context.exportStrategies,
+      );
 
-      const content =
-        options.format === "json"
-          ? formatChatAsJson(messages, conversationId)
-          : formatChatAsMarkdown(messages, conversationId, conversationId, options.includeMetadata);
-
-      writeTextFile(outputPath, content);
+      const outputPath = results![0].filePath;
       console.log(chalk.green(`Exported conversation '${chalk.cyan(conversationId)}' to: ${outputPath}`));
       logger.info(`Exported conversation ${conversationId} to ${outputPath}`);
     } catch (error) {
@@ -90,12 +90,6 @@ export class ExportCommand implements CliCommand {
       return arg;
     }
     return null;
-  }
-
-  private defaultFilename(conversationId: string, format: "markdown" | "json"): string {
-    const date = new Date().toISOString().slice(0, 10);
-    const ext = format === "json" ? "json" : "md";
-    return `gemini-chat-${conversationId}-${date}.${ext}`;
   }
 
   private parseArgs(args: string[]): ExportCommandOptions {

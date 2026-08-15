@@ -28,7 +28,7 @@ describe("list command integration", () => {
       verbose: false,
       profileAuthManager: {} as unknown as CliCommandContext["profileAuthManager"],
       getGeminiClient: () => client,
-      listProfiles: () => [],
+      listProfiles: () => ["default"],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     originalEnv = {
@@ -268,30 +268,23 @@ describe("list command integration", () => {
       expect(output).not.toContain("PROFILE");
     });
 
-    test("JSON output includes profile field only when --all-profiles is set", async () => {
-      const mockChatsWithProfile = [
-        { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" },
-      ];
-      context.listProfiles = () => ["work"];
+    test("JSON output includes profile field when the default listing spans profiles", async () => {
+      const profileChats: Record<string, ChatInfo[]> = {
+        work: [{ id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now(), profile: "work" }],
+        personal: [{ id: "conv-2", title: "Chat 2", isPinned: false, timestamp: Date.now(), profile: "personal" }],
+      };
+      context.listProfiles = () => Object.keys(profileChats);
       client.forProfile = mock((name: string) => ({
-        listChats: mock(async () => (name === "work" ? mockChatsWithProfile : [])),
+        listChats: mock(async () => profileChats[name] ?? []),
       }));
 
-      await command.execute(["--all-profiles", "--format", "json"], context);
-      const outputWithFlag = logSpy.mock.calls.map((c) => c[0]).join("\n");
-      const parsedWithFlag = JSON.parse(outputWithFlag);
-      expect(parsedWithFlag.chats[0]).toHaveProperty("profile");
-      expect(parsedWithFlag.chats[0].profile).toBe("work");
-
-      const mockChatsWithoutProfile = [
-        { id: "conv-1", title: "Chat 1", isPinned: false, timestamp: Date.now() },
-      ];
-      logSpy.mockClear();
-      client.listChats = mock(async () => mockChatsWithoutProfile);
       await command.execute(["--format", "json"], context);
-      const outputWithoutFlag = logSpy.mock.calls.map((c) => c[0]).join("\n");
-      const parsedWithoutFlag = JSON.parse(outputWithoutFlag);
-      expect(parsedWithoutFlag.chats[0]).not.toHaveProperty("profile");
+
+      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      const parsed = JSON.parse(output);
+      expect(parsed.chats).toHaveLength(2);
+      expect(parsed.chats[0]).toHaveProperty("profile");
+      expect(parsed.chats[0].profile).toBe("work");
     });
   });
 
@@ -316,10 +309,10 @@ describe("list command integration", () => {
       expect(client.forProfile).toHaveBeenCalledWith("personal");
     });
 
-    test("without --profile, forProfile is not called", async () => {
+    test("without --profile, the default fans out to all configured profiles", async () => {
       await command.execute([], context);
 
-      expect(client.forProfile).not.toHaveBeenCalled();
+      expect(client.forProfile).toHaveBeenCalledWith("default");
     });
 
     test("--profile renders Profile column in text output", async () => {
@@ -350,11 +343,67 @@ describe("list command integration", () => {
     });
   });
 
+  describe("multi-profile default", () => {
+    test("default aggregates chats from all configured profiles with a PROFILE column", async () => {
+      const profileChats: Record<string, ChatInfo[]> = {
+        work: [{ id: "conv-1", title: "Chat 1", isPinned: false, timestamp: 1717100000000, profile: "work" }],
+        personal: [{ id: "conv-2", title: "Chat 2", isPinned: false, timestamp: 1717000000000, profile: "personal" }],
+      };
+      context.listProfiles = () => Object.keys(profileChats);
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => profileChats[name] ?? []),
+      }));
+
+      await command.execute([], context);
+
+      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(output).toContain("Chat 1");
+      expect(output).toContain("Chat 2");
+      expect(output).toContain("PROFILE");
+      expect(output).toContain("work");
+      expect(output).toContain("personal");
+    });
+
+    test("skips an inaccessible profile with a warning and continues", async () => {
+      const stderrSpy = spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        const profileClients: Record<string, { listChats: ReturnType<typeof mock> }> = {
+          work: { listChats: mock(async () => [{ id: "w1", title: "Work chat", isPinned: false, timestamp: Date.now(), profile: "work" }]) },
+          broken: { listChats: mock(async () => { throw new Error("Network error"); }) },
+        };
+        client.forProfile = mock((name: string) => profileClients[name]);
+        context.listProfiles = () => ["work", "broken"];
+
+        await command.execute([], context);
+
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Work chat");
+        expect(stderrSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("broken");
+      } finally {
+        stderrSpy.mockRestore();
+      }
+    });
+
+    test("resolves to the empty message when every profile listing fails", async () => {
+      client.forProfile = mock((_name: string) => ({
+        listChats: mock(async () => {
+          throw new Error("down");
+        }),
+      }));
+      context.listProfiles = () => ["a", "b"];
+
+      await command.execute([], context);
+
+      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(output).toContain("No conversations found");
+    });
+  });
+
   describe("error handling", () => {
-    test("propagates client errors", async () => {
+    test("propagates client errors when a single profile is explicitly targeted", async () => {
       client.listChats.mockRejectedValue(new Error("Network error"));
 
-      await expect(command.execute([], context)).rejects.toThrow("Network error");
+      await expect(command.execute(["--profile", "work"], context)).rejects.toThrow("Network error");
     });
   });
 });

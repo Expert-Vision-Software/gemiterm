@@ -4,31 +4,35 @@ The CLI command layer of the `gemiterm` application. It defines the 11 top-level
 ## Requirements
 ### Requirement: ListCommand
 
-The system MUST provide a `list` command implemented by `ListCommand` in `src/cli/commands/list-command.ts`. The command MUST be registered under the name `list` and MUST send a `ListChatsQuery` to the mediator with a payload of shape `{ limit?, offset?, search?, allProfiles }`. The command MUST support the flags `--limit/-n <N>` (no default; omitting `--limit` returns every conversation returned by the mediator), `--offset <N>` (default 0), `--all-profiles`, `--sort <recent|oldest|alpha>` (default `recent`), `--search/-s <query>`, `--after <date>`, `--before <date>`, `--format/-f <text|json>` (default `text`), and `--out/-o <path>`. When `--limit N` is supplied, the command MUST additionally slice the result set to `[offset, offset + N)`. When `--limit` is omitted, the command MUST NOT slice; the entire mediator result is rendered. When `--limit` is omitted and `--offset N` is supplied with `N > 0`, the command MUST slice the result set to `[N, ∞)`. The `--all-profiles` flag MUST be propagated into the mediator payload as `allProfiles: true`. The `list` command MUST NOT support a `--all` flag (omitting `--limit` is the canonical way to request every conversation). When `--out <path>` is supplied, the rendered output MUST be written to that file via `infrastructure/io.ts:writeTextFile` and the command MUST print `Output written to: <path>`; otherwise the output MUST be printed to stdout. The command MUST NOT recognize `--path` or `-p` as output flags.
+The system MUST provide a `list` command implemented by `ListCommand` in `src/cli/commands/list-command.ts`. The command MUST be registered under the name `list` and MUST obtain chats through the shared listing helper (`listChatsForRequest`) — see the *Multi-Profile Listing Resilience* requirement for the default scope and failure semantics. The command MUST support the flags `--limit/-n <N>` (no default; omitting `--limit` returns every conversation returned by the listing), `--offset <N>` (default 0), `--all-profiles` (accepted and preserved for script compatibility; with the all-profiles default it is redundant but MUST NOT error), `--profile/-p <name>` (scope the listing to exactly the named profile), `--sort <recent|oldest|alpha>` (default `recent`), `--search/-s <query>`, `--after <date>`, `--before <date>`, `--format/-f <text|json>` (default `text`), `--out/-o <path>`, and `--interactive/-i` (see the interactive requirements). When `--limit N` is supplied, the command MUST additionally slice the result set to `[offset, offset + N)`. When `--limit` is omitted the command MUST NOT slice; when `--offset N > 0` is supplied without `--limit` the command MUST slice to `[N, ∞)`. Sorting MUST be applied via the shared `sortChats` and date filtering via the shared `filterChatsByDate` (see the `chat-output` capability). Rendering MUST be delegated to `ChatOutput.render` — the command MUST NOT implement its own sort, date filter, output helpers, or stdout-vs-file dispatch. When `--out <path>` is supplied, the rendered output MUST be written to that file via `infrastructure/io.ts:writeTextFile` and the command MUST print `Output written to: <path>`; otherwise the output MUST be printed to stdout. The command MUST NOT recognize `--path` as an output flag and MUST NOT support a `--all` flag (omitting `--limit` is the canonical way to request every conversation).
 
-#### Scenario: List with no flags returns all conversations
-- **WHEN** the user runs `gemiterm list`
-- **THEN** the command sends a `ListChatsQuery` to the mediator with `limit: undefined`, `offset: 0`, no `search`, and `allProfiles: false`, and renders every chat returned by the mediator as a 4-column text table (ID / TITLE / DATE / PIN)
+#### Scenario: List with no flags aggregates all profiles
+- **WHEN** the user runs `gemiterm list` and profiles `work` and `personal` are configured
+- **THEN** the listing spans both profiles (chats from each are included), chats from inaccessible profiles are skipped with a warning, and the rendered table is sorted by the default `recent` order
+
+#### Scenario: List with --profile scopes to the named profile
+- **WHEN** the user runs `gemiterm list --profile work`
+- **THEN** only the `work` profile's chats are listed
 
 #### Scenario: List with --limit
 - **WHEN** the user runs `gemiterm list --limit 5`
-- **THEN** the mediator payload carries `limit: 5` and at most 5 chats are displayed
+- **THEN** at most 5 chats are displayed
 
 #### Scenario: List with --offset and no --limit skips the first N chats
 - **WHEN** the user runs `gemiterm list --offset 20`
-- **THEN** the mediator payload carries `limit: undefined` and `offset: 20`, and the first 20 chats are skipped before display
+- **THEN** the first 20 chats are skipped before display
 
-#### Scenario: List with --all-profiles propagates to mediator
+#### Scenario: List with --all-profiles remains accepted
 - **WHEN** the user runs `gemiterm list --all-profiles`
-- **THEN** the mediator payload carries `allProfiles: true`
+- **THEN** the command behaves identically to `gemiterm list` (the flag is redundant with the all-profiles default and MUST NOT error)
 
 #### Scenario: List with --sort alpha sorts ascending by title
 - **WHEN** the user runs `gemiterm list --sort alpha`
-- **THEN** the displayed chats are sorted by `title` ascending using `localeCompare`
+- **THEN** the displayed chats are sorted by `title` ascending using `localeCompare` (via the shared `sortChats`)
 
 #### Scenario: List with --search forwards the search term
 - **WHEN** the user runs `gemiterm list --search "Bun"`
-- **THEN** the mediator payload carries `search: "Bun"`
+- **THEN** the listing carries `search: "Bun"` for every profile in scope
 
 #### Scenario: List with --format json
 - **WHEN** the user runs `gemiterm list --format json`
@@ -40,31 +44,39 @@ The system MUST provide a `list` command implemented by `ListCommand` in `src/cl
 
 #### Scenario: List with --after and --before filters chats by date
 - **WHEN** the user runs `gemiterm list --after 2024-01-01 --before 2024-12-31`
-- **THEN** chats with `timestamp` outside the inclusive range are removed before display
+- **THEN** chats with `timestamp` outside the inclusive range are removed before display (via the shared `filterChatsByDate`)
 
 #### Scenario: List with no conversations prints the empty message
-- **WHEN** the mediator returns an empty `chats` array
+- **WHEN** the listing resolves to an empty `chats` array
 - **THEN** the output contains the message `No conversations found.`
 
 #### Scenario: List --help shows usage
 - **WHEN** the user runs `gemiterm list --help`
 - **THEN** the output contains `Usage: gemiterm list` and documents every flag above, and does NOT document a `--all` flag
 
-#### Scenario: List rejects the removed --all flag
-- **WHEN** the user runs `gemiterm list --all`
-- **THEN** the command leaves the `--all` token in `subcommandArgs` and either ignores it (if argv parsing is tolerant) or rejects it; in either case the output is the same as `gemiterm list` with no flags (every conversation rendered)
+#### Scenario: List rendering goes through ChatOutput
+- **WHEN** `ListCommand.execute` runs
+- **THEN** output is produced via `ChatOutput.render`, and the command file defines no `applySort`, `applyDateFilter`, `outputJson`, `outputText`, or `writeOutput`
 
 ### Requirement: ListCommand Text Output Table
 
-The `list` command's default text output MUST be a 4-column table with headers `ID`, `TITLE`, `DATE`, `PIN` (in that order). The table MUST be produced by `formatChatList` in `src/infrastructure/formatters.ts`. When `--all-profiles` is set, the command MUST call `formatChatList(chats, { includeProfileColumn: true })` and the rendered text output MUST include a `PROFILE` column as the 5th column.
+The `list` command's default text output MUST be a 4-column table with headers `ID`, `TITLE`, `DATE`, `PIN` (in that order), produced by `formatChatList` via `ChatOutput.render`. The render MUST call `formatChatList(chats, { includeProfileColumn: true })` and the text output MUST include a `PROFILE` column as the 5th column when: more than one profile is configured, OR `--all-profiles` is explicitly supplied, OR `--profile <name>` scopes the listing. When exactly one profile is configured and neither `--all-profiles` nor `--profile` is supplied, the table MUST remain the 4-column form (byte-equivalent to the single-profile baseline).
 
-#### Scenario: Default text output has 4 columns
-- **WHEN** the user runs `gemiterm list` (no flags)
-- **THEN** the rendered table contains header columns `ID`, `TITLE`, `DATE`, and `PIN` only
+#### Scenario: Single-profile default output has 4 columns
+- **WHEN** the user runs `gemiterm list` (no flags) and exactly one profile is configured
+- **THEN** the rendered table contains header columns `ID`, `TITLE`, `DATE`, and `PIN` only, byte-equivalent to the pre-change single-profile output
+
+#### Scenario: Multi-profile default adds a Profile column
+- **WHEN** the user runs `gemiterm list` (no flags) and more than one profile is configured
+- **THEN** the rendered text output table contains 5 columns `ID`, `TITLE`, `DATE`, `PIN`, `PROFILE` and each row shows the owning profile name
 
 #### Scenario: --all-profiles adds a Profile column to text output
 - **WHEN** the user runs `gemiterm list --all-profiles`
-- **THEN** the rendered text output table contains 5 columns `ID`, `TITLE`, `DATE`, `PIN`, `PROFILE` and each row shows the owning profile name
+- **THEN** the rendered text output table contains the `PROFILE` column regardless of how many profiles are configured
+
+#### Scenario: --profile renders the Profile column
+- **WHEN** the user runs `gemiterm list --profile work`
+- **THEN** the rendered table contains the 5 columns `ID`, `TITLE`, `DATE`, `PIN`, `PROFILE`, byte-equivalent to the pre-change `--profile`-scoped output
 
 ### Requirement: ListCommand --interactive flag
 
@@ -104,23 +116,27 @@ The `ListCommand` MUST invoke the chat-list browser only when `process.stdin.isT
 
 ### Requirement: ListCommand non-interactive byte-equivalence contract
 
-The `ListCommand`'s non-interactive output paths MUST remain byte-equivalent to the pre-change baseline. Specifically:
-- `gemiterm list` (no flags) MUST emit the same 4-column text table (`ID` / `TITLE` / `DATE` / `PIN`).
-- `gemiterm list --format json` MUST emit the same `{ chats: ChatInfo[] }` JSON document.
-- `gemiterm list --search <q>` MUST forward the search term to the mediator.
-- `gemiterm list --sort <mode>` MUST apply the sort.
-- `gemiterm list --limit <N>` / `--offset <N>` MUST apply the limit/offset (the deprecated `--all` flag is no longer recognised — omit `--limit` to get every conversation).
-- `gemiterm list --all-profiles` MUST add the `PROFILE` column.
-- `gemiterm list --after <date>` / `--before <date>` MUST apply the date filter.
-- `gemiterm list --out <p>` MUST write the rendered output to the path and print a confirmation line.
+The `ListCommand`'s non-interactive output paths MUST remain byte-equivalent to the pre-phase-2 baseline in every configuration where the listing scope is unchanged. Specifically:
+- **Single-profile setups**: `gemiterm list` (no flags) MUST emit the same 4-column text table; `--format json` the same `{ chats: ChatInfo[] }` document; `--search`, `--sort`, `--limit`/`--offset`, `--after`/`--before`, `--out` all behave identically.
+- **Multi-profile setups**: `gemiterm list --profile <name>` MUST behave identically to the pre-change scoped listing.
+- **Intentional delta**: in multi-profile setups the flagless default now aggregates all profiles with a `PROFILE` column (see the modified *ListCommand* and *ListCommand Text Output Table* requirements). This delta is a deliberate behavior change; `tests/integration/commands/list.test.ts` expectations for the multi-profile default are updated accordingly, while its single-profile expectations remain untouched.
+- `gemiterm list --out <p>` MUST write the rendered output to the path and print a confirmation line in all configurations.
 
-#### Scenario: Default list is the 4-column text table
-- **WHEN** the user runs `gemiterm list` (no flags)
-- **THEN** the output is the same 4-column text table that the pre-change `list` command emitted
+#### Scenario: Single-profile list is byte-identical
+- **WHEN** the user runs any flagless or flagged non-interactive `gemiterm list` invocation in a single-profile setup
+- **THEN** the output is byte-identical to the pre-change baseline for the same invocation
+
+#### Scenario: Multi-profile --profile list is byte-identical
+- **WHEN** the user runs `gemiterm list --profile work` in a multi-profile setup
+- **THEN** the output is byte-identical to the pre-change `--profile`-scoped baseline
 
 #### Scenario: --format json is the same JSON document
-- **WHEN** the user runs `gemiterm list --format json`
+- **WHEN** the user runs `gemiterm list --format json` in a single-profile setup
 - **THEN** the output is the same `{ chats: ChatInfo[] }` JSON document that the pre-change `list` command emitted
+
+#### Scenario: Multi-profile default intentionally changes
+- **WHEN** the user runs `gemiterm list` (no flags) in a multi-profile setup
+- **THEN** the output aggregates all profiles with the `PROFILE` column — this is the documented intentional delta, covered by updated integration-test expectations
 
 #### Scenario: --help documents --interactive
 - **WHEN** the user runs `gemiterm list --help`
@@ -128,15 +144,15 @@ The `ListCommand`'s non-interactive output paths MUST remain byte-equivalent to 
 
 ### Requirement: FetchCommand
 
-The system MUST provide a `fetch` command implemented by `FetchCommand` in `src/cli/commands/fetch-command.ts`. The command MUST accept a single optional positional `<conversation_id>` argument and MUST support `--format/-f <text|json>` (default `text`) and `--out/-o <path>`. When a conversation id is provided, the command MUST send a `FetchChatQuery` to the mediator with payload `{ conversationId }`. When no conversation id is provided, the command MUST invoke the `list` command via the `CommandRegistry` and return without sending a fetch query. Text output MUST include a header line `Conversation: <id>` and label each message with `User:` or `Model:` depending on role. JSON output MUST be `{ conversationId, messages }`. When `--out <path>` is supplied, the rendered output MUST be written to that file via `infrastructure/io.ts:writeTextFile` and the command MUST print `Output written to: <path>`; otherwise the output MUST be printed to stdout. The command MUST NOT recognize `--path` or `-p` as output flags.
+The system MUST provide a `fetch` command implemented by `FetchCommand` in `src/cli/commands/fetch-command.ts`. The command MUST accept a single optional positional `<conversation_id>` argument and MUST support `--format/-f <text|json>` (default `text`) and `--out/-o <path>`. When a conversation id is provided, the command MUST fetch the conversation via the shared fetch helper (with `resolveProfile` for profile routing). When no conversation id is provided, the command MUST invoke the `list` command via the shared command invoker and return without fetching. All output rendering MUST be delegated to `ChatOutput.render` — the command MUST NOT define its own output helpers or `writeOutput` method. Text output MUST include a header line `Conversation: <id>` and label each message with `User:` or `Model:` depending on role. JSON output MUST be `{ conversationId, messages }`. When `--out <path>` is supplied, the rendered output MUST be written to that file via `infrastructure/io.ts:writeTextFile` and the command MUST print `Output written to: <path>`; otherwise the output MUST be printed to stdout. The command MUST NOT recognize `--path` or `-p` as output flags.
 
-#### Scenario: Fetch with conversation id sends a FetchChatQuery
+#### Scenario: Fetch with conversation id renders the conversation
 - **WHEN** the user runs `gemiterm fetch conv-abc123`
-- **THEN** the mediator receives a `FetchChatQuery` with `payload.conversationId === "conv-abc123"`
+- **THEN** the conversation is fetched and rendered via `ChatOutput.render` with the `Conversation: conv-abc123` header
 
 #### Scenario: Fetch with no id invokes list
 - **WHEN** the user runs `gemiterm fetch` with no positional argument
-- **THEN** no `FetchChatQuery` is sent and the `list` command is executed against the same context (after printing a "No conversation ID specified" notice)
+- **THEN** no conversation is fetched and the `list` command is executed against the same context (after printing a "No conversation ID specified" notice)
 
 #### Scenario: Fetch with --format json
 - **WHEN** the user runs `gemiterm fetch conv-abc123 --format json`
@@ -147,12 +163,16 @@ The system MUST provide a `fetch` command implemented by `FetchCommand` in `src/
 - **THEN** the rendered text or JSON content is written to `./out.txt` and a confirmation line `Output written to: <resolved>` is printed
 
 #### Scenario: Fetch with empty messages prints "No messages found"
-- **WHEN** the mediator returns `messages: []`
+- **WHEN** the fetched conversation has `messages: []`
 - **THEN** the rendered text output contains `No messages found.`
 
 #### Scenario: Fetch --help shows usage
 - **WHEN** the user runs `gemiterm fetch --help`
 - **THEN** the output contains `Usage: gemiterm fetch [conversation_id] [options]` and documents `--format`, `--out`, and `--help`
+
+#### Scenario: Fetch rendering goes through ChatOutput
+- **WHEN** `FetchCommand.execute` runs
+- **THEN** output is produced via `ChatOutput.render` and the command file defines no `writeOutput` or output-helper methods
 
 ### Requirement: ContinueCommand
 
@@ -240,7 +260,7 @@ The system MUST provide a `delete` command implemented by `DeleteCommand` in `sr
 
 ### Requirement: ExportCommand
 
-The system MUST provide an `export` command implemented by `ExportCommand` in `src/cli/commands/export-command.ts`. The command MUST accept a single positional `<conversation_id>` argument and MUST support `--out/-o <path>`, `--format/-f <markdown|json>` (default `markdown`), `--include-metadata`, and `--help/-h`. The command MUST send a `FetchChatQuery` to the mediator with `payload.conversationId` and MUST write the formatted output to the path supplied by `--out` or, when `--out` is not set, to a default file in the current working directory named `gemini-chat-<conversation_id>-<YYYY-MM-DD>.<ext>` (where `ext` is `md` for markdown and `json` for json). The command MUST create the output directory (and any parents) with `mkdirSync(..., { recursive: true })` before writing. Markdown output MUST be produced by `formatChatAsMarkdown` and JSON output MUST be produced by `formatChatAsJson`. When `<conversation_id>` is missing or invalid, the command MUST print an error and exit with code 1. The command MUST NOT recognize `--output` as a flag.
+The system MUST provide an `export` command implemented by `ExportCommand` in `src/cli/commands/export-command.ts`. The command MUST accept a single positional `<conversation_id>` argument and MUST support `--out/-o <path>`, `--format/-f <markdown|json>` (default `markdown`), `--include-metadata`, and `--help/-h`. The command MUST fetch the conversation via the `gemini-queries` helpers (with `resolveProfile` for profile routing) and MUST delegate all formatting, filename construction, and writing to `context.exportStrategies.single` — the command MUST NOT call `formatChatAsMarkdown`, `formatChatAsJson`, or `writeTextFile` itself and MUST NOT construct export filenames itself. The strategy MUST write to the path supplied by `--out` or, when `--out` is not set, to a default file in the current working directory named `gemini-chat-<conversation_id>-<YYYY-MM-DD>.<ext>` (where `ext` is `md` for markdown and `json` for json), creating the output directory (and any parents) before writing. When `<conversation_id>` is missing or invalid, the command MUST print an error and exit with code 1. The command MUST NOT recognize `--output` as a flag. All user-visible output is byte-equivalent to the pre-change baseline.
 
 #### Scenario: Export with --out writes to the supplied path
 - **WHEN** the user runs `gemiterm export conv-abc123 --out ./out.md`
@@ -256,7 +276,7 @@ The system MUST provide an `export` command implemented by `ExportCommand` in `s
 
 #### Scenario: Export with --include-metadata
 - **WHEN** the user runs `gemiterm export conv-abc123 --include-metadata`
-- **THEN** `formatChatAsMarkdown` is called with `includeMetadata=true` and the resulting file contains a metadata header
+- **THEN** the markdown formatting is invoked with `includeMetadata=true` (inside the strategy) and the resulting file contains a metadata header
 
 #### Scenario: Export with no id errors and exits 1
 - **WHEN** the user runs `gemiterm export`
@@ -266,36 +286,40 @@ The system MUST provide an `export` command implemented by `ExportCommand` in `s
 - **WHEN** the user runs `gemiterm export --help`
 - **THEN** the output contains `Usage: gemiterm export <conversation_id> [options]` and documents `--out`, `--format`, `--include-metadata`, and `--help`
 
+#### Scenario: Export delegates through the strategy seam
+- **WHEN** `ExportCommand.execute` runs
+- **THEN** formatting, filename construction, and file writing are performed by `context.exportStrategies.single`, and the command file contains no `formatChatAsMarkdown` / `formatChatAsJson` / `writeTextFile` call and no `defaultFilename` method
+
 ### Requirement: ExportAllCommand
 
-The system MUST provide an `export-all` command implemented by `ExportAllCommand` in `src/cli/commands/export-all-command.ts`. The command MUST support `--out-dir/-o <dir>` (default `./exports`), `--since <date>`, `--include-metadata`, `--all-profiles/-a`, and `--help/-h`. The command MUST send a `ListChatsQuery` to the mediator with payload `{ allProfiles }`, MUST filter the resulting chats to those whose `timestamp` is on or after the `--since` date (when supplied), and MUST iterate over the remaining chats sending a `FetchChatQuery` for each and writing a markdown file per chat under the output directory using `formatChatAsMarkdown` with sanitized filenames of the form `gemini-chat-<sanitized-title>-<YYYY-MM-DD>.md`. The command MUST create the output directory with `mkdirSync(..., { recursive: true })` and MUST write an `index.md` file in the output directory that lists each successfully exported conversation as a markdown link and, when present, a `## Failed Exports` section listing failed exports with their error message. The command MUST print progress to stdout as `  [i/total] Exporting <id>...` followed by `OK` or `FAILED` on the same line, and MUST print a final summary including `Exported: <n>`, optional `Failed: <n>`, `Output: <dir>`, and `Index: <dir>/index.md`. When `--include-metadata` is set the index MUST include a `> Successful: <n> | Failed: <n>` line. The command MUST NOT recognize `--output-dir` as a flag.
+The system MUST provide an `export-all` command implemented by `ExportAllCommand` in `src/cli/commands/export-all-command.ts`. The command MUST support `--out-dir/-o <dir>` (default `./exports`), `--since <date>`, `--include-metadata`, `--all-profiles/-a`, and `--help/-h`. The command MUST obtain the chat list (propagating `allProfiles`), filter to chats whose `timestamp` is on or after the `--since` date when supplied, and MUST delegate the entire batch — iteration, per-chat fetch, markdown formatting, sanitized filenames of the form `gemini-chat-<sanitized-title>-<YYYY-MM-DD>.md`, directory creation, per-chat progress and error collection, `index.md` generation, and the final summary — to `context.exportStrategies.batch`. The command MUST NOT implement the batch loop, progress reporting, error collection, index generation, or filename sanitization itself. When the batch lists chats across profiles, a profile whose listing fails MUST log a warning and be skipped (warn-and-continue), matching the `export-strategy` capability's `Batch Listing Warns and Continues Per Profile` requirement. All printed output (`[i/N]` progress lines with `OK`/`FAILED`, `Exported:` / `Failed:` / `Output:` / `Index:` summary, `index.md` content, and the empty-list message) MUST be byte-equivalent to the pre-change baseline. When `--include-metadata` is set the index MUST include a `> Successful: <n> | Failed: <n>` line. The command MUST NOT recognize `--output-dir` as a flag.
 
 #### Scenario: Export-all writes per-chat files and an index
-- **WHEN** the user runs `gemiterm export-all --out-dir ./exports` against a mediator returning two chats
+- **WHEN** the user runs `gemiterm export-all --out-dir ./exports` against a client returning two chats
 - **THEN** exactly two markdown files appear under `./exports` and `./exports/index.md` contains a `## Conversations` section linking to both filenames
 
 #### Scenario: Export-all default output directory is ./exports
 - **WHEN** the user runs `gemiterm export-all` with no `--out-dir`
 - **THEN** the output directory is `./exports` (resolved against the current working directory)
 
-#### Scenario: Export-all with --all-profiles propagates to mediator
+#### Scenario: Export-all with --all-profiles lists across profiles
 - **WHEN** the user runs `gemiterm export-all --all-profiles`
-- **THEN** the `ListChatsQuery` payload carries `allProfiles: true`
+- **THEN** the chat list spans all configured profiles and one inaccessible profile is skipped with a warning while the rest are exported
 
 #### Scenario: Export-all with --since filters by date
 - **WHEN** the user runs `gemiterm export-all --since 2024-01-01`
 - **THEN** chats with `timestamp < 2024-01-01` are excluded from the iteration and from the index
 
 #### Scenario: Export-all reports failed exports
-- **WHEN** the mediator's `FetchChatQuery` handler throws for one chat
-- **THEN** the failing chat appears in `index.md` under a `## Failed Exports` section and the printed summary contains `Failed:  1` (two spaces before the count, matching `formatReportSummary`)
+- **WHEN** the fetcher throws for one chat
+- **THEN** the failing chat appears in `index.md` under a `## Failed Exports` section, the remaining chats still export, and the printed summary contains `Failed:  1` (two spaces before the count, matching the pre-change format)
 
 #### Scenario: Export-all shows progress lines
-- **WHEN** the user runs `gemiterm export-all` against a mediator returning N chats
+- **WHEN** the user runs `gemiterm export-all` against a client returning N chats
 - **THEN** exactly N progress lines of the form `[i/N]` are written to stdout, each followed by `OK` or `FAILED`
 
 #### Scenario: Export-all with no conversations prints the empty message
-- **WHEN** the mediator returns an empty `chats` array
+- **WHEN** the chat list is empty
 - **THEN** the output contains `No conversations found to export.` and no `index.md` is written
 
 #### Scenario: Export-all --include-metadata adds success/failure counts to the index
@@ -306,9 +330,13 @@ The system MUST provide an `export-all` command implemented by `ExportAllCommand
 - **WHEN** the user runs `gemiterm export-all --help`
 - **THEN** the output contains `Usage: gemiterm export-all [options]` and documents `--out-dir`, `--since`, `--include-metadata`, `--all-profiles`, and `--help`
 
+#### Scenario: Export-all delegates through the strategy seam
+- **WHEN** `ExportAllCommand.execute` runs
+- **THEN** the batch loop, progress reporting, error collection, index generation, and filename sanitization are performed by `context.exportStrategies.batch`, and the command file contains no `sanitizeFilename`, `writeIndex`, or inline batch iteration
+
 ### Requirement: AuthCommand
 
-The system MUST provide an `auth` command implemented by `AuthCommand` in `src/cli/commands/auth-command.ts`. The command MUST be registered under the name `auth` (NOT `login`) and MUST take no positional arguments. The command MUST delegate the actual browser-driven authentication to `AuthService.authenticate(profileName)`. When zero profiles exist, the command MUST create the default profile and authenticate against it. When exactly one profile exists, the command MUST authenticate against that profile directly. When more than one profile exists, the command MUST display a profile management menu using `formatProfileTable` and the options `[A] Add new profile`, `[D] Delete profile`, `[S] Set default`, `[R] Rename profile`, `[X] Exit and continue with current default`. The `A` and `R` options MUST trigger authentication against the resulting profile; `D`, `S`, and `X` MUST NOT trigger authentication. The `D` option MUST require a `[y/N]` confirmation before deletion. The `S` option MUST call both `ProfileManager.setDefault` and `setDefaultProfileName`. Profile names MUST be validated via `validateProfileName`.
+The system MUST provide an `auth` command implemented by `AuthCommand` in `src/cli/commands/auth-command.ts`. The command MUST be registered under the name `auth` (NOT `login`) and MUST take no positional arguments. The command MUST be a thin adapter: it MUST delegate all profile-lifecycle work to `context.profileLifecycle.manageProfiles(action, params)`, which forwards the actual browser-driven authentication to `AuthService.authenticate(profileName)`. The command MUST NOT construct `CookieStorage`, `ProfileManager`, `PlaywrightCliDriver`, `CookieMonitor`, or `AuthService` itself. When zero profiles exist, the command MUST create the default profile and authenticate against it. When exactly one profile exists, the command MUST authenticate against that profile directly. When more than one profile exists, the command MUST display a profile management menu using `formatProfileTable` and the options `[A] Add new profile`, `[D] Delete profile`, `[S] Set default`, `[R] Rename profile`, `[X] Exit and continue with current default`. The `A` and `R` options MUST trigger authentication against the resulting profile; `D`, `S`, and `X` MUST NOT trigger authentication. The `D` option MUST require a `[y/N]` confirmation before deletion. The `S` option MUST set the default profile through the module (which calls both `ProfileManager.setDefault` and `setDefaultProfileName`). Profile names MUST be validated via `validateProfileName`. All menu text, prompts, and error messages MUST be byte-equivalent to the pre-change baseline.
 
 #### Scenario: Auth with no profiles creates and authenticates the default profile
 - **WHEN** the user runs `gemiterm auth` and no profiles exist
@@ -349,6 +377,10 @@ The system MUST provide an `auth` command implemented by `AuthCommand` in `src/c
 #### Scenario: Auth --help shows usage
 - **WHEN** the user runs `gemiterm auth --help`
 - **THEN** the output contains `Usage: gemiterm auth` and documents `-h, --help`
+
+#### Scenario: Auth delegates through the context
+- **WHEN** `AuthCommand.execute` runs
+- **THEN** every profile-lifecycle operation is dispatched via `context.profileLifecycle.manageProfiles(...)` and the command file contains no inline service construction
 
 ### Requirement: ProfileCommand
 
@@ -396,7 +428,7 @@ The system MUST provide a `profile` command implemented by `ProfileCommand` in `
 
 ### Requirement: StatusCommand
 
-The system MUST provide a `status` command implemented by `StatusCommand` in `src/cli/commands/status-command.ts`. The command MUST take no arguments (other than `--help/-h`). The command MUST call `ensureConfigDir()`, MUST print a `Configuration` section containing `Directory: <configDir>` (the value from `getConfigDir()`), and MUST then print a `Profiles` section using `formatProfileTable`. When no profiles exist, the command MUST print `No profiles found. Run 'gemiterm login' to create one.` and MUST exit with code 2. When profiles exist, the command MUST additionally log a status line with the count of active profiles via `Logger.info`.
+The system MUST provide a `status` command implemented by `StatusCommand` in `src/cli/commands/status-command.ts`. The command MUST take no arguments (other than `--help/-h`) and MUST be a thin adapter that delegates to `context.profileLifecycle.manageProfiles("status", {})`. The command MUST NOT construct `CookieStorage` or `ProfileManager` itself. The module-backed action MUST call `ensureConfigDir()`, MUST print a `Configuration` section containing `Directory: <configDir>` (the value from `getConfigDir()`), and MUST then print a `Profiles` section using `formatProfileTable`. When no profiles exist, the command MUST print `No profiles found. Run 'gemiterm login' to create one.` and MUST exit with code 2. When profiles exist, the command MUST additionally log a status line with the count of active profiles via `Logger.info`.
 
 #### Scenario: Status with profiles shows the directory and the profile table
 - **WHEN** the user runs `gemiterm status` and at least one profile exists
@@ -409,6 +441,10 @@ The system MUST provide a `status` command implemented by `StatusCommand` in `sr
 #### Scenario: Status --help shows usage
 - **WHEN** the user runs `gemiterm status --help`
 - **THEN** the output contains `Usage: gemiterm status` and documents `-h, --help`
+
+#### Scenario: Status delegates through the context
+- **WHEN** `StatusCommand.execute` runs
+- **THEN** the profile-lifecycle work is dispatched via `context.profileLifecycle.manageProfiles("status", {})` and the command file contains no inline service construction
 
 ### Requirement: InstallBrowserCommand
 
@@ -424,7 +460,7 @@ The system MUST provide an `install-browser` command implemented by `InstallBrow
 
 ### Requirement: CommandRegistry
 
-The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all commands by name. The `CliCommandContext` interface MUST carry `{ verbose: boolean, profileAuthManager: ProfileAuthManager, getGeminiClient: () => GeminiClientService, listProfiles: () => string[] }` (no `mediator` field). The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
+The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all commands by name. The `CliCommandContext` interface MUST carry `{ verbose: boolean, profileAuthManager: ProfileAuthManager, profileLifecycle: ProfileLifecycle, exportStrategies: { single: ExportStrategy; batch: ExportStrategy }, getGeminiClient: () => GeminiClientService, listProfiles: () => string[] }` (no `mediator` field). The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
 
 #### Scenario: Registering the same name twice throws
 - **WHEN** `register("dup", handlerA)` is called and then `register("dup", handlerB)`
@@ -444,7 +480,7 @@ The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.t
 
 #### Scenario: Context carries services, not a mediator
 - **WHEN** a `CliCommandContext` is constructed for a command
-- **THEN** it exposes `verbose`, `profileAuthManager`, `getGeminiClient`, and `listProfiles`, and does NOT expose a `mediator` field
+- **THEN** it exposes `verbose`, `profileAuthManager`, `profileLifecycle`, `exportStrategies`, `getGeminiClient`, and `listProfiles`, and does NOT expose a `mediator` field
 
 ### Requirement: Command Help Output
 
@@ -590,3 +626,80 @@ The system MUST provide a `loadEffectivePrompt(message: string | null, promptFil
 - **WHEN** `loadEffectivePrompt(null, null)` is called
 - **THEN** the result is `null`
 
+### Requirement: Shared Command Invocation Helper
+
+The system MUST provide an `invokeCommand(commandName: string, args: string[], context: CliCommandContext): Promise<void>` helper in `src/cli/utils/command-invoker.ts`. The helper MUST dynamically import the `CommandRegistry`, construct and register all commands, look up the named handler, and execute it with `(args, context)`. When no handler is registered for `commandName`, the helper MUST throw an `Error` whose message names the missing command. The `continue` and `fetch` commands MUST use this helper (in place of their previously byte-identical private `invokeListCommand` methods) to run the `list` command when no conversation id is supplied, preserving the `No conversation ID specified. Listing conversations:` notice. The `list` command's interactive action dispatch MUST use the same helper in place of its inline registry import+construction+registration block.
+
+#### Scenario: Invoking a registered command executes it
+
+- **WHEN** `invokeCommand("list", [], context)` is called
+- **THEN** the registered `list` handler's `execute` receives `([], context)` and runs
+
+#### Scenario: Invoking an unknown command throws
+
+- **WHEN** `invokeCommand("nope", [], context)` is called
+- **THEN** the helper rejects with an `Error` whose message names the missing command
+
+#### Scenario: continue and fetch share the helper with no duplicated copies
+
+- **WHEN** `src/cli/commands/continue-command.ts` and `src/cli/commands/fetch-command.ts` are inspected after the change
+- **THEN** neither file defines an `invokeListCommand` method; both dispatch through `invokeCommand("list", [], context)` with the same `No conversation ID specified. Listing conversations:` notice as before
+
+#### Scenario: list interactive dispatch routes through the helper
+
+- **WHEN** the `list` command's interactive action menu dispatches `fetch`, `export`, or `continue`
+- **THEN** the dispatch goes through `invokeCommand(<name>, <args>, context)` and the file contains no inline `new CommandRegistry()` construction
+
+#### Scenario: Output byte-equivalence is preserved
+
+- **WHEN** `gemiterm fetch` or `gemiterm continue` is run with no conversation id
+- **THEN** the notice text, the rendered `list` output, and the exit code are byte-equivalent to the pre-change baseline
+
+### Requirement: Shared Chat Session Dispatch
+
+The system MUST provide a `startChatSession(params): Promise<void>` helper in `src/cli/utils/chat-session.ts` that owns the interactive/non-interactive mode branch for the chat commands. `params` MUST carry the effective message (`string | null`), an optional `conversationId`, an optional `profileName`, the `getGeminiClient` factory, and the logger. When the effective message is non-null the helper MUST perform the one-shot send (printing the model response after a `Model:` label, and for a new conversation printing the `Conversation ID: <id>` line via its first-turn hook). When the effective message is null the helper MUST start the interactive REPL via `runInteractiveLoop` with a `messageHandler` built from the same params. The presence of `conversationId` MUST select append semantics (`sendMessage` against the existing conversation); its absence MUST select new-chat semantics (`startNewChat` for the first turn, then `sendMessage` against the resulting id). The `new` and `continue` commands MUST obtain this behavior exclusively from the helper and MUST NOT define their own `sendNonInteractive`/`startInteractive` method pairs.
+
+#### Scenario: Non-null message sends one shot
+
+- **WHEN** `startChatSession({ effectiveMessage: "hi", getGeminiClient, logger })` is called
+- **THEN** a new chat is started with the message and the model response is printed after a `Model:` label
+
+#### Scenario: Null message starts the REPL
+
+- **WHEN** `startChatSession({ effectiveMessage: null, getGeminiClient, logger })` is called
+- **THEN** `runInteractiveLoop` is entered with a `messageHandler` that starts a new chat on the first non-empty line and appends to the resulting conversation id afterwards
+
+#### Scenario: conversationId selects append semantics
+
+- **WHEN** `startChatSession({ effectiveMessage: "follow up", conversationId: "conv-1", getGeminiClient, logger })` is called
+- **THEN** the message is sent to the existing `conv-1` conversation and no new chat is created
+
+#### Scenario: new and continue contain no mode-branch duplication
+
+- **WHEN** `src/cli/commands/new-command.ts` and `src/cli/commands/continue-command.ts` are inspected after the change
+- **THEN** neither file defines `sendNonInteractive` or `startInteractive` private methods; both dispatch through `startChatSession`
+
+#### Scenario: REPL behavior byte-equivalence is preserved
+
+- **WHEN** `gemiterm new` or `gemiterm continue <id>` is run with no message on a TTY
+- **THEN** the banner, prompt, `/exit` / `/quit` handling, empty-line handling, `Model:` labels, and exit-on-Ctrl+C behavior are byte-equivalent to the pre-change baseline
+
+### Requirement: Multi-Profile Listing Resilience
+
+The shared listing helper `listChatsForRequest` in `src/cli/utils/gemini-queries.ts` MUST scope listings as follows: when `profile` is explicitly supplied, the listing targets exactly that profile; otherwise the listing MUST default to **all configured profiles**. The multi-profile fan-out MUST use `Promise.allSettled` semantics: a profile whose listing fails MUST log a warning naming the profile and be skipped, and the remaining profiles' chats MUST be aggregated (merged and sorted by descending timestamp). When every profile fails, the helper MUST resolve with an empty chat list (no unhandled rejection). The `--all-profiles` request flag MUST map onto the same multi-profile path.
+
+#### Scenario: Default listing spans all profiles
+- **WHEN** `listChatsForRequest` is called with no `profile` and no `allProfiles`, and profiles `work` and `personal` are configured
+- **THEN** the result contains chats from both profiles merged in descending-timestamp order
+
+#### Scenario: One inaccessible profile is skipped with a warning
+- **WHEN** the default listing runs and the `broken` profile's listing rejects while `work` succeeds
+- **THEN** a warning naming `broken` is logged and the result contains `work`'s chats
+
+#### Scenario: All profiles failing resolves empty
+- **WHEN** every configured profile's listing rejects
+- **THEN** the helper resolves with `[]` and each failure was logged as a warning
+
+#### Scenario: Explicit profile is honored exactly
+- **WHEN** `listChatsForRequest` is called with `profile: "work"`
+- **THEN** only the `work` profile's client is queried, with no fan-out

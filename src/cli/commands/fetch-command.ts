@@ -3,9 +3,9 @@ import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { fetchChatForRequest } from "../utils/gemini-queries.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
-import type { Message } from "../../core/types.ts";
-import { writeTextFile } from "../../infrastructure/io.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
+import { invokeCommand } from "../utils/command-invoker.ts";
+import { render } from "../utils/chat-output.ts";
 
 interface FetchCommandOptions {
   help: boolean;
@@ -44,7 +44,8 @@ export class FetchCommand implements CliCommand {
     let conversationId = this.extractConversationId(args, options);
 
     if (!conversationId) {
-      await this.invokeListCommand(context);
+      console.log(chalk.dim("No conversation ID specified. Listing conversations:\n"));
+      await invokeCommand("list", [], context);
       return;
     }
 
@@ -53,11 +54,10 @@ export class FetchCommand implements CliCommand {
     logger.debug(`Fetching chat: ${conversationId}`);
     const messages = await fetchChatForRequest(context.getGeminiClient, conversationId, profileName ?? undefined);
 
-    if (options.format === "json") {
-      this.outputJson(messages, conversationId, options.out);
-    } else {
-      this.outputText(messages, conversationId, options.out);
-    }
+    await render(
+      { kind: "conversation", conversationId, messages },
+      { format: options.format, out: options.out || undefined },
+    );
   }
 
   private extractConversationId(args: string[], options: FetchCommandOptions): string | null {
@@ -66,60 +66,6 @@ export class FetchCommand implements CliCommand {
       return arg;
     }
     return null;
-  }
-
-  private async invokeListCommand(context: CliCommandContext): Promise<void> {
-    const { CommandRegistry } = await import("../command-registry.ts");
-    const registry = new CommandRegistry();
-    registry.registerAllCommands();
-
-    const listHandler = registry.getHandler("list");
-    if (listHandler) {
-      console.log(chalk.dim("No conversation ID specified. Listing conversations:\n"));
-      await listHandler.execute([], context);
-    } else {
-      throw new Error("Could not invoke list command.");
-    }
-  }
-
-  private outputJson(messages: Message[], conversationId: string, out: string): void {
-    const output = JSON.stringify({ conversationId, messages }, null, 2);
-    if (out) {
-      this.writeOutput(out, output);
-    } else {
-      console.log(output);
-    }
-  }
-
-  private outputText(messages: Message[], conversationId: string, out: string): void {
-    const lines: string[] = [];
-
-    lines.push(chalk.bold(`Conversation: ${chalk.cyan(conversationId)}`));
-    lines.push("");
-
-    if (messages.length === 0) {
-      lines.push(chalk.dim("No messages found."));
-    } else {
-      for (const msg of messages) {
-        const label =
-          msg.role === "user" ? chalk.green.bold("User:") : chalk.blue.bold("Model:");
-        lines.push(label);
-        lines.push(msg.content);
-        lines.push("");
-      }
-    }
-
-    const output = lines.join("\n");
-    if (out) {
-      this.writeOutput(out, output);
-    } else {
-      console.log(output);
-    }
-  }
-
-  private writeOutput(out: string, content: string): void {
-    writeTextFile(out, content);
-    console.log(chalk.dim(`Output written to: ${out}`));
   }
 
   private parseArgs(args: string[]): FetchCommandOptions {

@@ -1,6 +1,11 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
 import { StatusCommand } from "../../../src/cli/commands/status-command.ts";
-import { ProfileManager } from "../../../src/infrastructure/storage.ts";
+import { ProfileLifecycle } from "../../../src/services/profile-lifecycle.ts";
+import { CookieStorage, ProfileManager } from "../../../src/infrastructure/storage.ts";
+import type { AuthService } from "../../../src/services/auth-service.ts";
+import type { PlaywrightCliDriver } from "../../../src/services/playwright-cli-driver.ts";
+import type { CookieMonitor } from "../../../src/services/cookie-monitor.ts";
+import { Logger } from "../../../src/infrastructure/logger.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
@@ -9,16 +14,6 @@ import type { ProfileStatus } from "../../../src/core/types.ts";
 function getOutput(logSpy: ReturnType<typeof spyOn>): string {
   return logSpy.mock.calls.map((c) => c[0]).join("\n");
 }
-
-const freshCookies = [
-  { name: "__Secure-1PSID", value: "test", domain: ".google.com", path: "/", expires: Math.floor(Date.now() / 1000) + 86400 * 30, httpOnly: true, secure: true, sameSite: "None" as const },
-  { name: "__Secure-1PSIDTS", value: "test", domain: ".google.com", path: "/", expires: Math.floor(Date.now() / 1000) + 86400 * 30, httpOnly: true, secure: true, sameSite: "None" as const },
-];
-
-const expiredCookies = [
-  { name: "__Secure-1PSID", value: "test", domain: ".google.com", path: "/", expires: -1, httpOnly: true, secure: true, sameSite: "None" as const },
-  { name: "__Secure-1PSIDTS", value: "test", domain: ".google.com", path: "/", expires: -1, httpOnly: true, secure: true, sameSite: "None" as const },
-];
 
 describe("status command integration", () => {
   let command: StatusCommand;
@@ -30,7 +25,6 @@ describe("status command integration", () => {
 
   beforeEach(() => {
     command = new StatusCommand();
-    context = { verbose: false } as unknown as CliCommandContext;
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     stderrSpy = spyOn(process.stderr, "write").mockImplementation(() => true);
     exitSpy = spyOn(process, "exit").mockImplementation(() => {});
@@ -38,6 +32,23 @@ describe("status command integration", () => {
       GEMITERM_CONFIG_DIR: process.env.GEMITERM_CONFIG_DIR,
     };
     const configDir = setupTestConfig("status-integration");
+
+    const cookieStorage = new CookieStorage();
+    const profileManager = new ProfileManager(cookieStorage);
+    const lifecycle = new ProfileLifecycle({
+      cookieStorage,
+      profileManager,
+      driver: {} as PlaywrightCliDriver,
+      cookieMonitor: {} as CookieMonitor,
+      authService: {} as AuthService,
+      logger: new Logger("test"),
+    });
+
+    context = {
+      verbose: false,
+      profileLifecycle: lifecycle,
+    } as unknown as CliCommandContext;
+
     spyOn(configModule, "getConfigDir").mockReturnValue(configDir);
     spyOn(configModule, "ensureConfigDir").mockImplementation(() => {});
   });
@@ -45,6 +56,8 @@ describe("status command integration", () => {
   afterEach(() => {
     mock.restore();
     logSpy.mockRestore();
+    stderrSpy.mockRestore();
+    exitSpy.mockRestore();
     teardownTestConfig(originalEnv);
   });
 
@@ -108,7 +121,10 @@ describe("status command integration", () => {
       spyOn(configModule, "getDefaultProfileName").mockReturnValue(
         statuses.find((s) => s.isDefault)?.name ?? statuses[0]?.name ?? "default",
       );
-      spyOn(ProfileManager.prototype, "getStatus").mockImplementation(function (this: ProfileManager, name: string) {
+      spyOn(ProfileManager.prototype, "getStatus").mockImplementation(function (
+        this: ProfileManager,
+        name: string,
+      ) {
         const found = statuses.find((s) => s.name === name);
         if (!found) {
           return { name, exists: false, isActive: false, expiresAt: null, isDefault: false };

@@ -5,6 +5,12 @@ import { Logger } from "../infrastructure/logger.ts";
 import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import { CookieStorageService } from "../services/cookie-storage-service.ts";
 import { ProfileAuthManager } from "../services/profile-auth-manager.ts";
+import { ProfileLifecycle } from "../services/profile-lifecycle.ts";
+import { SingleExport, BatchExport } from "../services/export-strategy.ts";
+import { fetchChatForRequest } from "./utils/gemini-queries.ts";
+import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
+import { CookieMonitor } from "../services/cookie-monitor.ts";
+import { AuthService } from "../services/auth-service.ts";
 import { CookieStorage, ProfileManager } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts";
 import { getPackageJson } from "../infrastructure/path-utils.ts";
@@ -15,6 +21,8 @@ const pkg = getPackageJson(import.meta.url);
 
 interface CliServices {
   profileAuthManager: ProfileAuthManager;
+  profileLifecycle: ProfileLifecycle;
+  exportStrategies: { single: SingleExport; batch: BatchExport };
   getGeminiClient: () => GeminiClientService;
   listProfiles: () => string[];
 }
@@ -24,6 +32,18 @@ async function setupServices(): Promise<CliServices> {
   const cookieStorage = new CookieStorage();
   const profileManager = new ProfileManager(cookieStorage);
   const cookieStorageService = new CookieStorageService({ cookieStorage, logger });
+
+  const driver = new PlaywrightCliDriver();
+  const cookieMonitor = new CookieMonitor({ driver, logger });
+  const authService = new AuthService({ driver, cookieMonitor, cookieStorage, logger });
+  const profileLifecycle = new ProfileLifecycle({
+    cookieStorage,
+    profileManager,
+    driver,
+    cookieMonitor,
+    authService,
+    logger,
+  });
 
   let geminiClient: GeminiClientService | null = null;
 
@@ -52,7 +72,20 @@ async function setupServices(): Promise<CliServices> {
   try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
   const profileAuthManager = new ProfileAuthManager({ profileManager, cookieStorageService, logger, geminiClient: factoryClient });
 
-  return { profileAuthManager, getGeminiClient, listProfiles };
+  const exportStrategies = {
+    single: new SingleExport({
+      fetchChat: (id, profile) => fetchChatForRequest(getGeminiClient, id, profile),
+      logger: new Logger("export-command"),
+    }),
+    batch: new BatchExport({
+      fetchChat: (id, profile) => fetchChatForRequest(getGeminiClient, id, profile),
+      listChatsForProfile: (name, options) => getGeminiClient().forProfile(name).listChats(options),
+      listProfiles,
+      logger: new Logger("export-all-command"),
+    }),
+  };
+
+  return { profileAuthManager, profileLifecycle, exportStrategies, getGeminiClient, listProfiles };
 }
 
 async function main(): Promise<void> {
@@ -107,6 +140,8 @@ async function main(): Promise<void> {
     await handler.execute(subcommandArgs, {
       verbose,
       profileAuthManager: services.profileAuthManager,
+      profileLifecycle: services.profileLifecycle,
+      exportStrategies: services.exportStrategies,
       getGeminiClient: services.getGeminiClient,
       listProfiles: services.listProfiles,
     });

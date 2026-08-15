@@ -1,0 +1,67 @@
+import chalk from "chalk";
+import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
+import type { Logger } from "../../infrastructure/logger.ts";
+import { runInteractiveLoop, type MessageHandlerResult } from "./interactive-prompt.ts";
+
+export interface StartChatSessionParams {
+  effectiveMessage: string | null;
+  conversationId?: string | null;
+  profileName?: string | null;
+  getGeminiClient: () => GeminiClientService;
+  logger: Logger;
+  onFirstTurn?: (conversationId: string) => void;
+  onInteractiveTurn?: (conversationId: string, isFirst: boolean) => void;
+  beforeInteractiveLoop?: () => Promise<void>;
+}
+
+export async function startChatSession(params: StartChatSessionParams): Promise<void> {
+  const {
+    effectiveMessage,
+    conversationId,
+    profileName,
+    getGeminiClient,
+    logger,
+    onFirstTurn,
+    onInteractiveTurn,
+    beforeInteractiveLoop,
+  } = params;
+
+  const resolveClient = (): GeminiClientService =>
+    profileName ? getGeminiClient().forProfile(profileName) : getGeminiClient();
+
+  if (effectiveMessage) {
+    if (conversationId) {
+      logger.debug(`Sending message to ${conversationId}`);
+      const response = await resolveClient().sendMessage(conversationId, effectiveMessage);
+      console.log(chalk.blue.bold("Model:"));
+      console.log(response);
+    } else {
+      logger.debug("Starting new chat with message");
+      const result = await resolveClient().startNewChat(effectiveMessage);
+      onFirstTurn?.(result.conversationId);
+      console.log(chalk.blue.bold("Model:"));
+      console.log(result.response);
+    }
+    return;
+  }
+
+  await beforeInteractiveLoop?.();
+
+  let sessionConversationId: string | null = conversationId ?? null;
+
+  const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
+    if (sessionConversationId) {
+      logger.debug(`Sending message to ${sessionConversationId}`);
+      const response = await resolveClient().sendMessage(sessionConversationId, message);
+      onInteractiveTurn?.(sessionConversationId, false);
+      return { response };
+    }
+
+    const result = await resolveClient().startNewChat(message);
+    sessionConversationId = result.conversationId;
+    onInteractiveTurn?.(sessionConversationId, true);
+    return { response: result.response };
+  };
+
+  await runInteractiveLoop(messageHandler, { profileName });
+}

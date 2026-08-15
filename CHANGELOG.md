@@ -1,3 +1,12 @@
+## [Unreleased]
+
+### Changed
+
+- **BREAKING**: `gemiterm list` now defaults to aggregating conversations across **all** configured profiles (unless `--profile <name>` is given), skipping inaccessible profiles with a warning instead of failing the whole listing. In a single-profile setup the output is unchanged (4-column table); in multi-profile setups the default table gains a `PROFILE` column. `--all-profiles` remains accepted and is now redundant with the default; `--profile <name>` restores the exact per-profile output.
+- Consolidated the four output commands (`list`, `fetch`, `export`, `export-all`) onto a single `ChatOutput` module (`src/cli/utils/chat-output.ts`) with shared `sortChats` / `filterChatsByDate` helpers and one stdout-vs-file dispatch. The commands no longer carry their own sort/filter/output/write helpers.
+
+---
+
 ## [2.4.2] - 2026-08-01
 
 ### Added
