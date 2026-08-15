@@ -16,7 +16,7 @@
     .badge-strong { background: #059669; }
     .badge-explore { background: #d97706; }
     .badge-spec { background: #475569; }
-    .assumed-tag { background: #2563eb; }
+    .badge-landed { background: #1d4ed8; }
   </style>
 </head>
 <body class="bg-stone-50 text-slate-800 font-sans selection:bg-emerald-200">
@@ -27,12 +27,16 @@
   <header class="space-y-4">
     <div class="flex items-baseline gap-3">
       <h1 class="text-3xl font-serif font-bold tracking-tight text-slate-900">GemiTerm v2.4 → v3.0</h1>
-      <span class="text-sm text-slate-400">Architecture review &middot; 2026-08-12</span>
+      <span class="text-sm text-slate-400">Architecture review &middot; 2026-08-12 &middot; revalidated 2026-08-14</span>
     </div>
     <p class="text-sm text-slate-500 max-w-prose">
-      This review assumes refactorings <strong>#2–#5</strong> from <code>docs/refactorings-phase-1.html</code> have landed
-      (mediator removal, shared arg parsing, @inquirer/input, Gemini client factory).
-      <strong>#1 (Cookie Session)</strong> has <em>not</em> been done — it remains the top deepening candidate below.
+      This review assumed refactorings <strong>#2–#5</strong> from phase 1 (<code>docs/refactorings-phase-1.html</code>) had landed — they have, and
+      <strong>four of the five phase-2 candidates below have now landed too</strong>:
+      <a class="text-blue-700 underline" href="#profile-lifecycle">#2 ProfileLifecycle</a>,
+      <a class="text-blue-700 underline" href="#interactive-session">#4 InteractiveSession</a>,
+      <a class="text-blue-700 underline" href="#export-strategy">#5 ExportStrategy</a>, and
+      <a class="text-blue-700 underline" href="#output-pipeline">#3 ChatOutput</a> (in that order, archived under <code>openspec/changes/archive/</code>).
+      <strong>#1 (Cookie Session)</strong> is the sole remaining candidate — it remains the top deepening target below, with facts revalidated against v2.4.2 HEAD.
     </p>
     <div class="flex flex-wrap gap-3 text-xs uppercase tracking-wider text-slate-500">
       <span class="flex items-center gap-1.5">
@@ -48,7 +52,7 @@
         <span class="inline-block w-3.5 h-3.5 rounded-sm bg-slate-100 border border-slate-200"></span> shallow module
       </span>
       <span class="flex items-center gap-1.5">
-        <span class="px-2 py-0.5 rounded text-[10px] text-white" style="background:#2563eb">assumed</span> already landed
+        <span class="px-2 py-0.5 rounded text-[10px] text-white" style="background:#1d4ed8">landed</span> already implemented
       </span>
     </div>
   </header>
@@ -75,11 +79,11 @@
       <div class="grid grid-cols-2 gap-6">
         <div>
           <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Problem</p>
-          <p class="text-sm leading-relaxed">The cookie lifecycle is scattered across <strong>five modules</strong> with <strong>triple-duplicated</strong> validation logic — the <code>COOKIE_EXPIRY_THRESHOLD_MS</code> constant (7 days) is defined identically in three files: <code>cookie-storage-service.ts:5</code>, <code>gemini-client-wrapper.ts:71</code>, and <code>storage.ts:14</code>. Validation (<code>validateCookies</code>) and expiry checking (<code>checkCookieFreshness</code>) are duplicated between <code>CookieStorageService</code> and module-level functions in <code>storage.ts</code>. Cookies are only refreshed <strong>passively</strong> after successful API calls — there is no proactive rotation. This is the architectural root of the recurring phantom auth bug ("models() works but listChats returns 0").</p>
+          <p class="text-sm leading-relaxed">The cookie lifecycle is scattered across <strong>five modules</strong> with <strong>triple-duplicated</strong> validation logic — the <code>COOKIE_EXPIRY_THRESHOLD_MS</code> constant (7 days) is defined identically in three files: <code>cookie-storage-service.ts:5</code>, <code>gemini-client-wrapper.ts:69</code>, and <code>storage.ts:14</code> (revalidated at v2.4.2). Validation (<code>validateCookies</code>) and expiry checking (<code>checkCookieFreshness</code>) are duplicated between <code>CookieStorageService</code> and module-level functions in <code>storage.ts</code>, and <em>three different</em> expiry computations coexist: <code>storage.ts:25</code> takes the max over both <code>__Secure-1PSID*</code> cookies, while <code>cookie-storage-service.ts:68</code> and <code>auth-service.ts:187</code> read <code>__Secure-1PSIDTS</code> only. The SDK's live jar and GemiTerm's persisted state have <strong>no transactional sync boundary</strong> — persistence is the wrapper's <code>persistRefreshedCookies()</code> scattered across 7 internal call sites, while <code>AuthService</code> writes storage directly (<code>auth-service.ts:155</code>) with no validation at all. Cookies are only refreshed <strong>passively</strong> after successful API calls — there is no proactive rotation. This is the architectural root of the recurring phantom auth bug ("models() works but listChats returns 0").</p>
         </div>
         <div>
           <p class="text-xs uppercase tracking-wider text-slate-400 mb-1">Solution</p>
-          <p class="text-sm leading-relaxed">Collapse into a single <strong>CookieSession</strong> module behind one interface: <code>ensureSession(profile)</code>. It owns proactive <code>RotateCookies</code> POST, two-tier cookie validation (primary + secondary bindings), a typed recovery ladder, and an injectable clock for testability. The module hides all cookie-name magic strings, freshness thresholds, and persistence details.</p>
+          <p class="text-sm leading-relaxed">Collapse into a single <strong>CookieSession</strong> module behind one interface: <code>ensureSession(profile)</code> — the only load path — and <code>commit(liveJar)</code> — the only persistence path, forming a <strong>transactional jar↔disk boundary</strong> (read persisted → merge jar → validate → write) so the SDK's live cookie jar and stored cookies can never diverge. Every writer (API-call refresh, auth-flow capture, rotation response) goes through the same commit; every reader gets cookies validated at commit time. The module owns proactive <code>RotateCookies</code> POST — implemented <strong>in-repo</strong>, since <code>gemini-web-sdk</code> exposes no rotation API (it only passively absorbs <code>Set-Cookie</code> headers into its public jar) — plus two-tier cookie validation (primary + secondary bindings), a typed recovery ladder, and an injectable clock for testability. The module hides all cookie-name magic strings, freshness thresholds, and persistence details.</p>
         </div>
       </div>
 
@@ -164,10 +168,11 @@ graph TD
         <ul class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-700">
           <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 3 copies of <code>COOKIE_EXPIRY_THRESHOLD_MS</code></li>
           <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Delete 4 copies of cookie-name magic strings</li>
-          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Active RotateCookies replaces passive refresh</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Active in-repo RotateCookies replaces passive refresh (SDK has no rotation API)</li>
           <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Recovery ladder self-heals stale sessions</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> Transactional <code>commit()</code> is the single persistence path — jar/disk can't diverge</li>
           <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> <code>CookieMonitor</code> tests drop real 2.1s timers</li>
-          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> <code>CookieStorageService</code> (82 shallow lines) deleted</li>
+          <li class="flex items-start gap-2"><span class="text-emerald-500 mt-1">+</span> <code>CookieStorageService</code> (70 shallow lines) deleted</li>
         </ul>
       </div>
     </div>
@@ -177,7 +182,8 @@ graph TD
   <article id="profile-lifecycle" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
     <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
       <h2 class="text-lg font-serif font-semibold text-slate-900">2. Deepen the Profile Lifecycle module</h2>
-      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-landed">Landed</span>
+      <span class="text-[11px] text-slate-400 font-mono">2026-08-14-refactorings-phase2-01-profile-lifecycle-module</span>
     </div>
 
     <div class="p-6 space-y-5">
@@ -272,7 +278,8 @@ graph TD
   <article id="output-pipeline" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
     <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
       <h2 class="text-lg font-serif font-semibold text-slate-900">3. Deepen the Chat Output Pipeline</h2>
-      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-landed">Landed</span>
+      <span class="text-[11px] text-slate-400 font-mono">2026-08-14-refactorings-phase2-04-chat-output-pipeline</span>
     </div>
 
     <div class="p-6 space-y-5">
@@ -395,7 +402,8 @@ graph TD
   <article id="interactive-session" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
     <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
       <h2 class="text-lg font-serif font-semibold text-slate-900">4. Deepen the Interactive Chat Session</h2>
-      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-spec">Speculative</span>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-landed">Landed</span>
+      <span class="text-[11px] text-slate-400 font-mono">2026-08-14-refactorings-phase2-02-interactive-session-dedup</span>
     </div>
 
     <div class="p-6 space-y-5">
@@ -497,7 +505,8 @@ graph TD
   <article id="export-strategy" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
     <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
       <h2 class="text-lg font-serif font-semibold text-slate-900">5. Extract Idempotent Export as a strategy seam</h2>
-      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-spec">Speculative</span>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-landed">Landed</span>
+      <span class="text-[11px] text-slate-400 font-mono">2026-08-14-refactorings-phase2-03-export-strategy-seam</span>
     </div>
 
     <div class="p-6 space-y-5">
@@ -594,15 +603,15 @@ graph TD
 
   <!-- Top Recommendation -->
   <section id="top-recommendation" class="rounded-2xl border-2 border-emerald-400 bg-emerald-50/40 shadow-md p-6 space-y-3">
-    <p class="text-xs uppercase tracking-wider text-emerald-700 font-semibold">Top recommendation</p>
+    <p class="text-xs uppercase tracking-wider text-emerald-700 font-semibold">Remaining recommendation (sole candidate left)</p>
     <a href="#cookie-session" class="block text-lg font-serif font-bold text-emerald-800 hover:text-emerald-900 hover:underline">
       #1 — Deepen the Cookie Session module
     </a>
     <p class="text-sm text-slate-700 max-w-prose">
-      This directly addresses the recurring phantom auth bug. The scattered cookie lifecycle — with its 7-day threshold conflating different cookie timers, triplicate constants, duplicated validation, and no proactive rotation — is the root cause of "models() works but listChats returns 0." Introducing active RotateCookies POST, two-tier validation, and a recovery ladder into a single deep module pays off on <em>every caller</em>.
+      This directly addresses the recurring phantom auth bug. The scattered cookie lifecycle — with its 7-day threshold conflating different cookie timers, triplicate constants, duplicated validation, three divergent expiry computations, no transactional jar↔disk boundary, and no proactive rotation — is the root cause of "models() works but listChats returns 0." Introducing a single deep module with <code>ensureSession(profile)</code> as the only load path, a transactional <code>commit()</code> as the only persistence path, active in-repo RotateCookies POST, two-tier validation, and a recovery ladder pays off on <em>every caller</em>.
     </p>
     <p class="text-sm text-slate-500">
-      The other candidates compound CookieSession's leverage: ProfileLifecycle (#2) removes the last service-locator pattern from the codebase; ChatOutput (#3) and ExportStrategy (#5) consolidate the output pipeline into tested seams; InteractiveSession (#4) eliminates the last exact-duplicate code block. All four are <strong>independent</strong> of CookieSession and of each other — they can be tackled in any order, but CookieSession first gives the biggest payoff.
+      The four sibling candidates have all landed and are archived: ProfileLifecycle (#2) removed the last service-locator pattern; InteractiveSession (#4) eliminated the last exact-duplicate code block; ExportStrategy (#5) and ChatOutput (#3) consolidated the output pipeline behind tested seams. Their landing compounds #1's payoff — every caller is now a thin adapter over a <code>CommandContext</code>, so <code>ensureSession(profile)</code> slots into an already-clean seam. An OpenSpec change proposal (<code>openspec/changes/refactorings-phase2-05-cookie-session/</code>) has been drafted for a later implementation session.
     </p>
   </section>
 

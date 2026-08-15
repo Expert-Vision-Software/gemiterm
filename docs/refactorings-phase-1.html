@@ -14,8 +14,7 @@
     .deep-box { background: linear-gradient(135deg, #0f172a, #1e293b); }
     .shallow-box { background: #f1f5f9; border: 1.5px dashed #94a3b8; }
     .badge-strong { background: #059669; }
-    .badge-explore { background: #d97706; }
-    .badge-spec { background: #475569; }
+    .badge-landed { background: #1d4ed8; }
   </style>
 </head>
 <body class="bg-stone-50 text-slate-800 font-sans selection:bg-emerald-200">
@@ -49,7 +48,7 @@
     <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
       <h2 class="text-lg font-serif font-semibold text-slate-900">1. Deepen the Cookie Session module</h2>
       <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-strong">Strong</span>
-      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white" style="background:#b45309">Skipped</span>
     </div>
 
     <div class="p-6 space-y-5">
@@ -176,8 +175,8 @@ graph TD
   <article id="mediator" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
     <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
       <h2 class="text-lg font-serif font-semibold text-slate-900">2. Remove the Mediator layer</h2>
-      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
-      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-landed">Landed</span>
+      <span class="text-[11px] text-slate-400 font-mono">2026-08-13-remove-mediator-layer</span>
     </div>
 
     <div class="p-6 space-y-5">
@@ -267,8 +266,8 @@ sequenceDiagram
   <article id="arg-parsing" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
     <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
       <h2 class="text-lg font-serif font-semibold text-slate-900">3. Extract shared Command arg-parsing</h2>
-      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
-      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-landed">Landed</span>
+      <span class="text-[11px] text-slate-400 font-mono">2026-08-13-extract-command-arg-parsing</span>
     </div>
 
     <div class="p-6 space-y-5">
@@ -346,8 +345,8 @@ sequenceDiagram
   <article id="terminal-input" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
     <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
       <h2 class="text-lg font-serif font-semibold text-slate-900">4. Replace hand-rolled terminal input with @inquirer/input</h2>
-      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-spec">Speculative</span>
-      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-landed">Landed</span>
+      <span class="text-[11px] text-slate-400 font-mono">2026-08-13-replace-terminal-input-inquirer</span>
     </div>
 
     <div class="p-6 space-y-5">
@@ -426,8 +425,7 @@ sequenceDiagram
   <article id="client-construction" class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
     <div class="px-6 py-5 border-b border-slate-100 flex flex-wrap items-center gap-3">
       <h2 class="text-lg font-serif font-semibold text-slate-900">5. Consolidate Gemini client construction</h2>
-      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-explore">Worth exploring</span>
-      <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider text-slate-500 border border-slate-200">in-process</span>
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide text-white badge-landed">Landed</span>
     </div>
 
     <div class="p-6 space-y-5">
