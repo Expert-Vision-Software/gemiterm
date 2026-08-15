@@ -44,6 +44,10 @@ function getProfilePath(name: string): string {
   return join(getProfilesDir(), name, STORAGE_STATE_FILE);
 }
 
+function getProfileLockPath(name: string): string {
+  return join(getProfilesDir(), name, `${STORAGE_STATE_FILE}.lock`);
+}
+
 function getProfileChatMetadataPath(name: string): string {
   return join(getProfilesDir(), name, CHAT_METADATA_FILE);
 }
@@ -150,6 +154,7 @@ export {
   getConfigDir,
   getProfilesDir,
   getProfilePath,
+  getProfileLockPath,
   getProfileChatMetadataPath,
   getProfileDir,
   getDefaultProfileMarkerPath,

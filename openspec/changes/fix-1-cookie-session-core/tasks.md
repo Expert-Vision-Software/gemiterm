@@ -9,9 +9,9 @@ Baseline: `bun test` -> 862 pass / 2 skip / 0 fail / 1748 expects / 56 files. Ru
 
 ## 2. CookieStore (CAS + lock, pure Bun fs)
 
-- [ ] 2.1 Create `src/auth/cookie-store.ts`: `load(profile)` returns cookies + snapshot (`(name,domain,path) -> value`); `save(profile, cookies, snapshot)` writes only deltas whose on-disk value still matches the snapshot; atomic temp-file write via `io.ts` surface
-- [ ] 2.2 Implement the lock: sibling `storage_state.json.lock`, exclusive-create (`wx`) acquisition, 100 ms retry; CAS saves wait <= 10 s then proceed (fail-open); full-jar writers wait <= 90 s then throw `LockUnavailableError` (fail-closed, typed, exported from `src/core/errors.ts`); locks with mtime older than 120 s are stealable; no shell commands anywhere
-- [ ] 2.3 RED-first tests: CAS prevents stale-overwrite-fresh (second writer with stale snapshot does not clobber a fresher on-disk value it did not change); lock contention fail-open/fail-closed paths; stale-lock steal; Windows-safe (tests run on `bun test` locally on Windows)
+- [x] 2.1 Create `src/auth/cookie-store.ts`: `load(profile)` returns cookies + snapshot (`(name,domain,path) -> value`); `save(profile, cookies, snapshot)` writes only deltas whose on-disk value still matches the snapshot; atomic temp-file write via `io.ts` surface
+- [x] 2.2 Implement the lock: sibling `storage_state.json.lock`, exclusive-create (`wx`) acquisition, 100 ms retry; CAS saves wait <= 10 s then proceed (fail-open); full-jar writers wait <= 90 s then throw `LockUnavailableError` (fail-closed, typed, exported from `src/core/errors.ts`); locks with mtime older than 120 s are stealable; no shell commands anywhere
+- [x] 2.3 RED-first tests: CAS prevents stale-overwrite-fresh (second writer with stale snapshot does not clobber a fresher on-disk value it did not change); lock contention fail-open/fail-closed paths; stale-lock steal; Windows-safe (tests run on `bun test` locally on Windows)
 
 ## 3. Validation + classifier
 
