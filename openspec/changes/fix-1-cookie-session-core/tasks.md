@@ -15,9 +15,9 @@ Baseline: `bun test` -> 862 pass / 2 skip / 0 fail / 1748 expects / 56 files. Ru
 
 ## 3. Validation + classifier
 
-- [ ] 3.1 Create `src/auth/cookie-validation.ts`: tier-1 raise (`__Secure-1PSIDTS` RFC-6265-routable to `gemini.google.com` AND `__Secure-1PSID` present) with typed error; tier-2 warn-once (companion set `SID`/`HSID`/`SSID`/`APISID`/`SAPISID`/`SIDCC`/`NID` absent); implement the routability predicate (domain/path/expiry selection against the target URL)
-- [ ] 3.2 Create `src/auth/session-classifier.ts`: `classify(profile)` -> `live | phantom | dead` via init GET token check (`SNlM0e`/`cfb2h`/`FdrFJe` present) + `listChats({limit:1})`; read-only (no writes, no refresh); no use of SDK `models()` anywhere
-- [ ] 3.3 RED-first tests: tier-1 raises on missing and on present-but-unroutable PSIDTS (wrong-domain-scope variant included); tier-2 warns exactly once; classifier maps tokens+chats->live, tokens+0->phantom, no-tokens->dead (fakes at the HTTP seam)
+- [x] 3.1 Create `src/auth/cookie-validation.ts`: tier-1 raise (`__Secure-1PSIDTS` RFC-6265-routable to `gemini.google.com` AND `__Secure-1PSID` present) with typed error; tier-2 warn-once (companion set `SID`/`HSID`/`SSID`/`APISID`/`SAPISID`/`SIDCC`/`NID` absent); implement the routability predicate (domain/path/expiry selection against the target URL)
+- [x] 3.2 Create `src/auth/session-classifier.ts`: `classify(profile)` -> `live | phantom | dead` via init GET token check (`SNlM0e`/`cfb2h`/`FdrFJe` present) + `listChats({limit:1})`; read-only (no writes, no refresh); no use of SDK `models()` anywhere
+- [x] 3.3 RED-first tests: tier-1 raises on missing and on present-but-unroutable PSIDTS (wrong-domain-scope variant included); tier-2 warns exactly once; classifier maps tokens+chats->live, tokens+0->phantom, no-tokens->dead (fakes at the HTTP seam)
 
 ## 4. BrowserRefresher + refresh-runner (the rotation engine)
 
