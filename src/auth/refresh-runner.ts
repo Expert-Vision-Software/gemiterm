@@ -32,6 +32,8 @@ export function spawnDetachedRefreshRunner(profile: string, deps: DetachedSpawnD
   try {
     output = (deps.openLogFd ?? openAppendFd)(getLogFilePath());
   } catch {
+    // a logging failure must never block a refresh (spec: "Detached refresh-runner
+    // survives the CLI and is observable", openspec/changes/fix-1-cookie-session-core)
   }
   const proc = spawn([process.execPath, refreshRunnerEntryPath(), profile], {
     stdin: "ignore",
