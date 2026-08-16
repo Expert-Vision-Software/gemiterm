@@ -1,0 +1,17 @@
+# Auth-sensitive paths for the auth-regression gate
+# This file defines which paths, when changed, require corresponding changes to the auth-regression test suite
+
+# Auth module (all files)
+src/auth/**
+
+# Cookie/storage infrastructure (all cookie-related code)
+src/infrastructure/storage.ts
+src/infrastructure/io.ts
+
+# Service layer (auth-related)
+src/services/playwright-cli-driver.ts
+src/services/gemini-client-wrapper.ts
+src/services/profile-lifecycle.ts
+
+# Core types if they touch auth
+src/core/types.ts
