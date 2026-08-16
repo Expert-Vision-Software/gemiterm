@@ -2,7 +2,7 @@
 
 ## Context
 
-fix-1 ships the `CookieSession` facade with `probe(profile)` (the network-honest classifier: init-token check + `listChats({limit:1})` -> `live`/`phantom`/`dead`) and the refresh-and-retry recovery rung, but no command-layer consumer. The phantom state is undetectable locally (proven: byte-identical jars differ only in server-side PSIDTS supersession state), so detection must be reactive and network-based, and must never sit on the hot auth gate (the 2026-08-11 ledger design - a preemptive probe once killed sessions that would have worked).
+fix-1 landed (archived 2026-08-16): the `CookieSession` facade ships `probe(profile)` (the network-honest classifier: init-token check + `listChats({limit:1})` -> `live`/`phantom`/`dead`) and the refresh-and-retry recovery rung, with no command-layer consumer. Its detached rotation engine is now verified live (survives the CLI process tree, appends to `<configDir>/gemiterm.log`, rotates a stale jar in ~8 s; healthy foreground mint observed at 4.8 s) — but the 7.4 idle gate failed exactly as the phantom model predicts: `list` OK at 00:55Z, empty at 04:38Z after 3 h 43 m idle, because the first post-idle command arms the stale jar and answers before any rotation lands. The phantom state is undetectable locally (proven: byte-identical jars differ only in server-side PSIDTS supersession state), so detection must be reactive and network-based, and must never sit on the hot auth gate (the 2026-08-11 ledger design - a preemptive probe once killed sessions that would have worked). This change is the first-post-idle bridge fix-1's design D2/D5 deferred here.
 
 ## Goals / Non-Goals
 
@@ -36,14 +36,15 @@ The PROBE column (`live (N)` / `phantom` / `dead`) renders only with `--verbose`
 
 ### D4: One retry, then honest failure
 
-After a user-accepted recovery that succeeds, the list query re-runs exactly once; if the retry still yields zero chats, the phantom diagnostic is printed and the command exits normally (the session may be an edge state recovery cannot fix - the user is told, not looped). Loop risk is structurally absent: classification + recovery fire at most once per command invocation.
+After a user-accepted recovery that succeeds, the list query re-runs exactly once; if the retry still yields zero chats, the phantom diagnostic is printed and the command exits normally (the session may be an edge state recovery cannot fix - the user is told, not looped). Loop risk is structurally absent: classification + recovery fire at most once per command invocation. Recovery failures surface the typed `AuthenticationError` (fix-1 pinned re-arm failures into this contract, commit `e567ff0`), so the failure path lands in the existing headed re-login prompt. Observed edge worth naming: one detached rotation minted slower than the 60 s poll window (2026-08-16T07:41Z, cold start; next invocation self-healed) - a retry immediately after a slow mint can still see the empty result; D4's single-retry bound plus the honest diagnostic is the designed answer, and `<configDir>/gemiterm.log` distinguishes engine trouble from account emptiness when triaging.
 
 ## Risks / Trade-offs
 
 - **Probe cost in the degraded path** - one init GET + one `listChats({limit:1})` only when a single-profile list already returned empty; acceptable.
 - **Phantom-during-retry race** - a session can decay between probe and retry; bounded by D4's single retry.
 - **Status probe latency under `--verbose` with many profiles** - sequential and opt-in; documented in-flag.
+- **Compiled-build detached spawn gap (excluded)** - `refresh-runner.ts` resolves from `import.meta.dir` and won't exist beside `dist/gemiterm`; the recovery rung in this change is synchronous and unaffected, but proactive refresh in compiled builds needs a multi-entry build - tracked as a build-surface follow-up, not this change.
 
 ## Migration Plan
 
-Thin additive change on top of fix-1's facade; no storage, format, or wiring migrations. Ships after fix-1 lands (its facade and classifier are prerequisites).
+Thin additive change on top of fix-1's facade (landed and archived 2026-08-16); no storage, format, or wiring migrations.
