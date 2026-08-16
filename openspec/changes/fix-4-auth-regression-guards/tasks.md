@@ -42,12 +42,18 @@ Prerequisite: fix-1, fix-2, fix-3 implemented and archived. Baseline test counts
 
 ## 5. Documentation consolidation
 
-- [ ] 5.1 Append the closing entry to `docs/phantom-bug-synthesis.md` (ledger closed; fix-1..3 landed), then move it, `auth-replacement-plan.md`, and `refactorings-phase-{1,2}.html` to `docs/archive/` with superseded-by banners
-- [ ] 5.2 Create `docs/README.md` authority index (lifecycle doc > ablation findings > archive; everything else non-contradicting) and prune contradicting/stale sections in remaining docs to pointers
-- [ ] 5.3 Harden `AGENTS.md`: auth-sensitive path list, docs authority order, same-PR rule (auth change ⇒ auth-regression suite run + lifecycle-doc changelog update), standing traps as pointers (static-`models()` probe ban, cookie-`expires` meaninglessness, name-filter ban)
+- [x] 5.1 Append the closing entry to `docs/phantom-bug-synthesis.md` (ledger closed; fix-1..3 landed), then move it, `auth-replacement-plan.md`, and `refactorings-phase-{1,2}.html` to `docs/archive/` with superseded-by banners
+  - Closing entry appended 2026-08-16; all four files moved via `git mv` (history preserved) with archive banners naming the superseding docs.
+- [x] 5.2 Create `docs/README.md` authority index (lifecycle doc > ablation findings > archive; everything else non-contradicting) and prune contradicting/stale sections in remaining docs to pointers
+  - Live references to the moved files updated in `auth-cookie-lifecycle.md` (3 links), `cookie-ablation-findings.md`, `re-implement-through-v2-7-2.md`; `docs/archive/` internals kept consistent. OpenSpec change archives intentionally left as history.
+- [x] 5.3 Harden `AGENTS.md`: auth-sensitive path list, docs authority order, same-PR rule (auth change ⇒ auth-regression suite run + lifecycle-doc changelog update), standing traps as pointers (static-`models()` probe ban, cookie-`expires` meaninglessness, name-filter ban)
+  - New "Auth regression gate (fix-4)" section + the three commands added to the build/test block.
 
 ## 6. Verification and archive
 
-- [ ] 6.1 Full gates: `bun run typecheck`, `bun run lint:mediation` (bash form), `bun test` — baseline intact plus net additions recorded
+- [x] 6.1 Full gates: `bun run typecheck`, `bun run lint:mediation` (bash form), `bun test` — baseline intact plus net additions recorded
+  - typecheck clean; `bash scripts/lint-path-mediation.sh` clean; full suite 937 pass / 0 fail / 2 pre-existing skips (baseline 917 + 20 auth-regression tests); `bun run canary:auth` detects all 3 mutations; `bun run check:auth-gate` pass/fail/opt-out paths verified locally.
 - [ ] 6.2 Verify gate + canary end-to-end in CI on a deliberately-injected local regression (screencap or log captured in PR)
+  - Requires the fix-4 PR's CI runs (warn-only gate on its own diff) plus one nightly canary run; cannot be completed from a dev machine.
 - [ ] 6.3 `openspec validate fix-4-auth-regression-guards --strict`; sync specs (`auth-regression-gate` new, `testing`/`domain-model` deltas) and archive the change
+  - Blocked on 3.4 + 6.2 (CI-gated); archive after the first blocking-green run.

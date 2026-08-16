@@ -1,3 +1,5 @@
+> **ARCHIVED (2026-08-16) - superseded by docs/auth-cookie-lifecycle.md (canonical) and docs/cookie-ablation-findings.md (empirical record).** Historical reference only; not normative. See docs/README.md for the documentation authority order.
+
 # Auth Replacement Plan — CookieSession (2026-08-15)
 
 The post-grilling plan to replace GemiTerm's auth implementation with a notebooklm-py-mirrored design, adjusted to first-principles evidence gathered on this codebase. Evidence base: `docs/cookie-ablation-findings.md` (empirical, raw-wire, zero gemiterm auth code), notebooklm-py `docs/auth-cookie-lifecycle.md` + ADRs 0023/0029/0030, and the grilling decisions below.

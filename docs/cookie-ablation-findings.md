@@ -1,6 +1,6 @@
 # Cookie Ablation Findings — gemini.google.com (2026-08-15)
 
-First-principles empirical study of Gemini web auth-cookie requirements and session decay, methodology mirrored from `teng-lin/notebooklm-py` `docs/auth-cookie-lifecycle.md` §3.3. This doc supersedes every cookie-requirement hypothesis in `docs/phantom-bug-synthesis.md` (which observed broken code observing broken jars).
+First-principles empirical study of Gemini web auth-cookie requirements and session decay, methodology mirrored from `teng-lin/notebooklm-py` `docs/auth-cookie-lifecycle.md` §3.3. This doc supersedes every cookie-requirement hypothesis in `docs/archive/phantom-bug-synthesis.md` (which observed broken code observing broken jars).
 
 ## Method
 

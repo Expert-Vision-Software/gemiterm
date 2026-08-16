@@ -46,6 +46,9 @@ bun run build:linux        # cross-compile to bun-linux-x64
 bun run build:windows      # cross-compile to bun-windows-x64
 bun run build:release      # minified host-target build
 bun run lint:mediation     # bash version — use this on Windows
+bun test tests/auth-regression   # auth invariant suite — REQUIRED in any PR touching auth-sensitive paths
+bun run check:auth-gate    # auth-regression gate (auth-path diff without tests/auth-regression/ diff => fail)
+bun run canary:auth        # mutation canary: asserts the suite goes RED on the historical bug shapes
 ```
 
 > **The PowerShell version of the mediation lint is broken.** `bun run lint:mediation:ps` (and `pwsh -File scripts/lint-path-mediation.ps1`) hardcodes `gemiterm-bun-rewrite/` in its path-normalization step (`scripts/lint-path-mediation.ps1:30`). It will report false positives on every file in `src/infrastructure/`. **Use `bash scripts/lint-path-mediation.sh` (or `bun run lint:mediation`) on Windows** — that one is correct. CI runs the bash form in `.github/workflows/test.yml:23-29`.
@@ -87,6 +90,22 @@ Files in the prompt layer:
 Test files for the prompt layer: `tests/cli/utils/{prompts,interactive-prompt,chat-list-browser,prompt-facade-contract}.test.ts`, plus the `--interactive` block in `tests/cli/list-command.test.ts`. `prompt-facade-contract.test.ts` pins the no-re-export rule (fix-3b): facade symbols are imported from `prompts.ts` only, never re-exported by consumers such as `interactive-prompt.ts`.
 
 The `gemiterm list -i` (or `--interactive`) flag is the **only** entry point to the chat-list TUI; the non-interactive forms (`gemiterm list`, `gemiterm list --format json`, `gemiterm list --search foo`, `gemiterm list --out out.txt`) are byte-equivalent to the pre-change baseline. Any change to the non-interactive output paths is a regression and must be caught by `tests/integration/commands/list.test.ts`.
+
+---
+
+## Auth regression gate (fix-4)
+
+Any change touching an **auth-sensitive path** must, **in the same PR**: (1) add or update tests under `tests/auth-regression/` and run `bun test tests/auth-regression`, and (2) append a changelog entry to `docs/auth-cookie-lifecycle.md`. `scripts/check-auth-gate.sh` (`bun run check:auth-gate`) enforces (1) — warn-only in CI until the first green warn-only run flips it to blocking (fix-4 task 3.4). Opt-out: `SKIP_AUTH_REGRESSION_GATE=1` **with a stated reason in the PR body**; opt-outs are audited.
+
+Auth-sensitive paths (authoritative executable list: `PATH_SPECS` in `scripts/check-auth-gate.{sh,ps1}`; doc form: `AUTH_SENSITIVE_PATHS`): `src/auth/**`, `src/infrastructure/storage.ts`, `src/infrastructure/io.ts`, `src/services/playwright-cli-driver.ts`, `src/services/gemini-client-wrapper.ts`, `src/services/profile-lifecycle.ts`, `docs/auth-cookie-lifecycle.md`, plus any changed file matching the content regex `cookie|PSID|storage_state|CookieSession|silentRefresh|rotate` (benign exceptions: `scripts/auth-gate-allowlist`).
+
+**Docs authority order** (binding; see `docs/README.md`): `docs/auth-cookie-lifecycle.md` (canonical, normative) > `docs/cookie-ablation-findings.md` (empirical record) > `docs/archive/**` (history, never normative; every archived file carries a banner) > everything else (must not contradict the lifecycle doc). Resolve doc conflicts by this rule, not judgment.
+
+Standing traps — pointers into the lifecycle doc; do not re-litigate:
+
+- **Static `models()` probe ban** — session honesty requires the init-GET + listChats wire (the classifier); the SDK's static `models()` table proves nothing.
+- **Cookie `expires` is meaningless for decay** — server-side PSIDTS supersession is undetectable locally; a future-dated `expires` on a stale jar is normal.
+- **No cookie-name filtering, anywhere, ever** — capture and persistence filter by domain only (`filterToGeminiDomains`). The H6 lesson; pinned by `tests/auth-regression/invariant-capture-integrity.test.ts` and the nightly mutation canary (`bun run canary:auth`).
 
 ---
 

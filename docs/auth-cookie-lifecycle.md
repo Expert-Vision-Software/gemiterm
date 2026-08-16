@@ -16,7 +16,7 @@
 > Companion documents:
 > [docs/cookie-ablation-findings.md](cookie-ablation-findings.md) — the empirical
 > study this doc embeds and must not contradict;
-> [docs/phantom-bug-synthesis.md](phantom-bug-synthesis.md) — the write-once bug
+> [docs/archive/phantom-bug-synthesis.md](archive/phantom-bug-synthesis.md) — the write-once bug
 > ledger (condensed into [Appendix A1](#a1--bug-history-the-phantom-saga-v240--v27x));
 > [docs/PLAYWRIGHT_CLI_API.md](PLAYWRIGHT_CLI_API.md) — browser command
 > reference for the L3 flow.
@@ -739,7 +739,7 @@ Tripwires that would shift the threat model:
   (`src/gemini_webapi/utils/rotate_1psidts.py`).
 - [W3C DBSC spec](https://w3c.github.io/webappsec-dbsc/).
 - In-repo: [docs/cookie-ablation-findings.md](cookie-ablation-findings.md),
-  [docs/phantom-bug-synthesis.md](phantom-bug-synthesis.md),
+  [docs/archive/phantom-bug-synthesis.md](archive/phantom-bug-synthesis.md),
   [docs/PLAYWRIGHT_CLI_API.md](PLAYWRIGHT_CLI_API.md),
   [AGENTS.md](../AGENTS.md).
 
@@ -784,7 +784,7 @@ master token:
 
 ### A1 · Bug history: the phantom saga (v2.4.0 → v2.7.x)
 
-Condensed from [docs/phantom-bug-synthesis.md](phantom-bug-synthesis.md)
+Condensed from [docs/archive/phantom-bug-synthesis.md](archive/phantom-bug-synthesis.md)
 (the write-once ledger is authoritative for detail). Several of its
 hypotheses are now **disproven by the 2026-08-15 ablation** — noted inline;
 do not re-litigate them.

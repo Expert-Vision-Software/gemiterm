@@ -1,7 +1,7 @@
 # Re-implementation guide — changes through v2.7.2
 
 **Range:** every commit in `b36e6276..58c9aa9` (152 commits), oldest first.
-**Excluded:** all authentication, cookie, probe, and phantom-session work — i.e. anything covered by `docs/phantom-bug-synthesis.md` (L1 `RotateCookies`, L2 silent refresh, `CookieMonitor` jar capture, `ensureAuthenticated` gates, `session-state`/`sessionInvalid`, the status PROBE column, `auth-daemon`, and every `spec:/archive/` bookkeeping commit tied to those changes).
+**Excluded:** all authentication, cookie, probe, and phantom-session work — i.e. anything covered by `docs/archive/phantom-bug-synthesis.md` (L1 `RotateCookies`, L2 silent refresh, `CookieMonitor` jar capture, `ensureAuthenticated` gates, `session-state`/`sessionInvalid`, the status PROBE column, `auth-daemon`, and every `spec:/archive/` bookkeeping commit tied to those changes).
 **Surviving scope:** the Gemini chat client, list/status/continue CLI commands, build/release tooling, test harness, and the OpenSpec/skills scaffolding that is independent of the auth saga.
 
 Each item below is the 2-line prompt to recreate that commit. Apply them in order.
@@ -216,4 +216,4 @@ Docs only.
 
 ## Excluded commits (auth / cookie / phantom-probe work)
 
-Omitted in full per the scope rule — every commit touching `auth-service`, `cookie-*` (monitor/storage/rotation/jar), `profile-auth-manager` ensure/RotateCookies/silentRefresh paths, `session-state`, the status PROBE column, `auth-daemon`, and all their `openspec/changes/*` proposal/spec-sync/archive bookkeeping. These are documented in `docs/phantom-bug-synthesis.md` and are intentionally out of scope for this guide.
+Omitted in full per the scope rule — every commit touching `auth-service`, `cookie-*` (monitor/storage/rotation/jar), `profile-auth-manager` ensure/RotateCookies/silentRefresh paths, `session-state`, the status PROBE column, `auth-daemon`, and all their `openspec/changes/*` proposal/spec-sync/archive bookkeeping. These are documented in `docs/archive/phantom-bug-synthesis.md` and are intentionally out of scope for this guide.
