@@ -118,6 +118,8 @@ async function writeJsonFile(path: string, data: unknown): Promise<void> {
  */
 async function writeFileExclusive(path: string, content: string): Promise<boolean> {
   const absolute = resolve(path);
+  const parent = dirname(absolute);
+  await ensureDir(parent);
   try {
     await writeFile(absolute, content, { encoding: "utf-8", flag: "wx" });
     return true;
