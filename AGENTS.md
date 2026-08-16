@@ -102,7 +102,7 @@ The `io.ts` surface to use: `writeTextFile`, `readTextFile`, `readJsonFile`, `wr
 
 The `path-utils.ts` surface: `resolvePath`, `joinPath`, `dirnamePath`, `getConfigDir`, `getProfilesDir`, `getProfilePath`, `getProfileLockPath`, `getProfileDir`, `getDefaultProfileMarkerPath`, `getTempFilePath`, `isWSL`, `getProjectRoot`, `getPackageJson`. Config dir resolution: `GEMITERM_CONFIG_DIR` env -> `%APPDATA%\gemiterm` (Windows) -> `~/gemiterm` (POSIX). v1.4.1 -> v2.0.0 upgrade preserves this dir unchanged.
 
-General style: no comments unless explicitly asked. Conventional-commits, commit frequently, never push. Default to delegating to subagents (sequential when output feeds the next step, parallel otherwise). Run `bun test` after any non-trivial change and confirm the baseline is intact.
+General style: never comment out code (delete it — git remembers). Explanatory comments are welcome and should be kept in sync with the code they describe; the best ones capture non-obvious *why* and link the governing spec or OpenSpec change file (e.g. `openspec/changes/<name>/specs/...`). Conventional-commits, commit frequently, never push. Default to delegating to subagents (sequential when output feeds the next step, parallel otherwise). Run `bun test` after any non-trivial change and confirm the baseline is intact.
 
 ---
 
