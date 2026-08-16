@@ -27,6 +27,8 @@ export class SessionKeepalive {
   private readonly deps: SessionKeepaliveDeps;
   private readonly intervalMs: number;
   private lastObservedBaseline: string | null = null;
+  // Interval tracking for the local fast path only. The 60s rotation floor itself lives
+  // in the shared cooldown (fix-3b) so this loop and manual refresh() suppress each other.
   private lastRotationTime: number | null = null;
   private handle: TimerHandle | null = null;
   private stopped = false;

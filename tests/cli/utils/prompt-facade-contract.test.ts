@@ -27,6 +27,7 @@ describe("prompt facade contract pins (fix-3b)", () => {
     for (const match of content.match(reExport) ?? []) {
       expect(FACADE_SYMBOLS.test(match)).toBe(false);
     }
+    expect(/export\s*\*/.test(content)).toBe(false);
   });
 
   test("no module imports facade symbols from interactive-prompt.ts", () => {

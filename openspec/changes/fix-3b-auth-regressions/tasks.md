@@ -22,4 +22,4 @@ Baseline: post-fix-3 suite (905 pass / 2 skip / 0 fail / 1934 expects / 61 files
 ## 4. Verification
 
 - [x] 4.1 Full suite green; net test count recorded here; `bun run typecheck` clean; mediation lint clean (bash form; the PowerShell form's exempt-file false positives are documented in AGENTS.md)
-  - Result: 917 pass / 2 skip / 0 fail / 1964 expects / 62 files (baseline 905 pass / 2 skip / 0 fail / 1934 expects / 61 files — net +12 tests, +1 file). `tsc --noEmit` clean. `bash scripts/lint-path-mediation.sh` via Git Bash: OK.
+  - Result: 917 pass / 2 skip / 0 fail / 1966 expects / 62 files (baseline 905 pass / 2 skip / 0 fail / 1934 expects / 61 files — net +12 tests, +1 file). `tsc --noEmit` clean. `bash scripts/lint-path-mediation.sh` via Git Bash: OK.

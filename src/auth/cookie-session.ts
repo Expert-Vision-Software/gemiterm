@@ -7,7 +7,7 @@ import { validateProfileName } from "../infrastructure/validators.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
 import { CookieValidator, findRoutableCookieValue } from "./cookie-validation.ts";
 import { CookieStore } from "./cookie-store.ts";
-import { RotationCooldown } from "./rotation-cooldown.ts";
+import { RotationCooldown, type RotationCooldownSeam } from "./rotation-cooldown.ts";
 import { SessionKeepalive, type SessionKeepaliveOptions } from "./session-keepalive.ts";
 import { SessionClassifier, type SessionProbeResult } from "./session-classifier.ts";
 
@@ -46,7 +46,7 @@ export interface CookieSessionDeps {
   cookieStore: Pick<CookieStore, "load" | "getJarMtime" | "saveFullJar">;
   validator: Pick<CookieValidator, "validate">;
   refresher: Pick<BrowserRefresher, "rotatePsidts">;
-  cooldown: RotationCooldown;
+  cooldown: RotationCooldownSeam;
   classifier: Pick<SessionClassifier, "classify" | "classifyDetailed">;
   recovery: Pick<RecoveryRung, "recover">;
   logger: Logger;

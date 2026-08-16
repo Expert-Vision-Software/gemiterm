@@ -32,6 +32,7 @@ describe("ListCommand", () => {
     cookieSession = {
       probe: mock(async () => "live" as const),
       recover: mock(async () => ({})),
+      createKeepalive: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
     };
     context = {
       verbose: false,
@@ -69,6 +70,7 @@ describe("ListCommand", () => {
     expect(output).toContain("abc123");
     expect(output).toContain("Python tips");
     expect(output).toContain("Total: 3 conversations");
+    expect(cookieSession.createKeepalive).not.toHaveBeenCalled();
   });
 
   test("applies limit", async () => {

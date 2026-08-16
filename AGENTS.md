@@ -84,7 +84,7 @@ Files in the prompt layer:
 - `src/cli/commands/profile-command.ts` — `promptInput` shim delegates to facade
 - `src/cli/commands/list-command.ts` — `--interactive/-i` flag drives `runInteractiveBrowser` (uses `browser` + `select`)
 
-Test files for the prompt layer: `tests/cli/utils/{prompts,interactive-prompt,chat-list-browser}.test.ts`, plus the `--interactive` block in `tests/cli/list-command.test.ts`.
+Test files for the prompt layer: `tests/cli/utils/{prompts,interactive-prompt,chat-list-browser,prompt-facade-contract}.test.ts`, plus the `--interactive` block in `tests/cli/list-command.test.ts`. `prompt-facade-contract.test.ts` pins the no-re-export rule (fix-3b): facade symbols are imported from `prompts.ts` only, never re-exported by consumers such as `interactive-prompt.ts`.
 
 The `gemiterm list -i` (or `--interactive`) flag is the **only** entry point to the chat-list TUI; the non-interactive forms (`gemiterm list`, `gemiterm list --format json`, `gemiterm list --search foo`, `gemiterm list --out out.txt`) are byte-equivalent to the pre-change baseline. Any change to the non-interactive output paths is a regression and must be caught by `tests/integration/commands/list.test.ts`.
 
