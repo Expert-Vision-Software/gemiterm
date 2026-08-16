@@ -703,3 +703,23 @@ The phantom check is skipped for `allProfiles` queries (profiles aggregate, per-
 
 **Verified:** full suite 851 pass / 2 skip / 0 fail / 1797 expects / 60 files (baseline 862/2/0/1748/56; net = +65 new auth/pin tests, −76 deleted-service tests); `tsc --noEmit` clean; path-mediation lint clean; non-interactive `list` byte-equivalence intact. Post-review fixes: detached-runner spawn path now resolved from the runner's own module dir (was silently pointing at a nonexistent `src/cli/refresh-runner.ts`), and the composition root moved inside `src/auth/` (`createCookieSession` factory — `src/cli/index.ts` no longer imports any collaborator directly). Live verification (fresh capture → `gemiterm list` → idle > 1 h → `gemiterm list`) is the user-assisted gate tracked in the change's task 7.4.
 
+
+## 2026-08-16 - fix-1 idle gate failed: the detached refresh-runner was silently dying (and double-spawning)
+
+**Discovered by:** continuation session executing the approved plan `plan-fix-1-detached-refresh-si-2026-08-16-approved.md`; trigger was the fix-1 task 7.4 idle gate.
+
+**Symptom:** `list` OK at 2026-08-16T00:55Z, "No conversations found." at 04:38Z after 3 h 43 m idle - the phantom signature, jar byte-unchanged on disk. The detached refresh-runner, spawned by every stale-jar `list` since the fix-1 cutover, had persisted nothing in 4 days: stdio discarded (`"ignore"`), zero `page-*.yml` sessions between 2026-08-15T23:23Z and 2026-08-16T05:14Z.
+
+**Root cause (two defects):**
+
+1. `spawnDetachedRefreshRunner` spawned the runner as a plain in-tree child. Under `bun run dev`, the script-runner teardown killed the whole tree: on fast-exit phantom lists the runner died <2 s in, before the browser (reproduced 07:31Z); on slower real-network lists it died mid-poll after opening the browser, orphaning the playwright daemon + headless chromium (05:16Z, 05:58Z). Foreground runs (`bun src/auth/refresh-runner.ts`) worked fine - the %TEMP% spawn-test that "proved" plain-child survival never included the `bun run` wrapper, which was the operative variable.
+2. The `list` path armed the profile twice (`getGeminiClient` -> `profileCookieLoader`, then `forProfile(same)` -> loader again, ~106 ms apart), so two runners raced the persistent-profile lock; the loser failed with "Browser is already in use".
+
+**Fix:** runner spawns `detached: true` (own process group, survives the CLI tree); stdout+stderr append-redirected to `<configDir>/gemiterm.log` via new sync `openAppendFd` (`io.ts`; mediation-legal single call site per the `writeFileExclusive` precedent) + `getLogFilePath()` (`path-utils.ts`); child env carries absolute `GEMITERM_CONFIG_DIR`; `ensureSession` memoizes spawned profiles (max one runner per profile per process); `runRefresh` logs a start line (profile + pid). A log-open failure degrades to discarded output - never blocks a refresh.
+
+**Verified:** 864 pass / 2 skip / 0 fail / 1822 expects / 60 files; typecheck + path-mediation clean. Live no-wait recipe (backdate jar mtime -2 h, then `bun run dev list`): exactly one runner, `rotated=true`, 41 cookies persisted, jar write + `gemiterm.log` entry within ~8.4 s, browser closed. Foreground control at 07:46Z rotated the same jar in 4.8 s. One observed miss: the 07:41Z detached run timed out at 60 s without a PSIDTS change (cold-start page-load mint slower than the poll window); the next invocation self-heals. Timeout kept at 60 s on n=1.
+
+**Related ledger entries:**
+- "2026-08-08 - minimal wait time to reproduce phantom/dead state: ~1h15m idle" - the idle cadence this engine defect was hiding behind; with a live runner the jar now self-heals instead of rotting
+- "The 4-cookie discovery (2026-08-06, afternoon)" - jar shape was never the dormancy mechanism; PSIDTS freshness plus a rotation engine that actually runs were
+- "2026-08-15 - fix-1 implemented" - shipped the (silently dead) runner this entry resurrects

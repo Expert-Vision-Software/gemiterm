@@ -84,6 +84,25 @@ The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as 
 - **WHEN** `ensureSession("p")` is called and the stored jar contains only `__Secure-1PSID` + `__Secure-1PSIDTS`
 - **THEN** the call does not reject on jar shape (tier-2 warns at most) and arms the session
 
+### Requirement: Detached refresh-runner survives the CLI and is observable
+The detached refresh-runner spawn MUST create the child in its own process group (`detached: true`) so it survives the exiting CLI process tree - including the `bun run` script-runner teardown on Windows, which otherwise kills it mid-flight. The child's stdout and stderr MUST be redirected (append) to `<configDir>/gemiterm.log` so every run records a start line and an outcome (`rotated=true`, timeout, or failure); a failure to open the log file MUST degrade to discarded output and MUST NOT block the refresh. The child environment MUST carry `GEMITERM_CONFIG_DIR` resolved to an absolute path. Within one process, `ensureSession` MUST spawn at most one detached runner per profile regardless of how many times the same stale profile is armed.
+
+#### Scenario: Runner outlives the script-runner teardown
+- **WHEN** a stale-jar `ensureSession` runs inside `bun run dev list` and the CLI process tree exits seconds later
+- **THEN** the spawned runner process is still alive and completes its own probe/open/poll cycle (rotation or logged timeout) independently of the parent
+
+#### Scenario: Every run lands in gemiterm.log
+- **WHEN** the detached runner starts and finishes (either outcome)
+- **THEN** `<configDir>/gemiterm.log` gains a start line (profile + pid) and an outcome line (`rotated=true`, the rotation-timeout info, or the failure warning)
+
+#### Scenario: Log failure never blocks a refresh
+- **WHEN** the log file cannot be opened at spawn time
+- **THEN** the runner is still spawned with discarded stdio and the refresh proceeds
+
+#### Scenario: One arm per invocation
+- **WHEN** `ensureSession` arms the same stale profile multiple times in one process
+- **THEN** exactly one detached runner is spawned for that profile
+
 ### Requirement: SDK cookie selection prefers the gemini.google.com-routable scope
 The armed SDK config (`secure1psid`/`secure1psidts`) and the rotation baseline MUST be derived by selecting the cookie that is RFC-6265-routable to `gemini.google.com`, never the first cookie by name. A jar that holds `__Secure-1PSID`/`__Secure-1PSIDTS` at both `.youtube.com` and `.google.com` scopes MUST yield the `.google.com` values (the `.youtube.com` values are a different session and fail Gemini auth). When no cookie of the name is routable to `gemini.google.com`, selection MUST fall back to any name match rather than returning null for an otherwise-present cookie.
 
