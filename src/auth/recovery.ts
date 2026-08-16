@@ -45,6 +45,15 @@ export class RecoveryRung {
       );
     }
 
-    return await this.deps.rearm(profile);
+    try {
+      return await this.deps.rearm(profile);
+    } catch (err) {
+      if (err instanceof AuthenticationError) {
+        throw err;
+      }
+      throw new AuthenticationError(
+        `Session re-arm failed for profile '${profile}' (${err instanceof Error ? err.message : String(err)}). Run 'gemiterm auth' to re-authenticate.`,
+      );
+    }
   }
 }

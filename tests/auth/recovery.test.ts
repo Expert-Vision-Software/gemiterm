@@ -80,6 +80,18 @@ describe("RecoveryRung", () => {
     expect(deps.refresher.rotatePsidts).toHaveBeenCalledTimes(1);
   });
 
+  test("non-auth re-arm failures map to AuthenticationError", async () => {
+    const deps = makeDeps({
+      rearm: mock(async () => {
+        throw new Error("rearm exploded");
+      }),
+    });
+    const rung = new RecoveryRung(deps as never);
+
+    await expect(rung.recover("p")).rejects.toBeInstanceOf(AuthenticationError);
+    expect(deps.refresher.rotatePsidts).toHaveBeenCalledTimes(1);
+  });
+
   test("refresh exceptions map to AuthenticationError", async () => {
     const deps = makeDeps({
       refresher: {
