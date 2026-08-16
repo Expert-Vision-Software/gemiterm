@@ -21,7 +21,7 @@ describe("delete command integration", () => {
   let errorSpy: ReturnType<typeof spyOn>;
   let originalEnv: Record<string, string | undefined>;
   let findProfileSpy: ReturnType<typeof mock>;
-  let getActiveProfilesSpy: ReturnType<typeof mock>;
+  let activeProfilesSpy: ReturnType<typeof mock>;
   let exitSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -29,11 +29,11 @@ describe("delete command integration", () => {
     client = makeClient();
     context = {
       verbose: false,
-      profileAuthManager: {
-        getActiveProfiles: mock(() => ["work", "personal"]),
+      cookieSession: {
+        activeProfiles: mock(() => ["work", "personal"]),
         findProfileForConversation: mock(() => "work"),
-        ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
-      } as unknown as CliCommandContext["profileAuthManager"],
+        ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+      } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
     };
@@ -91,7 +91,7 @@ describe("delete command integration", () => {
 
     test("throws AuthenticationError when no profile owns the conversation", async () => {
       findProfileSpy = mock(() => null);
-      context.profileAuthManager.findProfileForConversation = findProfileSpy;
+      context.cookieSession.findProfileForConversation = findProfileSpy;
 
       await expect(command.execute(["unknown-id", "--force"], context)).rejects.toThrow(AuthenticationError);
 
@@ -107,8 +107,8 @@ describe("delete command integration", () => {
     });
 
     test("uses default profile when only one profile is active", async () => {
-      getActiveProfilesSpy = mock(() => ["default"]);
-      context.profileAuthManager.getActiveProfiles = getActiveProfilesSpy;
+      activeProfilesSpy = mock(() => ["default"]);
+      context.cookieSession.activeProfiles = activeProfilesSpy;
 
       await command.execute(["conv-123", "--force"], context);
 

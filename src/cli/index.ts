@@ -3,24 +3,21 @@
 import { CommandRegistry } from "./command-registry.ts";
 import { Logger } from "../infrastructure/logger.ts";
 import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
-import { CookieStorageService } from "../services/cookie-storage-service.ts";
-import { ProfileAuthManager } from "../services/profile-auth-manager.ts";
 import { ProfileLifecycle } from "../services/profile-lifecycle.ts";
 import { SingleExport, BatchExport } from "../services/export-strategy.ts";
 import { fetchChatForRequest } from "./utils/gemini-queries.ts";
-import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
-import { CookieMonitor } from "../services/cookie-monitor.ts";
-import { AuthService } from "../services/auth-service.ts";
-import { CookieStorage, ProfileManager } from "../infrastructure/storage.ts";
+import { ProfileManager, CookieStorage } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts";
 import { getPackageJson } from "../infrastructure/path-utils.ts";
 import { parseGlobalArgs, printVersion, printHelp } from "../infrastructure/cli-parser.ts";
 import { AuthenticationError } from "../core/errors.ts";
+import { createCookieSession } from "../auth/cookie-session.ts";
+import type { CookieSession } from "../auth/cookie-session.ts";
 
 const pkgPromise = getPackageJson(import.meta.url);
 
 interface CliServices {
-  profileAuthManager: ProfileAuthManager;
+  cookieSession: CookieSession;
   profileLifecycle: ProfileLifecycle;
   exportStrategies: { single: SingleExport; batch: BatchExport };
   getGeminiClient: () => Promise<GeminiClientService>;
@@ -29,21 +26,30 @@ interface CliServices {
 
 async function setupServices(): Promise<CliServices> {
   const logger = new Logger("cli");
-  const cookieStorage = new CookieStorage();
-  const profileManager = new ProfileManager(cookieStorage);
-  const cookieStorageService = new CookieStorageService({ cookieStorage, logger });
+  const profileManager = new ProfileManager(new CookieStorage());
 
-  const driver = new PlaywrightCliDriver();
-  const cookieMonitor = new CookieMonitor({ driver, logger });
-  const authService = new AuthService({ driver, cookieMonitor, cookieStorage, logger });
+  const cookieSession = createCookieSession({
+    logger,
+    listProfiles,
+    createProbeClient: (config, profile) =>
+      new GeminiClientService(
+        { secure1psid: config.secure1psid, secure1psidts: config.secure1psidts },
+        logger,
+        undefined,
+        profile,
+      ),
+  });
+
   const profileLifecycle = new ProfileLifecycle({
-    cookieStorage,
     profileManager,
-    driver,
-    cookieMonitor,
-    authService,
+    cookieSession,
     logger,
   });
+
+  const profileCookieLoader = async (profileName: string) => {
+    const armed = await cookieSession.ensureSession(profileName);
+    return { secure1psid: armed.secure_1psid, secure1psidts: armed.secure_1psidts };
+  };
 
   let geminiClient: GeminiClientService | null = null;
 
@@ -55,11 +61,11 @@ async function setupServices(): Promise<CliServices> {
     }
     const profileName = await getDefaultProfileName();
     try {
-      const cookieData = await profileManager.loadCookiesForApi(profileName);
+      const { secure1psid, secure1psidts } = await profileCookieLoader(profileName);
       geminiClient = new GeminiClientService(
-        { secure1psid: cookieData.secure1psid, secure1psidts: cookieData.secure1psidts },
+        { secure1psid, secure1psidts },
         logger,
-        cookieStorageService,
+        profileCookieLoader,
         profileName,
       );
       return geminiClient;
@@ -67,10 +73,6 @@ async function setupServices(): Promise<CliServices> {
       throw new AuthenticationError();
     }
   }
-
-  const factoryClient = new GeminiClientService({ secure1psid: "" }, logger, cookieStorageService);
-  try { await factoryClient.init(); } catch { /* factory: init deferred until first real profile call */ }
-  const profileAuthManager = new ProfileAuthManager({ profileManager, cookieStorageService, logger, geminiClient: factoryClient });
 
   const exportStrategies = {
     single: new SingleExport({
@@ -85,7 +87,7 @@ async function setupServices(): Promise<CliServices> {
     }),
   };
 
-  return { profileAuthManager, profileLifecycle, exportStrategies, getGeminiClient, listProfiles };
+  return { cookieSession, profileLifecycle, exportStrategies, getGeminiClient, listProfiles };
 }
 
 async function main(): Promise<void> {
@@ -140,7 +142,7 @@ async function main(): Promise<void> {
   try {
     await handler.execute(subcommandArgs, {
       verbose,
-      profileAuthManager: services.profileAuthManager,
+      cookieSession: services.cookieSession,
       profileLifecycle: services.profileLifecycle,
       exportStrategies: services.exportStrategies,
       getGeminiClient: services.getGeminiClient,

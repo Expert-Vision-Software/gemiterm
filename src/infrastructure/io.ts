@@ -20,7 +20,8 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { mkdirSync, openSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 
 export class IOError extends Error {
   override readonly name = "IOError";
@@ -109,6 +110,51 @@ async function writeJsonFile(path: string, data: unknown): Promise<void> {
   await writeTextFile(path, JSON.stringify(data, null, 2));
 }
 
+/**
+ * Creates the file at `path` with `content` only if it does not already
+ * exist (the `wx` exclusive-create flag). Returns `true` when the file was
+ * created, `false` when it already existed — the cross-process lock
+ * acquisition primitive.
+ */
+async function writeFileExclusive(path: string, content: string): Promise<boolean> {
+  const absolute = resolve(path);
+  try {
+    await writeFile(absolute, content, { encoding: "utf-8", flag: "wx" });
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (code === "EEXIST") {
+      return false;
+    }
+    throw wrap("writeFileExclusive", absolute, err instanceof Error ? err : undefined);
+  }
+}
+
+/**
+ * Atomic text write: writes to a temp file in the target's directory, then
+ * renames it over the target. Readers observe either the old or the new
+ * content, never a partial write. The temp file is removed on failure.
+ */
+async function writeTextFileAtomic(path: string, content: string): Promise<void> {
+  const absolute = resolve(path);
+  const parent = dirname(absolute);
+  await ensureDir(parent);
+  const tmp = join(
+    parent,
+    `.${basename(absolute)}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  );
+  try {
+    await writeFile(tmp, content, "utf-8");
+    await rename(tmp, absolute);
+  } catch (err) {
+    try {
+      await rm(tmp, { force: true });
+    } catch {
+    }
+    throw wrap("writeTextFileAtomic", absolute, err instanceof Error ? err : undefined);
+  }
+}
+
 async function removeDir(path: string): Promise<void> {
   try {
     await rm(path, { recursive: true, force: true });
@@ -169,13 +215,34 @@ async function getFileMtime(path: string): Promise<Date | null> {
   }
 }
 
+/**
+ * Synchronously opens (creating if needed) the file at `path` for appending
+ * and returns the raw file descriptor. Sync is required because `Bun.spawn`
+ * needs a numeric fd at spawn time to redirect a detached child's stdio to a
+ * log file (spec: "Detached refresh-runner survives the CLI and is observable",
+ * openspec/changes/fix-1-cookie-session-core). Parent directories are created
+ * recursively.
+ */
+function openAppendFd(path: string): number {
+  const absolute = resolve(path);
+  try {
+    mkdirSync(dirname(absolute), { recursive: true });
+    return openSync(absolute, "a");
+  } catch (err) {
+    throw wrap("openAppendFd", absolute, err instanceof Error ? err : undefined);
+  }
+}
+
 export {
   ensureDir,
   existsFile,
   getFileMtime,
+  openAppendFd,
   readTextFile,
   safeReadTextFile,
   writeTextFile,
+  writeFileExclusive,
+  writeTextFileAtomic,
   readJsonFile,
   writeJsonFile,
   removeDir,

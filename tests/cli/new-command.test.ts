@@ -28,7 +28,7 @@ describe("NewCommand", () => {
     client = makeClient();
     context = {
       verbose: false,
-      profileAuthManager: {} as CliCommandContext["profileAuthManager"],
+      cookieSession: {} as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
     };

@@ -9,10 +9,10 @@ function makeContext(
 ): CliCommandContext {
   return {
     verbose: false,
-    profileAuthManager: {
-      getActiveProfiles: mock(() => activeProfiles),
+    cookieSession: {
+      activeProfiles: mock(() => activeProfiles),
       findProfileForConversation: mock(findProfileForConversation),
-      ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+      ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
     },
   } as unknown as CliCommandContext;
 }

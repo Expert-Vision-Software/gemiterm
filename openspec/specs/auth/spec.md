@@ -4,257 +4,165 @@ The interactive authentication capability for `gemiterm`. It owns the end-to-end
 
 ## Requirements
 
-### Requirement: AuthService.authenticate orchestrates the full login flow
-The `AuthService.authenticate(profileName?)` method MUST be the single entry point for the login flow. When called, it MUST resolve the profile name (using the provided name, or the configured default), validate it, log an info-level "Starting authentication" message, and then in order: print a one-shot headed-browser notification, launch the browser via `PlaywrightCliDriver.openHeaded("https://gemini.google.com/app", profileName, profileName)`, wait up to 300000 ms (5 minutes) for the cookie monitor to report auth cookies, save the captured cookies via the cookie storage, compute the session expiry from `__Secure-1PSIDTS.expires`, and print a confirmation message containing the cookie count and the expiration date (when known). The browser session MUST always be closed in a `finally` block, even if the wait or save step throws.
+### Requirement: CookieSession facade is the single authentication surface
+The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as the only authentication surface consumed by the CLI. The facade MUST expose `ensureSession(profile)`, `captureLogin(profile)`, `probe(profile)`, `refresh(profile)`, `activeProfiles()`, and `findProfileForConversation(conversationId)`, and MUST accept all collaborators (`BrowserRefresher`, `CookieStore`, `CookieValidator`, recovery rung, logger) through a single `CookieSessionDeps` deps-object so the implementation is replaceable at the seam. No file outside `src/auth/` may import the collaborators directly.
 
-#### Scenario: Successful authentication returns cookies and expiry
-- **WHEN** `authenticate("test-profile")` is called and the cookie monitor reports both `__Secure-1PSID` and `__Secure-1PSIDTS` before the timeout
-- **THEN** the method resolves with an `AuthResult` whose `cookies` array has length 2, whose `expiresAt` is a `Date` derived from `__Secure-1PSIDTS.expires * 1000`, the driver `openHeaded` is called exactly once with the Gemini app URL, the cookie monitor `start` is called exactly once, the cookie storage `save` is called exactly once, and the driver `closeSession` is called exactly once with the profile name
+#### Scenario: Facade wires collaborators from a deps-object
+- **WHEN** a `CookieSession` is constructed with fakes for every collaborator in `CookieSessionDeps`
+- **THEN** `ensureSession`, `captureLogin`, `probe`, and `refresh` each complete using only the injected fakes (no direct construction of concrete collaborators inside the facade)
 
-#### Scenario: Driver is opened with the Gemini app URL and the profile as session
-- **WHEN** `launchBrowser("my-profile")` is called via the public flow
-- **THEN** the driver `openHeaded` is invoked with `"https://gemini.google.com/app"` as the URL, `"my-profile"` as the profile, and `"my-profile"` as the session identifier
+#### Scenario: Conversation routing contract is preserved
+- **WHEN** `findProfileForConversation("<cid>")` is called and exactly one active profile's client reports owning the conversation
+- **THEN** it resolves that profile's name; and when no active profile owns it, it resolves `null`
 
-#### Scenario: Browser is closed in a finally block on error
-- **WHEN** `authenticate("test-profile")` is called and `waitForLogin` throws (e.g. timeout)
-- **THEN** the driver `closeSession` is still invoked with the profile name (verified by `expect(driver.closeSession).toHaveBeenCalledWith("test-profile")`)
+### Requirement: CookieSession.ensureSession arms from the on-disk jar
+`ensureSession(profile)` MUST load the profile's stored jar, run tier validation, and return the armed cookies without any network call or browser launch when the jar is fresh (storage mtime within 30 minutes). When the jar's mtime exceeds 30 minutes, the method MUST spawn a detached refresh-runner process for the profile (fire-and-forget) and STILL return the on-disk armed cookies immediately - the current command is never blocked on the browser. Legacy 2/4-cookie jars MUST arm without error (shape is not a validity signal) and self-upgrade via the detached refresh.
 
-#### Scenario: Invalid profile name is rejected
-- **WHEN** `authenticate("bad name!")` is called
-- **THEN** the method rejects with an error whose message contains `invalid characters`
+#### Scenario: Fresh jar arms with zero added latency
+- **WHEN** `ensureSession("p")` is called and the profile's `storage_state.json` mtime is under 30 minutes old
+- **THEN** the resolved cookies equal the on-disk jar, no refresh-runner process is spawned, and neither the refresher nor the classifier is invoked
 
-#### Scenario: Authentication timeout is surfaced as AuthServiceTimeoutError
-- **WHEN** `waitForLogin` is called and the cookie monitor never invokes its callback before the timeout fires
-- **THEN** the method rejects with an `AuthServiceTimeoutError` whose message contains the configured timeout in milliseconds and the substring `No auth cookies detected`, and the cookie monitor `stop` has been called
+#### Scenario: Stale jar arms immediately and spawns a detached refresh
+- **WHEN** `ensureSession("p")` is called and the jar mtime is over 30 minutes old
+- **THEN** the method resolves with the on-disk cookies without waiting, and exactly one detached refresh-runner process is spawned for profile `p`
 
-### Requirement: AuthService prints headed-browser notification (no Enter-block)
-The `AuthService.notifyUser(profileName)` method MUST print a one-shot UI message to the console before launching the browser. The message MUST contain the substring `Opening headed browser`, the Gemini app URL `https://gemini.google.com/app`, and the substring `auto-detect`. The method MUST NOT block on an Enter key press — once the messages are printed, the call MUST return and the caller MUST proceed directly to launch the browser. The single-line "Press Enter to launch browser" prompt described in earlier design notes is not implemented; the current flow runs the launch immediately after the notification.
+#### Scenario: Legacy trimmed jar is accepted
+- **WHEN** `ensureSession("p")` is called and the stored jar contains only `__Secure-1PSID` + `__Secure-1PSIDTS`
+- **THEN** the call does not reject on jar shape (tier-2 warns at most) and arms the session
 
-#### Scenario: Notification includes URL and auto-detect hint
-- **WHEN** `notifyUser("default")` is called
-- **THEN** the combined console output contains the substrings `Opening headed browser`, `https://gemini.google.com/app`, and `auto-detect`
+### Requirement: Detached refresh-runner survives the CLI and is observable
+The detached refresh-runner spawn MUST create the child in its own process group (`detached: true`) so it survives the exiting CLI process tree - including the `bun run` script-runner teardown on Windows, which otherwise kills it mid-flight. The child's stdout and stderr MUST be redirected (append) to `<configDir>/gemiterm.log` so every run records a start line and an outcome (`rotated=true`, timeout, or failure); a failure to open the log file MUST degrade to discarded output and MUST NOT block the refresh. The child environment MUST carry `GEMITERM_CONFIG_DIR` resolved to an absolute path. Within one process, `ensureSession` MUST spawn at most one detached runner per profile regardless of how many times the same stale profile is armed.
 
-#### Scenario: Notification does not block waiting for input
-- **WHEN** the auth flow calls `notifyUser` followed by `launchBrowser`
-- **THEN** `launchBrowser` runs without the user pressing Enter (no `readline` or stdin reader is involved in the path)
+#### Scenario: Runner outlives the script-runner teardown
+- **WHEN** a stale-jar `ensureSession` runs inside `bun run dev list` and the CLI process tree exits seconds later
+- **THEN** the spawned runner process is still alive and completes its own probe/open/poll cycle (rotation or logged timeout) independently of the parent
 
-### Requirement: AuthService prints a confirmation with cookie count and expiry
-The `AuthService.confirmAuthSuccess(cookieCount, expiresAt, cookies)` method MUST print a success block to the console. The block MUST contain the substrings `Login auto-detected`, `Authentication successful`, and `<cookieCount> cookies`. When `expiresAt` is a `Date`, the block MUST additionally contain the substring `Session expires` followed by the localized date. The block MUST also report the presence of `__Secure-1PSID` in the supplied cookies with a `✅` (present) or `❌` (absent) marker.
+#### Scenario: Every run lands in gemiterm.log
+- **WHEN** the detached runner starts and finishes (either outcome)
+- **THEN** `<configDir>/gemiterm.log` gains a start line (profile + pid) and an outcome line (`rotated=true`, the rotation-timeout info, or the failure warning)
 
-#### Scenario: Success block with expiry
-- **WHEN** `confirmAuthSuccess(2, new Date("2026-12-31T00:00:00Z"), makeAuthCookies())` is called
-- **THEN** the combined output contains `Login auto-detected`, `Authentication successful`, `2 cookies`, `Session expires`, `__Secure-1PSID`, and the `✅` marker
+#### Scenario: Log failure never blocks a refresh
+- **WHEN** the log file cannot be opened at spawn time
+- **THEN** the runner is still spawned with discarded stdio and the refresh proceeds
 
-#### Scenario: Success block without expiry
-- **WHEN** `confirmAuthSuccess(1, null, [])` is called
-- **THEN** the combined output contains `Authentication successful` and `1 cookies` but does NOT contain the substring `Session expires`
+#### Scenario: One arm per invocation
+- **WHEN** `ensureSession` arms the same stale profile multiple times in one process
+- **THEN** exactly one detached runner is spawned for that profile
 
-#### Scenario: Success block with missing __Secure-1PSID
-- **WHEN** `confirmAuthSuccess(0, null, [])` is called
-- **THEN** the combined output contains `__Secure-1PSID` and the `❌` marker
+### Requirement: SDK cookie selection prefers the gemini.google.com-routable scope
+The armed SDK config (`secure1psid`/`secure1psidts`) and the rotation baseline MUST be derived by selecting the cookie that is RFC-6265-routable to `gemini.google.com`, never the first cookie by name. A jar that holds `__Secure-1PSID`/`__Secure-1PSIDTS` at both `.youtube.com` and `.google.com` scopes MUST yield the `.google.com` values (the `.youtube.com` values are a different session and fail Gemini auth). When no cookie of the name is routable to `gemini.google.com`, selection MUST fall back to any name match rather than returning null for an otherwise-present cookie.
 
-### Requirement: CookieMonitor polls every 2 seconds using a sign-out-link JS probe
-The `CookieMonitor.start(session, onCookiesFound, timeoutMs?)` method MUST begin polling the browser session identified by `session` for the presence of the auth cookies. The poll cadence MUST be a 2-second interval (`POLL_INTERVAL_MS = 2000`). On each tick the monitor MUST run a JavaScript probe that detects a logged-in state by checking for the presence of `a[href^="https://accounts.google.com/SignOutOptions"]`; the probe expression MUST be exactly `document.querySelector('a[href^="https://accounts.google.com/SignOutOptions"]') !== null`. Only when the probe returns `true` (matched as a trimmed string `"true"`) MUST the monitor then read the cookie list and require BOTH `__Secure-1PSID` and `__Secure-1PSIDTS` to be present before invoking the `onCookiesFound` callback. The monitor MUST also accept a `timeoutMs` parameter (default 300000 ms / 5 minutes) and MUST apply `.unref()` to the timeout handle so it does not block CLI process exit.
+#### Scenario: google.com scope wins over an earlier youtube.com sibling
+- **WHEN** a jar holds `__Secure-1PSID` and `__Secure-1PSIDTS` at `.youtube.com` (earlier in the jar) and at `.google.com` (later), with different values
+- **THEN** the armed SDK config and the refresh baseline resolve to the `.google.com` values
 
-#### Scenario: Monitor fires callback on first tick where probe and cookies are both ready
-- **WHEN** `start("sess1", cb, 10000)` is called and every 2-second tick returns `true` from the probe and returns both required cookies from `cookieList`
-- **THEN** `cb` is invoked exactly once with the auth cookies, `isRunning` is `false`, and the interval has been cleared
+#### Scenario: fallback to any name match when nothing is routable
+- **WHEN** a jar holds a same-name cookie whose domain is not routable to `gemini.google.com`
+- **THEN** selection falls back to that cookie's value (never `undefined`/`null` for a present cookie)
 
-#### Scenario: Monitor does not call driver immediately on start
-- **WHEN** `start("sess1", cb, 10000)` is called
-- **THEN** `driver.evalJs` is NOT called synchronously — the first eval call is scheduled by the interval and only happens after the 2-second delay
+### Requirement: CookieSession.captureLogin captures the full browser jar (gate is not payload)
+`captureLogin(profile)` MUST open a headed browser (`https://gemini.google.com/app`) after printing a one-shot notification (containing `Opening headed browser` and the app URL, without blocking on input), poll the session's cookie list until BOTH `__Secure-1PSID` and `__Secure-1PSIDTS` are present (5-minute timeout), and then persist the COMPLETE browser storage state captured via `state-save` as the payload - filtered by domain (`.google.com`, `.youtube.com`, `accounts.google.com`) and by nothing else. No cookie-name filtering may exist in the capture path. The browser session MUST be closed in a `finally` block on every path. On success the method MUST print a confirmation containing the captured cookie count and the expiry derived from `__Secure-1PSIDTS.expires`; on timeout it MUST reject with a typed timeout error.
 
-#### Scenario: Monitor does not call callback when probe returns false
-- **WHEN** `start("sess1", cb, 10000)` is called and every tick returns `false` from the probe
-- **THEN** `cb` is never invoked and `isRunning` is `false` after `stop()`
+#### Scenario: Gate waits for both required cookies; payload is the full jar
+- **WHEN** the cookie list first reports both `__Secure-1PSID` and `__Secure-1PSIDTS` while the browser also holds `SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `NID`
+- **THEN** the persisted jar contains all of those cookies (payload is never filtered to the gate set) and the confirmation reports the full count
 
-#### Scenario: Monitor swallows repeated eval throws
-- **WHEN** `start("sess1", cb, 10000)` is called and every tick's `evalJs` rejects
-- **THEN** `start` resolves successfully, `cb` is never invoked, and the monitor continues running (does not reject)
+#### Scenario: Notification prints and does not block
+- **WHEN** `captureLogin` begins
+- **THEN** console output contains `Opening headed browser` and `https://gemini.google.com/app`, and the browser launch proceeds without reading stdin
 
-#### Scenario: Timeout handle is unref'd so CLI can exit
-- **WHEN** `start("sess1", cb, 10000)` is called
-- **THEN** the `setTimeout` handle used for the hard timeout has `unref()` called on it (the monitor must not keep the event loop alive past the timeout)
+#### Scenario: Browser closed even when the gate times out
+- **WHEN** the required cookies never appear within the timeout
+- **THEN** the driver's session close is still invoked and the call rejects with the typed timeout error
 
-### Requirement: CookieMonitor exposes checkLoggedIn and checkCookies helpers
-The `CookieMonitor.checkLoggedIn(session)` method MUST return `true` when the sign-out-link probe evaluates to the string `"true"` (with surrounding whitespace allowed) and MUST return `false` for any other return value, including probe errors. The `CookieMonitor.checkCookies(session)` method MUST call `driver.cookieList(session)`, filter the result to entries whose `name` is `__Secure-1PSID` or `__Secure-1PSIDTS`, and return the filtered list when both required cookies are present; otherwise it MUST return an empty array. Both helpers MUST swallow driver errors and return `false` / `[]` respectively.
+### Requirement: BrowserRefresher rotates PSIDTS via headless persistent-profile page load
+The `src/auth/browser-refresher.ts` collaborator MUST provide `rotatePsidts(profile, baselineValue, timeoutMs = 60000)`: open the persistent-profile browser headless (`open --browser=chromium --persistent --profile=<profileDir>` without `--headed`) at `https://gemini.google.com/app`, poll the cookie list until the `__Secure-1PSIDTS` value differs from `baselineValue` or the timeout elapses, capture the full state via `state-save`, persist through the store's full-jar writer with the domain filter, and close the session in a `finally` block. On timeout or unchanged PSIDTS it MUST resolve `{ rotated: false }` without throwing and without persisting.
 
-#### Scenario: checkLoggedIn returns true on probe success
-- **WHEN** `driver.evalJs` returns the string `"true"`
-- **THEN** `checkLoggedIn("sess1")` resolves with `true`
+#### Scenario: Rotation detected and persisted
+- **WHEN** the headless page's cookie list reports an `__Secure-1PSIDTS` value different from the baseline within 60 seconds
+- **THEN** the full jar is persisted via the full-jar writer and the result is `{ rotated: true }`
 
-#### Scenario: checkLoggedIn returns false on whitespace-padded true
-- **WHEN** `driver.evalJs` returns the string `"  true  \n"`
-- **THEN** `checkLoggedIn("sess1")` resolves with `true` (whitespace is trimmed)
+#### Scenario: Timeout closes the browser and persists nothing
+- **WHEN** PSIDTS never changes before the timeout
+- **THEN** the browser session is closed, no jar write occurs, and the result is `{ rotated: false }`
 
-#### Scenario: checkLoggedIn returns false on probe throw
-- **WHEN** `driver.evalJs` rejects
-- **THEN** `checkLoggedIn("sess1")` resolves with `false` (does not throw)
+#### Scenario: Refresh preserves companion cookies
+- **WHEN** a rotation is persisted
+- **THEN** the stored jar still contains cookies the refresher did not rotate (e.g. `SID`, `HSID`, `APISID`) - the full-jar writer replaces, never trims
 
-#### Scenario: checkCookies returns required cookies when both present
-- **WHEN** `driver.cookieList` returns an array containing both `__Secure-1PSID` and `__Secure-1PSIDTS`
-- **THEN** `checkCookies("sess1")` resolves with a length-2 array containing both required cookie names
+### Requirement: CookieStore performs snapshot/delta CAS saves
+The `src/auth/cookie-store.ts` collaborator MUST provide `load(profile)` returning the jar plus a snapshot keyed by `(name, domain, path) -> value`, and `save(profile, cookies, snapshot)` writing ONLY entries this process changed, and ONLY where the on-disk value still matches the snapshot (compare-and-swap). A concurrent writer's fresher value for an entry this process did not change MUST survive the save. Writes MUST be atomic (temp file + rename) through the `io.ts` surface, and the on-disk format MUST remain the Playwright storage-state JSON.
 
-#### Scenario: checkCookies returns empty when only one required cookie present
-- **WHEN** `driver.cookieList` returns only `__Secure-1PSID`
-- **THEN** `checkCookies("sess1")` resolves with `[]`
+#### Scenario: Stale process cannot clobber a sibling's fresh rotation
+- **WHEN** process A loads a jar, process B rotates `__Secure-1PSIDTS` on disk, and process A then saves an unrelated change with its original snapshot
+- **THEN** the on-disk `__Secure-1PSIDTS` still holds process B's rotated value
 
-### Requirement: CookieMonitor.stop is idempotent and clears the interval
-The `CookieMonitor.stop()` method MUST clear the active polling interval and timeout handle, set the internal `_stopped` flag, and log a `Cookie monitor stopped` info message. Subsequent calls to `stop()` MUST be no-ops (verified by the `stop is idempotent` test). After `stop()` is called, `isRunning` MUST be `false`.
+#### Scenario: Save round-trips through the storage format
+- **WHEN** a jar is saved and reloaded
+- **THEN** the loaded cookies equal the saved set (same names, values, domains, paths)
 
-#### Scenario: stop prevents further polling
-- **WHEN** `start` is called and then `stop` is called before the first tick fires
-- **THEN** the callback is never invoked and `isRunning` is `false`
+### Requirement: CookieStore guards concurrent writers with a cross-process lock
+The store MUST serialize writers through one sibling lock file per profile (`storage_state.json.lock`) acquired by exclusive file creation with 100 ms retries, implemented purely with Bun filesystem APIs (no shell commands, no OS-specific locking). CAS saves MUST be fail-open (proceed after waiting at most 10 seconds); full-jar writers MUST be fail-closed (throw typed `LockUnavailableError` after at most 90 seconds). A lock whose file mtime is older than 120 seconds MUST be stealable. Behavior MUST be identical on Windows and POSIX.
 
-#### Scenario: stop is idempotent
-- **WHEN** `stop()` is called three consecutive times on a monitor that was never started
-- **THEN** none of the calls throw and `isRunning` is `false`
+#### Scenario: CAS save proceeds when the lock is held too long
+- **WHEN** a CAS save cannot acquire the lock within 10 seconds
+- **THEN** the save proceeds anyway (fail-open) rather than failing the command
 
-### Requirement: CookieStorageService loads and validates per-profile cookies
-The `CookieStorageService.loadCookiesForProfile(profileName)` method MUST return a `LoadedCookies` object with two fields: `secure_1psid: string` and `secure_1psidts: string | null`. The method MUST read cookies from the underlying `CookieStorage.load(profileName)`, build a name-to-value map, and extract the values for `__Secure-1PSID` and `__Secure-1PSIDTS`. If `__Secure-1PSID` is missing, the method MUST throw an `Error` whose message contains `Missing required cookie __Secure-1PSID` and mentions the profile name and `gemiterm auth`. The `secure_1psidts` field MUST be `null` when the cookie is absent.
+#### Scenario: Full-jar writer fails closed
+- **WHEN** a full-jar writer cannot acquire the lock within 90 seconds
+- **THEN** it rejects with `LockUnavailableError` and the on-disk jar is unchanged
 
-#### Scenario: Load returns both cookie values
-- **WHEN** the profile's storage contains both `__Secure-1PSID` and `__Secure-1PSIDTS`
-- **THEN** `loadCookiesForProfile("default")` returns `{ secure_1psid: "<psid value>", secure_1psidts: "<psidts value>" }`
+#### Scenario: Stale lock is stolen
+- **WHEN** a lock file exists with an mtime older than 120 seconds
+- **THEN** the next writer removes and re-acquires it instead of waiting
 
-#### Scenario: Load returns null for missing 1PSIDTS
-- **WHEN** the profile's storage contains only `__Secure-1PSID`
-- **THEN** `loadCookiesForProfile("default")` returns `{ secure_1psid: "<psid value>", secure_1psidts: null }`
+### Requirement: CookieValidator enforces two-tier session validation
+The `src/auth/cookie-validation.ts` collaborator MUST raise a typed validation error (tier 1) when `__Secure-1PSIDTS` is absent, expired, or not RFC-6265-routable to `gemini.google.com` (domain/path scope would not deliver it to that host), or when `__Secure-1PSID` is absent. It MUST log at most one warning per process (tier 2) when the companion set (`SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `SIDCC`, `NID`) is absent - a hedge for un-ablated surfaces, never a gate. Local `expires` values MUST NOT be treated as a validity signal beyond routability.
 
-#### Scenario: Load throws when __Secure-1PSID is missing
-- **WHEN** the profile's storage contains only `__Secure-1PSIDTS`
-- **THEN** `loadCookiesForProfile("default")` throws an error whose message contains `Missing required cookie`
+#### Scenario: Tier 1 raises on missing PSIDTS
+- **WHEN** a jar without `__Secure-1PSIDTS` is validated
+- **THEN** validation rejects with the typed tier-1 error
 
-### Requirement: CookieStorageService validates and computes cookie freshness
-The `CookieStorageService.validateCookies(cookies)` method MUST return `true` when the cookie array contains entries for BOTH `__Secure-1PSID` and `__Secure-1PSIDTS`, and MUST return `false` for any other case (including empty arrays). The `CookieStorageService.checkCookieFreshness(cookies)` method MUST return `true` only when `__Secure-1PSIDTS.expires` is a positive number AND the resulting expiry is more than 7 days (604800000 ms) in the future; it MUST return `false` for expired cookies, cookies expiring within 7 days, and cookies with no expiry timestamp.
+#### Scenario: Tier 1 raises on present-but-unroutable PSIDTS
+- **WHEN** the jar holds a `__Secure-1PSIDTS` whose domain scope would not be sent to `gemini.google.com`
+- **THEN** validation rejects with the typed tier-1 error (routability, not name presence)
 
-#### Scenario: validateCookies returns true when both required cookies are present
-- **WHEN** `validateCookies` is called with an array containing both `__Secure-1PSID` and `__Secure-1PSIDTS`
-- **THEN** it returns `true`
+#### Scenario: Tier 2 warns once for a companion-less jar
+- **WHEN** a jar with `__Secure-1PSID` + routable `__Secure-1PSIDTS` but no companions is validated twice in one process
+- **THEN** validation passes both times and the tier-2 warning is logged exactly once
 
-#### Scenario: validateCookies returns false when 1PSIDTS is missing
-- **WHEN** `validateCookies` is called with an array containing only `__Secure-1PSID`
-- **THEN** it returns `false`
+### Requirement: CookieSession.probe classifies live, phantom, or dead
+The facade's `probe(profile)` MUST classify a profile read-only as `live` (init GET yields session tokens AND `listChats({limit:1})` returns at least one chat), `phantom` (tokens present AND zero chats), or `dead` (init GET yields no session tokens). The probe MUST NOT write cookies, rotate, or spawn a browser, and MUST NOT use the SDK's `models()` as a signal (it is a static table). This is the only sanctioned session-state oracle.
 
-#### Scenario: checkCookieFreshness returns true for cookies expiring far in the future
-- **WHEN** `checkCookieFreshness` is called with cookies whose `__Secure-1PSIDTS.expires` is more than 7 days from now
-- **THEN** it returns `true`
+#### Scenario: Phantom is distinguishable from dead
+- **WHEN** the init GET extracts tokens but `listChats({limit:1})` returns none
+- **THEN** `probe` resolves `phantom`; and when the init GET extracts no tokens, it resolves `dead`
 
-#### Scenario: checkCookieFreshness returns false for cookies expiring within 7 days
-- **WHEN** `checkCookieFreshness` is called with cookies whose `__Secure-1PSIDTS.expires` is 3 days from now
-- **THEN** it returns `false`
+#### Scenario: Probe is read-only
+- **WHEN** `probe` runs against any profile state
+- **THEN** no cookie write occurs and no browser session is opened
 
-#### Scenario: checkCookieFreshness returns false for expired cookies
-- **WHEN** `checkCookieFreshness` is called with cookies whose `__Secure-1PSIDTS.expires` is in the past
-- **THEN** it returns `false`
+### Requirement: CookieSession refresh-and-retry recovery rung
+The `src/auth/recovery.ts` collaborator MUST implement a recovery operation that, given a degraded classification, runs the synchronous headless refresh (`BrowserRefresher.rotatePsidts` with the on-disk PSIDTS as baseline), persists via the full-jar writer, re-arms the session exactly once, and on failure throws the existing `AuthenticationError` type so the headed re-login prompt contract is preserved. The retry count MUST be exactly one.
 
-### Requirement: CookieStorageService computes cookie expiry
-The `CookieStorageService.getCookieExpiry(cookies)` method MUST return a `Date` derived from `__Secure-1PSIDTS.expires * 1000` (Unix seconds to JS ms) when the cookie has a positive `expires` value. The method MUST return `null` when the cookie array is empty or when no cookie has a positive `expires` value.
+#### Scenario: Recovery retries exactly once then throws
+- **WHEN** recovery runs and the refresh reports `{ rotated: false }`
+- **THEN** exactly one refresh attempt occurred and the operation rejects with `AuthenticationError`
 
-#### Scenario: getCookieExpiry returns Date for valid expiry
-- **WHEN** `getCookieExpiry` is called with cookies that include `__Secure-1PSIDTS` having a positive `expires`
-- **THEN** it returns a `Date` whose time is greater than the current time
+#### Scenario: Successful rotation restores the session
+- **WHEN** the refresh rotates PSIDTS and re-arming succeeds
+- **THEN** recovery resolves with the re-armed cookies and no error surfaces
 
-#### Scenario: getCookieExpiry returns null when 1PSIDTS has no positive expires
-- **WHEN** `getCookieExpiry` is called with cookies that include `__Secure-1PSIDTS` having `expires <= 0`
-- **THEN** it returns `null`
+### Requirement: PlaywrightCliDriver headless and storage-state surface
+`PlaywrightCliDriver` MUST expose `openHeadless(url, profile, session?)` (identical argv to the headed form minus `--headed`), `stateSave(session, outputPath)` (wrapping `state-save <file>`), and MUST retain the auto-detect strategy selection and existing headed surface unchanged.
 
-#### Scenario: getCookieExpiry returns null for empty cookies
-- **WHEN** `getCookieExpiry([])` is called
-- **THEN** it returns `null`
+#### Scenario: Headless open omits the headed flag
+- **WHEN** `openHeadless("https://gemini.google.com/app", "p", "s")` builds its argv
+- **THEN** the args contain `open`, `--browser=chromium`, `--persistent`, `--profile=<profileDir>` and the app URL, and do NOT contain `--headed`
 
-### Requirement: CookieStorageService persists refreshed session cookies
-`CookieStorageService` SHALL expose a save operation for a profile's cookie
-list, and `GeminiClientService` SHALL persist `__Secure-1PSID` and
-`__Secure-1PSIDTS` values refreshed by the Gemini client's response-cookie
-merging back to the active profile's stored cookies after successful API
-operations. Persisted entries SHALL preserve their existing
-domain/path/httpOnly/secure/sameSite metadata and have their `expires`
-refreshed. Persistence SHALL be skipped when no profile is active on the
-service instance, when the live values are unchanged since construction, or
-when the client jar holds no value for a tracked cookie. Persistence failures
-SHALL NOT fail the triggering operation.
-
-#### Scenario: Refreshed value is persisted with metadata preserved
-- **WHEN** the Gemini client's cookie jar contains a new `__Secure-1PSID`
-  value after a successful operation on a profile-scoped
-  `GeminiClientService`
-- **THEN** the profile's stored cookie list is saved with the new value, the
-  entry's original domain/path/httpOnly/secure/sameSite metadata intact, a
-  refreshed `expires`, and a subsequent load returns the refreshed value
-
-#### Scenario: No write when nothing changed
-- **WHEN** the client jar's tracked cookie values equal the values the
-  service instance was constructed with
-- **THEN** no storage save is invoked after the operation completes
-
-#### Scenario: Persistence skipped without an active profile
-- **WHEN** a `GeminiClientService` instance has no `profileName` (for
-  example the CLI's empty factory client)
-- **THEN** persistence is skipped regardless of jar contents
-
-#### Scenario: Persistence failure is isolated from the operation
-- **WHEN** saving the refreshed cookies throws
-- **THEN** the triggering API operation's result is returned normally and
-  the failure is logged at debug level
-
-### Requirement: ProfileAuthManager.ensureAuthenticated returns cookies or throws
-The `ProfileAuthManager.ensureAuthenticated(profileName?)` method MUST resolve the profile name (provided value, or the configured default), validate it, and check that the profile has valid cookies. If `profileManager.hasValidCookies(name)` returns `false`, the method MUST throw an `AuthenticationError` whose message contains `No valid session for profile '<name>'` and the substring `gemiterm login`. If the cookies are valid, the method MUST return the result of `cookieStorageService.loadCookiesForProfile(name)`.
-
-#### Scenario: Returns cookies for a profile with valid session
-- **WHEN** `ensureAuthenticated("default")` is called and the default profile has fresh cookies
-- **THEN** it returns a `LoadedCookies` object whose `secure_1psid` and `secure_1psidts` match the stored values
-
-#### Scenario: Throws AuthenticationError when no valid cookies
-- **WHEN** `ensureAuthenticated("default")` is called and the profile has no cookies
-- **THEN** it throws an `AuthenticationError` whose message contains `No valid session`
-
-#### Scenario: Throws AuthenticationError with expired cookies
-- **WHEN** `ensureAuthenticated("default")` is called and the profile's cookies are expired
-- **THEN** it throws an `AuthenticationError` whose message contains `No valid session`
-
-#### Scenario: Uses default profile when none specified
-- **WHEN** `ensureAuthenticated()` is called with no argument and the configured default profile has valid cookies
-- **THEN** it returns the loaded cookies for the default profile
-
-#### Scenario: Throws on invalid profile name
-- **WHEN** `ensureAuthenticated("bad name!")` is called
-- **THEN** it throws an error whose message contains `invalid characters`
-
-### Requirement: ProfileAuthManager.getActiveProfiles filters to valid sessions
-The `ProfileAuthManager.getActiveProfiles()` method MUST return the names of all profiles that have valid cookies. The method MUST return `string[]`, MUST be empty when no profiles exist, and MUST NOT include profiles whose cookies are expired or invalid.
-
-#### Scenario: Returns only profiles with valid cookies
-- **WHEN** two profiles exist, one with fresh cookies and one with expired cookies
-- **THEN** `getActiveProfiles()` returns a list containing the fresh profile and not the expired one
-
-#### Scenario: Returns empty array when no profiles have valid cookies
-- **WHEN** profiles exist but all have expired cookies
-- **THEN** `getActiveProfiles()` returns `[]`
-
-#### Scenario: Returns empty array when no profiles exist
-- **WHEN** no profiles are configured
-- **THEN** `getActiveProfiles()` returns `[]`
-
-### Requirement: ProfileAuthManager.findProfileForConversation returns the profile that owns the conversation
-
-The `ProfileAuthManager.findProfileForConversation(conversationId)` method MUST iterate over all profiles in `profileManager.list()` order and, for each, call `geminiClient.profileHasConversation(name, conversationId)` to check whether the conversation appears in that profile's chat list. It MUST return the name of the first profile whose helper returns `true`. When no profile owns the conversation, the method MUST return `null`. The `conversationId` argument MUST be passed to the lookup helper; it MUST NOT be ignored. The method MUST NOT throw on a missing or unknown conversation id.
-
-#### Scenario: Returns the profile that owns the conversation
-- **WHEN** `findProfileForConversation("conv-123")` is called and conversation `conv-123` exists in profile `work` but not in profile `personal`
-- **THEN** the method returns the string `"work"`
-
-#### Scenario: Returns null when conversation is not in any profile
-- **WHEN** `findProfileForConversation("conv-456")` is called and conversation `conv-456` does not exist in any profile's chat list
-- **THEN** the method returns `null`
-
-#### Scenario: Returns null when no profiles exist
-- **WHEN** `findProfileForConversation("conv-789")` is called and no profiles are configured
-- **THEN** the method returns `null`
-
-#### Scenario: Returns first profile in list order when multiple profiles report ownership
-- **WHEN** `findProfileForConversation("conv-shared")` is called and conversation `conv-shared` exists in both profile `profile1` and profile `profile3`, and `profileManager.list()` returns `["profile1", "profile2", "profile3"]` in that order
-- **THEN** the method returns the string `"profile1"` (the first profile in list order that reports ownership)
+#### Scenario: State save passes the target path
+- **WHEN** `stateSave("s", "out.json")` runs
+- **THEN** the CLI receives `state-save` with `out.json` as its file argument
 
 ### Requirement: PlaywrightCliDriver auto-detects between direct and bunx strategies
 The `PlaywrightCliDriver` constructor MUST default the underlying `PlaywrightRunner` to a `BunPlaywrightRunner` with strategy `"direct"` (invoking the `playwright-cli` binary directly). The first time `runCli` is needed, the driver MUST probe the available install: it MUST first try `playwright-cli --version`; if that exits with code 0, the strategy is `direct`. If the direct probe fails, the driver MUST try `bunx @playwright/cli --version`; on success, the strategy is `bunx`. If both probes fail, the driver MUST emit a warning and `runCli` MUST continue to throw `PlaywrightCliError` on any call. The probe MUST time out after 5000 ms (`PROBE_TIMEOUT_MS`) per attempt.

@@ -32,16 +32,16 @@ describe("export command integration", () => {
   beforeEach(() => {
     command = new ExportCommand();
     client = makeClient();
-    const profileAuthManager = {
-      getActiveProfiles: mock(() => ["default"]),
+    const cookieSession = {
+      activeProfiles: mock(() => ["default"]),
       findProfileForConversation: mock(() => Promise.resolve(null)),
-      ensureAuthenticated: mock(() => {
+      ensureSession: mock(() => {
         throw new Error("not used");
       }),
     };
     context = {
       verbose: false,
-      profileAuthManager: profileAuthManager as any,
+      cookieSession: cookieSession as any,
       getGeminiClient: () => client,
       listProfiles: () => [],
       exportStrategies: {
@@ -299,8 +299,8 @@ describe("export command integration", () => {
 
   describe("multi-profile routing", () => {
     test("auto-discovers owning profile and forwards it to forProfile", async () => {
-      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
-      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.cookieSession as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
       const outputPath = join(tmpdir(), `export-multi-profile-${Date.now()}.md`);
 
       try {
@@ -314,15 +314,15 @@ describe("export command integration", () => {
     });
 
     test("--profile overrides auto-discovery", async () => {
-      (context.profileAuthManager as any).getActiveProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
-      (context.profileAuthManager as any).findProfileForConversation.mockResolvedValue("dhb-work");
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
+      (context.cookieSession as any).findProfileForConversation.mockResolvedValue("dhb-work");
       const outputPath = join(tmpdir(), `export-override-${Date.now()}.md`);
 
       try {
         await command.execute(["conv-x", "--profile", "evs-diegohb", "--out", outputPath], context);
 
         expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
-        expect((context.profileAuthManager as any).findProfileForConversation).not.toHaveBeenCalled();
+        expect((context.cookieSession as any).findProfileForConversation).not.toHaveBeenCalled();
       } finally {
         if (existsSync(outputPath)) unlinkSync(outputPath);
       }

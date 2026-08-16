@@ -5,7 +5,7 @@ import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 function makeContext(): CliCommandContext {
   return {
     verbose: false,
-    profileAuthManager: {},
+    cookieSession: {},
     getGeminiClient: () => ({}),
     listProfiles: () => [],
   } as unknown as CliCommandContext;

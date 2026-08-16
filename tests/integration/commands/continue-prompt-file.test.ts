@@ -35,11 +35,11 @@ describe("continue command --prompt-file option", () => {
     client = makeClient();
     context = {
       verbose: false,
-      profileAuthManager: {
-        getActiveProfiles: mock(() => ["default"]),
+      cookieSession: {
+        activeProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => "default"),
-        ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
-      } as unknown as CliCommandContext["profileAuthManager"],
+        ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+      } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
     };
@@ -240,11 +240,11 @@ describe("continue command spillover: long positional arg is written to a temp f
     client = makeClient();
     context = {
       verbose: false,
-      profileAuthManager: {
-        getActiveProfiles: mock(() => ["default"]),
+      cookieSession: {
+        activeProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => "default"),
-        ensureAuthenticated: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
-      } as unknown as CliCommandContext["profileAuthManager"],
+        ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+      } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
     };

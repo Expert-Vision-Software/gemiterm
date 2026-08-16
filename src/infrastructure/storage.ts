@@ -11,8 +11,6 @@ import {
   listProfiles,
 } from "./config.ts";
 
-const COOKIE_EXPIRY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
-
 interface StorageState {
   cookies: Cookie[];
 }
@@ -36,16 +34,6 @@ function getCookieExpiryTimestamp(cookies: Cookie[]): number | null {
     }
   }
   return maxExpiry;
-}
-
-function checkCookieFreshness(cookies: Cookie[]): boolean {
-  for (const cookie of cookies) {
-    if (cookie.name === "__Secure-1PSIDTS" && cookie.expires > 0) {
-      const threshold = Date.now() + COOKIE_EXPIRY_THRESHOLD_MS;
-      if (cookie.expires * 1000 < threshold) return false;
-    }
-  }
-  return true;
 }
 
 export class CookieStorage {
@@ -192,32 +180,5 @@ export class ProfileManager {
       statuses.push({ ...status, isDefault: name === defaultName });
     }
     return statuses;
-  }
-
-  async hasValidCookies(profileName: string): Promise<boolean> {
-    try {
-      const cookies = await this.cookieStorage.load(profileName);
-      return validateCookies(cookies) && checkCookieFreshness(cookies);
-    } catch {
-      return false;
-    }
-  }
-
-  async loadCookiesForApi(profileName: string): Promise<{ secure1psid: string; secure1psidts: string | null }> {
-    const cookies = await this.cookieStorage.load(profileName);
-    if (!checkCookieFreshness(cookies)) {
-      throw new Error(
-        `Session for profile '${profileName}' appears expired. Run 'gemiterm auth' to re-authenticate.`,
-      );
-    }
-    const map = new Map(cookies.map((c) => [c.name, c.value]));
-    const secure1psid = map.get("__Secure-1PSID");
-    if (!secure1psid) {
-      throw new Error(`Missing required cookie __Secure-1PSID for profile '${profileName}'.`);
-    }
-    return {
-      secure1psid,
-      secure1psidts: map.get("__Secure-1PSIDTS") ?? null,
-    };
   }
 }

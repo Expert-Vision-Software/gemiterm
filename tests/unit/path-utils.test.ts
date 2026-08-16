@@ -11,6 +11,7 @@ import {
   getProfileChatMetadataPath,
   getProfileDir,
   getDefaultProfileMarkerPath,
+  getLogFilePath,
   isWSL,
   getProjectRoot,
   getPackageJson,
@@ -323,6 +324,12 @@ describe("path-utils", () => {
     test("returns the parsed package.json with name and version", async () => {
       const pkg = await getPackageJson(import.meta.url);
       expect(pkg.name).toBe("gemiterm");
+    });
+  });
+
+  describe("getLogFilePath", () => {
+    test("is gemiterm.log inside the config dir", () => {
+      expect(getLogFilePath()).toBe(join(getConfigDir(), "gemiterm.log"));
     });
   });
 });

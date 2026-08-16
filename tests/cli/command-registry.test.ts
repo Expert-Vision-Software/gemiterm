@@ -59,7 +59,7 @@ describe("CommandRegistry", () => {
 
     const ctx: CliCommandContext = {
       verbose: false,
-      profileAuthManager: {} as unknown as CliCommandContext["profileAuthManager"],
+      cookieSession: {} as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => ({} as any),
       listProfiles: () => [],
     };

@@ -291,46 +291,4 @@ describe("ProfileManager", () => {
     expect(active.isActive).toBe(true);
     expect(expired.isActive).toBe(false);
   });
-
-  test("hasValidCookies returns true for fresh cookies", async () => {
-    const storage = new CookieStorage();
-    const mgr = new ProfileManager(storage);
-    await storage.save("fresh", makeValidCookies());
-
-    expect(await mgr.hasValidCookies("fresh")).toBe(true);
-  });
-
-  test("hasValidCookies returns false for expired cookies", async () => {
-    const storage = new CookieStorage();
-    const mgr = new ProfileManager(storage);
-    await storage.save("stale", makeExpiredCookies());
-
-    expect(await mgr.hasValidCookies("stale")).toBe(false);
-  });
-
-  test("hasValidCookies returns false for missing profile", async () => {
-    expect(await manager.hasValidCookies("nope")).toBe(false);
-  });
-
-  test("loadCookiesForApi returns cookie values", async () => {
-    const storage = new CookieStorage();
-    const mgr = new ProfileManager(storage);
-    await storage.save("api-test", makeValidCookies());
-
-    const result = await mgr.loadCookiesForApi("api-test");
-    expect(result.secure1psid).toBe("test-psid-value");
-    expect(result.secure1psidts).toBe("test-psidts-value");
-  });
-
-  test("loadCookiesForApi throws for expired cookies", async () => {
-    const storage = new CookieStorage();
-    const mgr = new ProfileManager(storage);
-    await storage.save("expired-api", makeExpiredCookies());
-
-    await expect(mgr.loadCookiesForApi("expired-api")).rejects.toThrow("expired");
-  });
-
-  test("loadCookiesForApi throws for missing profile", async () => {
-    await expect(manager.loadCookiesForApi("ghost")).rejects.toThrow("No storage state found");
-  });
 });

@@ -39,3 +39,24 @@ export class ConversationPendingError extends GemitermError {
     this.name = "ConversationPendingError";
   }
 }
+
+export class LockUnavailableError extends GemitermError {
+  constructor(lockPath: string, waitedMs: number) {
+    super(`Could not acquire profile lock '${lockPath}' after waiting ${waitedMs}ms.`);
+    this.name = "LockUnavailableError";
+  }
+}
+
+export class SessionValidationError extends GemitermError {
+  constructor(message = "Stored session is not usable. Run 'gemiterm auth' to authenticate.") {
+    super(message);
+    this.name = "SessionValidationError";
+  }
+}
+
+export class LoginTimeoutError extends GemitermError {
+  constructor(timeoutMs: number) {
+    super(`Authentication timed out after ${timeoutMs}ms. No auth cookies detected.`);
+    this.name = "LoginTimeoutError";
+  }
+}

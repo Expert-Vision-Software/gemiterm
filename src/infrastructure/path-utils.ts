@@ -7,6 +7,7 @@ const STORAGE_STATE_FILE = "storage_state.json";
 const CHAT_METADATA_FILE = "chat-metadata.json";
 const PROFILES_DIR = "profiles";
 const DEFAULT_PROFILE_MARKER = ".default";
+const LOG_FILE = "gemiterm.log";
 
 function _getConfigDir(): string {
   const envOverride = process.env.GEMITERM_CONFIG_DIR;
@@ -44,6 +45,10 @@ function getProfilePath(name: string): string {
   return join(getProfilesDir(), name, STORAGE_STATE_FILE);
 }
 
+function getProfileLockPath(name: string): string {
+  return join(getProfilesDir(), name, `${STORAGE_STATE_FILE}.lock`);
+}
+
 function getProfileChatMetadataPath(name: string): string {
   return join(getProfilesDir(), name, CHAT_METADATA_FILE);
 }
@@ -54,6 +59,10 @@ function getProfileDir(name: string): string {
 
 function getDefaultProfileMarkerPath(): string {
   return join(getProfilesDir(), DEFAULT_PROFILE_MARKER);
+}
+
+function getLogFilePath(): string {
+  return join(getConfigDir(), LOG_FILE);
 }
 
 function getTempFilePath(prefix: string, extension = ".tmp"): string {
@@ -150,9 +159,11 @@ export {
   getConfigDir,
   getProfilesDir,
   getProfilePath,
+  getProfileLockPath,
   getProfileChatMetadataPath,
   getProfileDir,
   getDefaultProfileMarkerPath,
+  getLogFilePath,
   getTempFilePath,
   isWSL,
   getProjectRoot,
