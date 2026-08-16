@@ -8,6 +8,7 @@ import { resolveProfile } from "../utils/profile-resolution.ts";
 import { invokeCommand } from "../utils/command-invoker.ts";
 import { startChatSession } from "../utils/chat-session.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
+import { SessionKeepalive } from "../../auth/session-keepalive.ts";
 
 interface ContinueCommandOptions {
   help: boolean;
@@ -92,12 +93,21 @@ export class ContinueCommand implements CliCommand {
 
     message = await loadEffectivePrompt(message, options.promptFile);
 
+    const keepalive = message === null && profileName !== null
+      ? new SessionKeepalive(profileName, {
+          cookieStore: context.cookieSession.cookieStore,
+          refresher: context.cookieSession.refresher,
+          logger,
+        })
+      : undefined;
+
     await startChatSession({
       effectiveMessage: message,
       conversationId,
       profileName,
       getGeminiClient: context.getGeminiClient,
       logger,
+      keepalive,
       beforeInteractiveLoop: async () => {
         await this.printLastMessage(context.getGeminiClient, conversationId, profileName);
       },

@@ -89,6 +89,14 @@ export class CookieSession {
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   }
 
+  get cookieStore(): Pick<CookieStore, "load"> {
+    return this.deps.cookieStore;
+  }
+
+  get refresher(): Pick<BrowserRefresher, "rotatePsidts"> {
+    return this.deps.refresher;
+  }
+
   async ensureSession(profile?: string): Promise<ArmedSession> {
     const name = profile ?? await getDefaultProfileName();
     validateProfileName(name);

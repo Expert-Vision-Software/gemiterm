@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
-import { runInteractiveLoop, type InteractiveLoopDeps } from "../../../src/cli/utils/interactive-prompt.ts";
+import { runInteractiveLoop, type InteractiveLoopDeps, type SessionKeepaliveHandle } from "../../../src/cli/utils/interactive-prompt.ts";
 import { CancellationError } from "../../../src/cli/utils/prompts.ts";
 
 class MockCancellationError extends Error {
@@ -10,7 +10,11 @@ class MockCancellationError extends Error {
   }
 }
 
-function makeDeps(responses: string[], shouldThrow = false): InteractiveLoopDeps & {
+function makeDeps(
+  responses: string[],
+  shouldThrow = false,
+  keepalive?: SessionKeepaliveHandle,
+): InteractiveLoopDeps & {
   text: ReturnType<typeof mock>;
 } {
   const textMock = mock(async () => {
@@ -23,6 +27,14 @@ function makeDeps(responses: string[], shouldThrow = false): InteractiveLoopDeps
     text: textMock as unknown as InteractiveLoopDeps["text"],
     CancellationError: MockCancellationError as unknown as typeof CancellationError,
     text: textMock,
+    keepalive,
+  };
+}
+
+function makeKeepaliveMock() {
+  return {
+    start: mock(() => {}),
+    stop: mock(() => {}),
   };
 }
 
@@ -95,5 +107,79 @@ describe("runInteractiveLoop", () => {
 
     expect(messageHandler).not.toHaveBeenCalled();
     expect(deps.text).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("keepalive lifecycle", () => {
+  let logSpy: ReturnType<typeof spyOn>;
+  let errorSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    logSpy = spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  test("keepalive.start() is called once on REPL entry", async () => {
+    const keepalive = makeKeepaliveMock();
+    const deps = makeDeps(["/exit"], false, keepalive);
+    const messageHandler = mock(async () => ({ response: "ok" }));
+
+    await runInteractiveLoop(messageHandler, {}, deps);
+
+    expect(keepalive.start).toHaveBeenCalledTimes(1);
+  });
+
+  test("keepalive.stop() is called on normal /exit", async () => {
+    const keepalive = makeKeepaliveMock();
+    const deps = makeDeps(["/exit"], false, keepalive);
+    const messageHandler = mock(async () => ({ response: "ok" }));
+
+    await runInteractiveLoop(messageHandler, {}, deps);
+
+    expect(keepalive.stop).toHaveBeenCalledTimes(1);
+  });
+
+  test("keepalive.stop() is called on CancellationError", async () => {
+    const keepalive = makeKeepaliveMock();
+    const deps = makeDeps([], true, keepalive);
+    const messageHandler = mock(async () => ({ response: "ok" }));
+
+    try {
+      await runInteractiveLoop(messageHandler, {}, deps);
+    } catch {
+      // error propagates; we only care that stop was called
+    }
+
+    expect(keepalive.stop).toHaveBeenCalledTimes(1);
+  });
+
+  test("keepalive.stop() is called on error propagation", async () => {
+    const keepalive = makeKeepaliveMock();
+    const deps = makeDeps(["hello", "/exit"], false, keepalive);
+    const messageHandler = mock(async () => {
+      throw new Error("handler error");
+    });
+
+    try {
+      await runInteractiveLoop(messageHandler, {}, deps);
+    } catch {
+      // error propagates; we only verify stop was called
+    }
+
+    expect(keepalive.stop).toHaveBeenCalledTimes(1);
+  });
+
+  test("no keepalive dep: loop runs without error (backward compat)", async () => {
+    const deps = makeDeps(["/exit"], false);
+    const messageHandler = mock(async () => ({ response: "ok" }));
+
+    await runInteractiveLoop(messageHandler, {}, deps);
+
+    expect(messageHandler).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { CancellationError, text, type TextOptions } from "./prompts.ts";
+export { CancellationError, text };
 
 export interface MessageHandlerResult {
   response: string;
@@ -11,9 +12,15 @@ export interface InteractiveLoopOptions {
   profileName?: string | null;
 }
 
+export interface SessionKeepaliveHandle {
+  start: () => void;
+  stop: () => void;
+}
+
 export interface InteractiveLoopDeps {
   text: (opts: TextOptions) => Promise<string>;
   CancellationError: typeof CancellationError;
+  keepalive?: SessionKeepaliveHandle;
 }
 
 export async function runInteractiveLoop(
@@ -30,43 +37,49 @@ export async function runInteractiveLoop(
     resolveOuter = resolve;
   });
 
-  const prompt = async (): Promise<void> => {
-    let input: string;
-    try {
-      input = await deps.text({ message: "You" });
-    } catch (error) {
-      if (error instanceof deps.CancellationError) {
+  try {
+    deps.keepalive?.start();
+
+    const prompt = async (): Promise<void> => {
+      let input: string;
+      try {
+        input = await deps.text({ message: "You" });
+      } catch (error) {
+        if (error instanceof deps.CancellationError) {
+          console.log(chalk.dim("\nGoodbye."));
+          resolveOuter();
+          return;
+        }
+        throw error;
+      }
+      const trimmed = input.trim();
+      if (trimmed === "/exit" || trimmed === "/quit") {
         console.log(chalk.dim("\nGoodbye."));
         resolveOuter();
         return;
       }
-      throw error;
-    }
-    const trimmed = input.trim();
-    if (trimmed === "/exit" || trimmed === "/quit") {
-      console.log(chalk.dim("\nGoodbye."));
-      resolveOuter();
-      return;
-    }
-    if (!trimmed) {
+      if (!trimmed) {
+        await prompt();
+        return;
+      }
+      try {
+        console.log(chalk.dim("Thinking…"));
+        const result = await messageHandler(trimmed);
+        console.log(chalk.blue.bold("Model:"));
+        console.log(result.response);
+        console.log("");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(chalk.red(`Error: ${message}`));
+        console.log("");
+      }
       await prompt();
-      return;
-    }
-    try {
-      console.log(chalk.dim("Thinking…"));
-      const result = await messageHandler(trimmed);
-      console.log(chalk.blue.bold("Model:"));
-      console.log(result.response);
-      console.log("");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(chalk.red(`Error: ${message}`));
-      console.log("");
-    }
-    await prompt();
-  };
+    };
 
-  prompt();
+    prompt();
 
-  await outerPromise;
+    await outerPromise;
+  } finally {
+    deps.keepalive?.stop();
+  }
 }

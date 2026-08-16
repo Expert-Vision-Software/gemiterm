@@ -4,6 +4,7 @@ import { Logger } from "../../infrastructure/logger.ts";
 import { loadEffectivePrompt } from "../utils/prompt-file.ts";
 import { startChatSession } from "../utils/chat-session.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
+import { SessionKeepalive } from "../../auth/session-keepalive.ts";
 
 interface NewCommandOptions {
   help: boolean;
@@ -63,11 +64,20 @@ export class NewCommand implements CliCommand {
 
     message = await loadEffectivePrompt(message, options.promptFile);
 
+    const keepalive = message === null
+      ? new SessionKeepalive(options.profile ?? "default", {
+          cookieStore: context.cookieSession.cookieStore,
+          refresher: context.cookieSession.refresher,
+          logger,
+        })
+      : undefined;
+
     await startChatSession({
       effectiveMessage: message,
       profileName: options.profile,
       getGeminiClient: context.getGeminiClient,
       logger,
+      keepalive,
       onFirstTurn: (conversationId) => {
         console.log(chalk.cyan(`Conversation ID: ${conversationId}`));
       },
