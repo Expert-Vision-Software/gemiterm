@@ -215,12 +215,6 @@ async function getFileMtime(path: string): Promise<Date | null> {
   }
 }
 
-/**
- * Synchronously opens (creating if needed) the file at `path` for appending
- * and returns the raw file descriptor. Sync is required because
- * `Bun.spawn` needs a numeric fd at spawn time to redirect a detached
- * child's stdio to a log file. Parent directories are created recursively.
- */
 function openAppendFd(path: string): number {
   const absolute = resolve(path);
   try {

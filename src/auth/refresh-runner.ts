@@ -32,7 +32,6 @@ export function spawnDetachedRefreshRunner(profile: string, deps: DetachedSpawnD
   try {
     output = (deps.openLogFd ?? openAppendFd)(getLogFilePath());
   } catch {
-    // ignore — a logging failure must never block a refresh
   }
   const proc = spawn([process.execPath, refreshRunnerEntryPath(), profile], {
     stdin: "ignore",
