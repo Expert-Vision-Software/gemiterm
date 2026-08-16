@@ -1,98 +1,75 @@
+// Invariant: validator tier-1/tier-2 contract (#2061 class, fix-4 task 2.5).
+// tier-1 raises on absent __Secure-1PSID / absent or non-routable PSIDTS;
+// tier-2 warns once on a companion-less jar.
 import { describe, test, expect, beforeEach, mock, afterEach } from "bun:test";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { mkdirSync, rmSync } from "node:fs";
 import { CookieValidator } from "../../src/auth/cookie-validation.ts";
-import { freshFullJar, deadJar } from "./fixtures.ts";
+import { COMPANION_COOKIE_NAMES } from "../../src/auth/auth-constants.ts";
+import { freshFullJar } from "./fixtures.ts";
+import { setupIsolation, teardownIsolation, withPsidts, makeLogger } from "./harness.ts";
 
-const TEST_DIR = join(tmpdir(), "gemiterm-auth-regression");
+beforeEach(setupIsolation);
+afterEach(teardownIsolation);
 
-let logs: string[] = [];
-const origLog = console.log;
-
-beforeEach(() => {
-  process.env.GEMITERM_CONFIG_DIR = TEST_DIR;
-  mkdirSync(TEST_DIR, { recursive: true });
-  mkdirSync(join(TEST_DIR, "profiles"), { recursive: true });
-  logs = [];
-  console.log = ((...args: unknown[]) => { logs.push(args.map(String).join(" ")); }) as typeof console.log;
-});
-
-afterEach(() => {
-  console.log = origLog;
-  delete process.env.GEMITERM_CONFIG_DIR;
-  try {
-    rmSync(TEST_DIR, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-});
-
-function makeLogger() {
-  return {
+function validatorWithWarnLog() {
+  const warnCalls: string[] = [];
+  const logger = {
     debug: mock(() => {}),
     info: mock(() => {}),
-    warn: mock(() => {}),
+    warn: mock((msg: string) => void warnCalls.push(msg)),
     error: mock(() => {}),
   };
+  return { validator: new CookieValidator({ logger: logger as never }), warnCalls };
+}
+
+function withoutAllCompanions() {
+  return freshFullJar().filter((c) => !(COMPANION_COOKIE_NAMES as readonly string[]).includes(c.name));
+}
+
+function quietValidator() {
+  return new CookieValidator({ logger: makeLogger() as never });
 }
 
 describe("auth-regression: validator contract", () => {
-  test("tier-1 raises on absent __Secure-1PSID", async () => {
-    const jarWithoutPsid = freshFullJar().filter(c => c.name !== "__Secure-1PSID");
-    const validator = new CookieValidator({ logger: makeLogger() as never });
-    
-    expect(() => validator.validate(jarWithoutPsid)).toThrow(/__Secure-1PSID/);
+  test("tier-1 raises on absent __Secure-1PSID", () => {
+    const jar = freshFullJar().filter((c) => c.name !== "__Secure-1PSID");
+    expect(() => quietValidator().validate(jar)).toThrow(/__Secure-1PSID/);
   });
 
-  test("tier-1 raises on absent __Secure-1PSIDTS", async () => {
-    const jarWithoutPsidts = freshFullJar().filter(c => c.name !== "__Secure-1PSIDTS");
-    const validator = new CookieValidator({ logger: makeLogger() as never });
-    
-    expect(() => validator.validate(jarWithoutPsidts)).toThrow(/__Secure-1PSIDTS/);
+  test("tier-1 raises on absent __Secure-1PSIDTS", () => {
+    const jar = freshFullJar().filter((c) => c.name !== "__Secure-1PSIDTS");
+    expect(() => quietValidator().validate(jar)).toThrow(/__Secure-1PSIDTS/);
   });
 
-  test("tier-1 raises on non-routable PSIDTS (wrong domain)", async () => {
-    const jarWithWrongDomain = freshFullJar().map(c => {
-      if (c.name === "__Secure-1PSIDTS") {
-        return { ...c, domain: ".example.com" };
-      }
-      return c;
-    });
-    const validator = new CookieValidator({ logger: makeLogger() as never });
-    
-    expect(() => validator.validate(jarWithWrongDomain)).toThrow(/routable/);
+  test("tier-1 raises on non-routable PSIDTS (wrong scope)", () => {
+    const jar = freshFullJar().map((c) => (c.name === "__Secure-1PSIDTS" ? { ...c, domain: ".example.com" } : c));
+    expect(() => quietValidator().validate(jar)).toThrow(/routable/);
   });
 
-  test("tier-1 raises on expired PSIDTS", async () => {
-    const jarWithExpiredPsidts = freshFullJar().map(c => {
-      if (c.name === "__Secure-1PSIDTS") {
-        return { ...c, expires: Math.floor(Date.now() / 1000) - 3600 };
-      }
-      return c;
-    });
-    const validator = new CookieValidator({ logger: makeLogger() as never });
-    
-    expect(() => validator.validate(jarWithExpiredPsidts)).toThrow(/expired/);
-  });
-
-  test("tier-2 does not warn on full jar with all companions", async () => {
-    const fullJar = freshFullJar();
-    const warnCalls: string[] = [];
-    const logger = {
-      debug: mock(() => {}),
-      info: mock(() => {}),
-      warn: mock((msg: string) => { warnCalls.push(msg); }),
-      error: mock(() => {}),
-    };
-    
-    const validator = new CookieValidator({ logger: logger as never });
-    
-    validator.validate(fullJar);
-    
-    const companionWarnings = warnCalls.filter(call => 
-      call.includes("companion") || call.includes("SID") || call.includes("HSID")
+  test("tier-1 raises on expired PSIDTS", () => {
+    const jar = withPsidts(freshFullJar(), "expired-ts").map((c) =>
+      c.name === "__Secure-1PSIDTS" ? { ...c, expires: Math.floor(Date.now() / 1000) - 3600 } : c,
     );
-    expect(companionWarnings.length).toBe(0);
+    expect(() => quietValidator().validate(jar)).toThrow(/expired|routable/);
+  });
+
+  test("tier-2 warns when the jar has no companion cookies at all", () => {
+    const { validator, warnCalls } = validatorWithWarnLog();
+    validator.validate(withoutAllCompanions());
+    expect(warnCalls.length).toBe(1);
+    expect(warnCalls[0]).toMatch(/companion/);
+  });
+
+  test("tier-2 warns once across repeated validations (warn-once)", () => {
+    const { validator, warnCalls } = validatorWithWarnLog();
+    const jar = withoutAllCompanions();
+    validator.validate(jar);
+    validator.validate(jar);
+    expect(warnCalls.length).toBe(1);
+  });
+
+  test("tier-2 is silent on a full jar", () => {
+    const { validator, warnCalls } = validatorWithWarnLog();
+    validator.validate(freshFullJar());
+    expect(warnCalls.filter((c) => /companion/.test(c)).length).toBe(0);
   });
 });

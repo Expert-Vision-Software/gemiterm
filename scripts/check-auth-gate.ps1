@@ -27,11 +27,11 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-$PathSpecs = @(
-    'src/auth/**', 'src/infrastructure/storage.ts', 'src/infrastructure/io.ts',
-    'src/services/playwright-cli-driver.ts', 'src/services/gemini-client-wrapper.ts',
-    'src/services/profile-lifecycle.ts', 'docs/auth-cookie-lifecycle.md'
-)
+$PathSpecs = @(Get-Content "AUTH_SENSITIVE_PATHS" | Where-Object { $_ -and -not $_.StartsWith("#") })
+if ($PathSpecs.Count -eq 0) {
+    Write-Host "Auth regression gate: AUTH_SENSITIVE_PATHS is empty - refusing to run" -ForegroundColor Red
+    exit 1
+}
 
 $ChangedAuthFiles = @(git diff --name-only "$BaseCommit" HEAD -- $PathSpecs 2>$null | Where-Object { $_ })
 $ChangedTestFiles = @(git diff --name-only "$BaseCommit" HEAD -- 'tests/auth-regression/**' 2>$null | Where-Object { $_ })

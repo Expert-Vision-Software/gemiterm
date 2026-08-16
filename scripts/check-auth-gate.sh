@@ -41,15 +41,18 @@ if ! git rev-parse --verify -q "$BASE_COMMIT^{commit}" >/dev/null 2>&1; then
   exit 1
 fi
 
-PATH_SPECS=(
-  'src/auth/**'
-  'src/infrastructure/storage.ts'
-  'src/infrastructure/io.ts'
-  'src/services/playwright-cli-driver.ts'
-  'src/services/gemini-client-wrapper.ts'
-  'src/services/profile-lifecycle.ts'
-  'docs/auth-cookie-lifecycle.md'
-)
+PATH_SPECS=()
+while IFS= read -r line; do
+  case "$line" in
+    ""|\#*) continue ;;
+  esac
+  PATH_SPECS+=("$line")
+done < AUTH_SENSITIVE_PATHS
+
+if [ "${#PATH_SPECS[@]}" -eq 0 ]; then
+  echo -e "${RED}Auth regression gate: AUTH_SENSITIVE_PATHS is empty — refusing to run${NC}"
+  exit 1
+fi
 
 CHANGED_AUTH_FILES="$(git diff --name-only "$BASE_COMMIT" HEAD -- "${PATH_SPECS[@]}" 2>/dev/null || true)"
 CHANGED_TEST_FILES="$(git diff --name-only "$BASE_COMMIT" HEAD -- 'tests/auth-regression/**' 2>/dev/null || true)"

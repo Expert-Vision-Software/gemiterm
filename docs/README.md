@@ -29,7 +29,7 @@ Any conflict between documents is resolved **by rule, not judgment**:
 
 Any change touching an auth-sensitive path must, **in the same change**:
 
-1. add or update tests under `tests/auth-regression/` (the gate `bun run check:auth-gate` fails CI otherwise), and
+1. add or update tests under `tests/auth-regression/` (the gate `bun run check:auth-gate` enforces this — warn-only in CI during rollout, flipping to blocking per fix-4 task 3.4), and
 2. append a changelog entry to `docs/auth-cookie-lifecycle.md`.
 
 Standing traps (static-`models()` probe ban, cookie-`expires` meaninglessness, name-filter ban) are documented in the lifecycle doc — see its relevant sections rather than relying on memory or archived conclusions.

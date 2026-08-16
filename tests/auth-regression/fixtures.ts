@@ -1,3 +1,6 @@
+// Jar-shape registry for the auth-regression suite (fix-4, design.md D2).
+// Shapes derive from docs/cookie-ablation-findings.md — NOT from production
+// code — so a production regression cannot redefine the fixtures.
 import type { Cookie } from "../../src/core/types.ts";
 
 type Clock = () => Date;
@@ -7,121 +10,123 @@ function cookie(
   value: string,
   domain = ".google.com",
   expires?: number,
-  secure = true,
-  httpOnly = true,
-  sameSite: "Strict" | "Lax" | "None" = "Lax",
-  path = "/"
 ): Cookie {
   const now = Math.floor(Date.now() / 1000);
-  const expiresTimestamp = expires ?? now + 365 * 24 * 60 * 60;
-  return { name, value, domain, path, expires: expiresTimestamp, httpOnly, secure, sameSite };
+  return {
+    name,
+    value,
+    domain,
+    path: "/",
+    expires: expires ?? now + 365 * 24 * 60 * 60,
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+  };
 }
 
-const BASE_IDENTITY_FAMILY = [
-  cookie("__Secure-1PSID", "base-psid-value"),
-  cookie("SID", "base-sid-value"),
-  cookie("HSID", "base-hsid-value"),
-  cookie("SSID", "base-ssid-value"),
-  cookie("APISID", "base-apisid-value"),
-  cookie("SAPISID", "base-sapisid-value"),
+// The identity family: individually droppable (ablation P1/P2) but always captured.
+const IDENTITY_FAMILY = [
+  cookie("__Secure-1PSID", "identity-psid"),
+  cookie("SID", "identity-sid"),
+  cookie("HSID", "identity-hsid"),
+  cookie("SSID", "identity-ssid"),
+  cookie("APISID", "identity-apisid"),
+  cookie("SAPISID", "identity-sapisid"),
 ];
 
-const BASE_SIDCC_FAMILY = [
-  cookie("SIDCC", "base-sidcc-value"),
-  cookie("__Secure-1PSIDCC", "base-secure1psidcc-value"),
-  cookie("__Secure-3PSIDCC", "base-secure3psidcc-value"),
+// SIDCC family: minted/rotated server-side alongside the session.
+const SIDCC_FAMILY = [
+  cookie("SIDCC", "sidcc-value"),
+  cookie("__Secure-1PSIDCC", "secure1psidcc-value"),
+  cookie("__Secure-3PSIDCC", "secure3psidcc-value"),
 ];
 
-const BASE_PSIDTS_FAMILY = [
-  cookie("__Secure-1PSIDTS", "base-psidts-value-fresh"),
-  cookie("__Secure-3PSIDTS", "base-secure3psidts-value-fresh"),
+// Identity-service + other .google.com cookies from the validated 41-cookie shape.
+const GOOGLE_FAMILY = [
+  cookie("ACCOUNT_CHOOSER", "account-chooser-value"),
+  cookie("LSID", "lsid-value"),
+  cookie("NID", "nid-value"),
+  cookie("1P_JAR", "1pjar-value"),
+  cookie("CONSENT", "consent-value"),
 ];
 
-const BASE_IDENTITY_SERVICE = [
-  cookie("ACCOUNT_CHOOSER", "base-account-chooser-value"),
-  cookie("LSID", "base-lsid-value"),
+const YOUTUBE_FAMILY = [
+  cookie("VISITOR_INFO1_LIVE", "visitor-info-value", ".youtube.com"),
+  cookie("YSC", "ysc-value", ".youtube.com"),
+  cookie("PREF", "pref-value", ".youtube.com"),
 ];
 
-const BASE_YOUTUBE_FAMILY = [
-  cookie("VISITOR_INFO1_LIVE", "base-visitor-info-value", ".youtube.com"),
-  cookie("YSC", "base-ysc-value", ".youtube.com"),
-  cookie("PREF", "base-pref-value", ".youtube.com"),
+const ACCOUNTS_FAMILY = [
+  cookie("GAPS", "gaps-value", "accounts.google.com"),
+  cookie("OTZ", "otz-value", "accounts.google.com"),
 ];
 
-const BASE_OTHER_FAMILY = [
-  cookie("NID", "base-nid-value"),
-  cookie("1P_JAR", "base-1pjar-value"),
-  cookie("CONSENT", "base-consent-value"),
-];
-
-const ACCOUNTS_GOOGLE_DOMAIN = [
-  cookie("GAPS", "base-gaps-value", "accounts.google.com"),
-  cookie("OTZ", "base-otz-value", "accounts.google.com"),
-];
-
-export function freshFullJar(clock: Clock = () => new Date()): Cookie[] {
-  const freshTsValue = `psidts-fresh-${clock().getTime()}`;
+function psidtsPair(psidtsValue: string): Cookie[] {
   return [
-    ...BASE_IDENTITY_FAMILY,
-    ...BASE_SIDCC_FAMILY,
-    [
-      cookie("__Secure-1PSIDTS", freshTsValue),
-      cookie("__Secure-3PSIDTS", `${freshTsValue}-3`),
-    ],
-    ...BASE_IDENTITY_SERVICE,
-    ...BASE_YOUTUBE_FAMILY,
-    ...BASE_OTHER_FAMILY,
-    ...ACCOUNTS_GOOGLE_DOMAIN,
-  ].flat();
-}
-
-export function staleFullJar(clock: Clock = () => new Date()): Cookie[] {
-  const now = clock();
-  const staleDate = new Date(now.getTime() - 30 * 60 * 1000);
-  const freshTsValue = `psidts-stale-${staleDate.getTime()}`;
-  
-  return [
-    ...BASE_IDENTITY_FAMILY,
-    ...BASE_SIDCC_FAMILY,
-    [
-      cookie("__Secure-1PSIDTS", freshTsValue),
-      cookie("__Secure-3PSIDTS", `${freshTsValue}-3`),
-    ],
-    ...BASE_IDENTITY_SERVICE,
-    ...BASE_YOUTUBE_FAMILY,
-    ...BASE_OTHER_FAMILY,
-    ...ACCOUNTS_GOOGLE_DOMAIN,
-  ].flat();
-}
-
-export function phantomShapedJar(clock: Clock = () => new Date()): Cookie[] {
-  const freshTsValue = `psidts-phantom-${clock().getTime()}`;
-  return [
-    ...BASE_IDENTITY_FAMILY,
-    ...BASE_SIDCC_FAMILY,
-    [
-      cookie("__Secure-1PSIDTS", freshTsValue),
-      cookie("__Secure-3PSIDTS", `${freshTsValue}-3`),
-    ],
-    ...BASE_IDENTITY_SERVICE,
-  ].flat();
-}
-
-export function deadJar(): Cookie[] {
-  return [
-    cookie("__Secure-1PSID", ""),
-    cookie("SID", ""),
-    cookie("HSID", ""),
-    cookie("SSID", ""),
+    cookie("__Secure-1PSIDTS", psidtsValue),
+    cookie("__Secure-3PSIDTS", `${psidtsValue}-3`),
   ];
 }
 
-export function trimmedFourCookieJar(): Cookie[] {
-  const freshTsValue = `psidts-trimmed-${Date.now()}`;
+/** The validated fresh 41-cookie-class shape: every family, future expiry. */
+export function freshFullJar(clock: Clock = () => new Date()): Cookie[] {
+  const psidts = `psidts-fresh-${clock().getTime()}`;
   return [
-    cookie("__Secure-1PSID", "trimmed-psid-value", ".google.com"),
-    cookie("__Secure-1PSIDTS", freshTsValue, ".google.com"),
-    cookie("__Secure-1PSID", "trimmed-psid-value", ".youtube.com"),
-    cookie("__Secure-1PSIDTS", freshTsValue, ".youtube.com"),
+    ...IDENTITY_FAMILY,
+    ...SIDCC_FAMILY,
+    ...psidtsPair(psidts),
+    ...GOOGLE_FAMILY,
+    ...YOUTUBE_FAMILY,
+    ...ACCOUNTS_FAMILY,
+  ];
+}
+
+/**
+ * Same shape as freshFullJar, but the PSIDTS family carries a value aged
+ * 30 minutes behind `clock` — server-side supersession shape (ablation P2:
+ * shape identical, freshness is the failure mode). Identity cookies are
+ * byte-identical to freshFullJar's.
+ */
+export function staleFullJar(clock: Clock = () => new Date()): Cookie[] {
+  const aged = new Date(clock().getTime() - 30 * 60 * 1000);
+  const psidts = `psidts-stale-${aged.getTime()}`;
+  return [
+    ...IDENTITY_FAMILY,
+    ...SIDCC_FAMILY,
+    ...psidtsPair(psidts),
+    ...GOOGLE_FAMILY,
+    ...YOUTUBE_FAMILY,
+    ...ACCOUNTS_FAMILY,
+  ];
+}
+
+/** Tokens-shaped jar for the phantom scenario: fresh PSIDTS, identity family present. */
+export function phantomShapedJar(clock: Clock = () => new Date()): Cookie[] {
+  const psidts = `psidts-phantom-${clock().getTime()}`;
+  return [
+    ...IDENTITY_FAMILY,
+    ...SIDCC_FAMILY,
+    ...psidtsPair(psidts),
+    ...GOOGLE_FAMILY,
+  ];
+}
+
+/** Dead shape: no tier-1 or companion cookie names at all — anonymous, signed-out. */
+export function deadJar(): Cookie[] {
+  return [cookie("CONSENT", "YES+cb"), cookie("1P_JAR", "dead-1pjar"), cookie("OTZ", "dead-otz", "accounts.google.com")];
+}
+
+/**
+ * The historical "bug jar": exactly the PSID/PSIDTS pair on .google.com and
+ * .youtube.com. Works-when-fresh / fails-when-superseded — kept so that
+ * behavior stays pinned (ablation P1: shape was never the problem).
+ */
+export function trimmedFourCookieJar(): Cookie[] {
+  const psidts = `psidts-trimmed-${Date.now()}`;
+  return [
+    cookie("__Secure-1PSID", "trimmed-psid", ".google.com"),
+    cookie("__Secure-1PSIDTS", psidts, ".google.com"),
+    cookie("__Secure-1PSID", "trimmed-psid", ".youtube.com"),
+    cookie("__Secure-1PSIDTS", psidts, ".youtube.com"),
   ];
 }

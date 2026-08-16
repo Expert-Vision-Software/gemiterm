@@ -1,110 +1,54 @@
-import { describe, test, expect, beforeEach, mock, afterEach } from "bun:test";
+// Invariant: CAS semantics — a stale in-memory jar cannot clobber a fresher
+// disk jar (#361 class, fix-4 task 2.4). Asserts on the on-disk artifact.
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { mkdirSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type { Cookie } from "../../src/core/types.ts";
 import { CookieStore } from "../../src/auth/cookie-store.ts";
-import { RotationCooldown } from "../../src/auth/rotation-cooldown.ts";
-import { CookieValidator } from "../../src/auth/cookie-validation.ts";
-import { SessionClassifier } from "../../src/auth/session-classifier.ts";
-import { RecoveryRung } from "../../src/auth/recovery.ts";
-import { freshFullJar, staleFullJar, phantomShapedJar, deadJar, trimmedFourCookieJar } from "./fixtures.ts";
+import { freshFullJar } from "./fixtures.ts";
+import { TEST_DIR, setupIsolation, teardownIsolation, psidtsValue, withPsidts } from "./harness.ts";
 
-const TEST_DIR = join(tmpdir(), "gemiterm-auth-regression");
+beforeEach(setupIsolation);
+afterEach(teardownIsolation);
 
-let logs: string[] = [];
-const origLog = console.log;
+const jarPath = (profile: string) => join(TEST_DIR, "profiles", profile, "storage_state.json");
 
-beforeEach(() => {
-  process.env.GEMITERM_CONFIG_DIR = TEST_DIR;
-  mkdirSync(TEST_DIR, { recursive: true });
-  mkdirSync(join(TEST_DIR, "profiles"), { recursive: true });
-  logs = [];
-  console.log = ((...args: unknown[]) => { logs.push(args.map(String).join(" ")); }) as typeof console.log;
-});
-
-afterEach(() => {
-  console.log = origLog;
-  delete process.env.GEMITERM_CONFIG_DIR;
-  try {
-    rmSync(TEST_DIR, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-});
-
-function makeLogger() {
-  return {
-    debug: mock(() => {}),
-    info: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-  };
+function psidtsOnDisk(profile: string): string | undefined {
+  return psidtsValue(JSON.parse(readFileSync(jarPath(profile), "utf-8")).cookies as Cookie[]);
 }
 
-describe("auth-regression: CAS semantics (stale in-memory jar cannot clobber fresher disk jar)", () => {
-  test("stale process cannot clobber a sibling's fresh rotation", async () => {
-    const initialJar = freshFullJar();
-    const freshJar = freshFullJar();
-    const newPsidtsValue = "fresh-psidts-" + Date.now();
-    
-    freshJar.forEach(c => {
-      if (c.name === "__Secure-1PSIDTS") {
-        c.value = newPsidtsValue;
-      }
-    });
+describe("auth-regression: CAS semantics", () => {
+  test("stale in-memory jar cannot clobber a sibling's fresh PSIDTS rotation", async () => {
+    const store = new CookieStore();
+    await store.saveFullJar("test-profile", freshFullJar());
 
-    const cookieStore = new CookieStore();
-    await cookieStore.saveFullJar("test-profile", initialJar, new Map());
-    
-    const staleProcess = await cookieStore.load("test-profile");
-    
-    await cookieStore.saveFullJar("test-profile", freshJar, new Map());
-    
-    await cookieStore.save("test-profile", staleProcess.cookies, staleProcess.snapshot);
+    // A loads a snapshot, then idles (stale).
+    const { cookies: staleCookies, snapshot } = await store.load("test-profile");
 
-    const finalJar = await cookieStore.load("test-profile");
-    const psidtsCookie = finalJar.cookies.find(c => c.name === "__Secure-1PSIDTS");
-    expect(psidtsCookie?.value).toBe(newPsidtsValue);
+    // Sibling rotates PSIDTS to a fresh value on disk.
+    const siblingValue = `sibling-fresh-${Date.now()}`;
+    await store.saveFullJar("test-profile", withPsidts(freshFullJar(), siblingValue));
+
+    // The stale process saves its (unchanged) cookies back.
+    await store.save("test-profile", staleCookies, snapshot);
+
+    expect(psidtsOnDisk("test-profile")).toBe(siblingValue);
   });
 
-  test("CAS preserves unmodified cookies even when some changed", async () => {
-    const initialJar = freshFullJar();
-    const modifiedJar = freshFullJar();
-    const newPsidtsValue = "modified-psidts-" + Date.now();
-    const newSidValue = "modified-sid-" + Date.now();
-    
-    modifiedJar.forEach(c => {
-      if (c.name === "__Secure-1PSIDTS") {
-        c.value = newPsidtsValue;
-      }
-      if (c.name === "SID") {
-        c.value = newSidValue;
-      }
-    });
+  test("CAS preserves the sibling's PSIDTS while applying the process's own unrelated change", async () => {
+    const store = new CookieStore();
+    await store.saveFullJar("test-profile", freshFullJar());
+    const { snapshot } = await store.load("test-profile");
 
-    const cookieStore = new CookieStore();
-    await cookieStore.saveFullJar("test-profile", initialJar, new Map());
-    
-    const staleProcess = await cookieStore.load("test-profile");
-    
-    const siblingJar = freshFullJar();
-    const siblingPsidtsValue = "sibling-psidts-" + Date.now();
-    siblingJar.forEach(c => {
-      if (c.name === "__Secure-1PSIDTS") {
-        c.value = siblingPsidtsValue;
-      }
-    });
-    
-    await cookieStore.saveFullJar("test-profile", siblingJar, new Map());
-    
-    await cookieStore.save("test-profile", modifiedJar, staleProcess.snapshot);
+    const siblingValue = `sibling-fresh-${Date.now()}`;
+    await store.saveFullJar("test-profile", withPsidts(freshFullJar(), siblingValue));
 
-    const finalJar = await cookieStore.load("test-profile");
-    const psidtsCookie = finalJar.cookies.find(c => c.name === "__Secure-1PSIDTS");
-    const sidCookie = finalJar.cookies.find(c => c.name === "SID");
-    
-    expect(psidtsCookie?.value).toBe(siblingPsidtsValue);
-    expect(sidCookie?.value).toBe(newSidValue);
+    // The process changes only SID (its own edit), not PSIDTS.
+    const myJar = freshFullJar().map((c) => (c.name === "SID" ? { ...c, value: "my-new-sid" } : c));
+    await store.save("test-profile", myJar, snapshot);
+
+    const disk = JSON.parse(readFileSync(jarPath("test-profile"), "utf-8")).cookies as Cookie[];
+    expect(psidtsValue(disk)).toBe(siblingValue);
+    expect(disk.find((c) => c.name === "SID")?.value).toBe("my-new-sid");
   });
 });

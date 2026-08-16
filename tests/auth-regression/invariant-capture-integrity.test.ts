@@ -1,283 +1,139 @@
-import { describe, test, expect, beforeEach, mock, afterEach } from "bun:test";
+// Invariant: full-jar capture integrity + PSIDTS rotation propagation (fix-4 tasks 2.1-2.3).
+// Historical classes: H6/REQUIRED_COOKIES name-filter, discarded rotation,
+// save-on-login-page. Asserts on the on-disk storage_state.json artifact.
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { mkdirSync, rmSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type { Cookie } from "../../src/core/types.ts";
-import { CookieSession, createCookieSession } from "../../src/auth/cookie-session.ts";
 import { CookieStore } from "../../src/auth/cookie-store.ts";
 import { RotationCooldown } from "../../src/auth/rotation-cooldown.ts";
-import { CookieValidator } from "../../src/auth/cookie-validation.ts";
-import { SessionClassifier } from "../../src/auth/session-classifier.ts";
 import { RecoveryRung } from "../../src/auth/recovery.ts";
-import { BrowserRefresher } from "../../src/auth/browser-refresher.ts";
-import { PlaywrightCliDriver } from "../../src/services/playwright-cli-driver.ts";
-import { freshFullJar, staleFullJar, phantomShapedJar, deadJar, trimmedFourCookieJar } from "./fixtures.ts";
+import { freshFullJar, trimmedFourCookieJar } from "./fixtures.ts";
+import {
+  TEST_DIR,
+  setupIsolation,
+  teardownIsolation,
+  makeDriver,
+  makeLogger,
+  makeSessionDeps,
+  makeSession,
+  persistingRefresher,
+  psidtsValue,
+  withPsidts,
+} from "./harness.ts";
 
-const TEST_DIR = join(tmpdir(), "gemiterm-auth-regression");
+beforeEach(setupIsolation);
+afterEach(teardownIsolation);
 
-let logs: string[] = [];
-const origLog = console.log;
-
-beforeEach(() => {
-  process.env.GEMITERM_CONFIG_DIR = TEST_DIR;
-  mkdirSync(TEST_DIR, { recursive: true });
-  mkdirSync(join(TEST_DIR, "profiles"), { recursive: true });
-  logs = [];
-  console.log = ((...args: unknown[]) => { logs.push(args.map(String).join(" ")); }) as typeof console.log;
-});
-
-afterEach(() => {
-  console.log = origLog;
-  delete process.env.GEMITERM_CONFIG_DIR;
-  try {
-    rmSync(TEST_DIR, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-});
-
-function makeLogger() {
-  return {
-    debug: mock(() => {}),
-    info: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-  };
-}
+const jarPath = (profile: string) => join(TEST_DIR, "profiles", profile, "storage_state.json");
 
 describe("auth-regression: full-jar capture integrity", () => {
   test("capture persists every offered cookie; no name-subset filter can reduce it", async () => {
     const fullJar = freshFullJar();
-    const capturedCookies: Cookie[] = [];
-    
-    const driver = {
-      openHeaded: mock(async () => {}),
-      openHeadless: mock(async () => {}),
-      cookieList: mock(async () => fullJar),
-      cookieListFromState: mock(async () => fullJar),
-      closeSession: mock(async () => {}),
-    };
-
+    const persisted: Cookie[][] = [];
     const cookieStore = new CookieStore();
     const originalSave = cookieStore.saveFullJar.bind(cookieStore);
-    
-    cookieStore.saveFullJar = async (profile, cookies, snapshot) => {
-      capturedCookies.push(...cookies);
-      return originalSave(profile, cookies, snapshot);
+    cookieStore.saveFullJar = async (profile, cookies) => {
+      persisted.push(cookies);
+      return originalSave(profile, cookies);
     };
 
-    const deps = {
-      cookieStore,
-      validator: new CookieValidator({ logger: makeLogger() as never }),
-      refresher: { rotatePsidts: mock(async () => ({ rotated: false })) },
-      cooldown: new RotationCooldown(),
-      classifier: {
-        classify: mock(async () => "live" as const),
-        classifyDetailed: mock(async () => ({ state: "live" as const, chatCount: 1 })),
-      },
-      recovery: { recover: mock(async () => ({ secure_1psid: "psid", secure_1psidts: "ts", cookies: fullJar })) },
-      logger: makeLogger(),
-      spawnRefreshRunner: mock(() => {}),
-      listProfiles: mock(async () => ["p"]),
-      conversationLookup: { profileHasConversation: mock(async () => false) },
-      driver,
-      pollIntervalMs: 5,
-    };
+    const deps = makeSessionDeps({ cookieStore, driver: makeDriver(fullJar) });
+    await makeSession(deps).captureLogin("test-profile");
 
-    const session = new CookieSession(deps as never);
-    await session.captureLogin("test-profile");
-
-    expect(capturedCookies.length).toBe(fullJar.length);
-    
-    const capturedNames = new Set(capturedCookies.map((c) => c.name));
-    const offeredNames = new Set(fullJar.map((c) => c.name));
-    
-    expect(capturedNames.size).toBe(offeredNames.size);
-    offeredNames.forEach((name) => {
-      expect(capturedNames.has(name)).toBe(true);
-    });
-    
-    const diskJar = await cookieStore.load("test-profile");
-    expect(diskJar.cookies.length).toBe(fullJar.length);
+    // Every offered cookie name reached the persist call...
+    const saved = persisted[0] ?? [];
+    expect(new Set(saved.map((c) => c.name))).toEqual(new Set(fullJar.map((c) => c.name)));
+    expect(saved.length).toBe(fullJar.length);
+    // ...and every offered cookie is on disk, grouped by name.
+    const disk = JSON.parse(readFileSync(jarPath("test-profile"), "utf-8")).cookies as Cookie[];
+    expect(new Set(disk.map((c) => c.name))).toEqual(new Set(fullJar.map((c) => c.name)));
+    expect(disk.length).toBe(fullJar.length);
   });
 
-  test("trimmed 4-cookie jar is captured as-is (historical artifact preservation)", async () => {
+  test("trimmed 4-cookie jar is captured as-is (historical artifact)", async () => {
     const trimmedJar = trimmedFourCookieJar();
-    const capturedCookies: Cookie[] = [];
-    
-    const driver = {
-      openHeaded: mock(async () => {}),
-      openHeadless: mock(async () => {}),
-      cookieList: mock(async () => trimmedJar),
-      cookieListFromState: mock(async () => trimmedJar),
-      closeSession: mock(async () => {}),
-    };
+    const deps = makeSessionDeps({ driver: makeDriver(trimmedJar) });
+    await makeSession(deps).captureLogin("test-profile");
 
-    const cookieStore = new CookieStore();
-    const originalSave = cookieStore.saveFullJar.bind(cookieStore);
-    
-    cookieStore.saveFullJar = async (profile, cookies, snapshot) => {
-      capturedCookies.push(...cookies);
-      return originalSave(profile, cookies, snapshot);
-    };
-
-    const deps = {
-      cookieStore,
-      validator: new CookieValidator({ logger: makeLogger() as never }),
-      refresher: { rotatePsidts: mock(async () => ({ rotated: false })) },
-      cooldown: new RotationCooldown(),
-      classifier: {
-        classify: mock(async () => "live" as const),
-        classifyDetailed: mock(async () => ({ state: "live" as const, chatCount: 1 })),
-      },
-      recovery: { recover: mock(async () => ({ secure_1psid: "psid", secure_1psidts: "ts", cookies: trimmedJar })) },
-      logger: makeLogger(),
-      spawnRefreshRunner: mock(() => {}),
-      listProfiles: mock(async () => ["p"]),
-      conversationLookup: { profileHasConversation: mock(async () => false) },
-      driver,
-      pollIntervalMs: 5,
-    };
-
-    const session = new CookieSession(deps as never);
-    await session.captureLogin("test-profile");
-
-    expect(capturedCookies.length).toBe(trimmedJar.length);
-    const diskJar = await cookieStore.load("test-profile");
-    expect(diskJar.cookies.length).toBe(trimmedJar.length);
+    const disk = JSON.parse(readFileSync(jarPath("test-profile"), "utf-8")).cookies as Cookie[];
+    expect(disk.length).toBe(4);
+    for (const c of disk) {
+      expect(["__Secure-1PSID", "__Secure-1PSIDTS"]).toContain(c.name);
+      expect([".google.com", ".youtube.com"]).toContain(c.domain);
+    }
   });
 });
 
 describe("auth-regression: PSIDTS rotation propagation", () => {
-  test("store save propagates new PSIDTS value to disk", async () => {
-    const initialJar = freshFullJar();
-    const rotatedJar = freshFullJar();
-    const newPsidtsValue = "rotated-psidts-" + Date.now();
-    
-    rotatedJar.forEach(c => {
-      if (c.name === "__Secure-1PSIDTS") {
-        c.value = newPsidtsValue;
-      }
-    });
-    
+  test("facade refresh() propagates the rotated PSIDTS value to disk", async () => {
     const cookieStore = new CookieStore();
-    await cookieStore.saveFullJar("test-profile", rotatedJar, new Map());
+    await cookieStore.saveFullJar("test-profile", freshFullJar());
+    const rotatedValue = `rotated-psidts-${Date.now()}`;
+    const refresher = persistingRefresher(cookieStore, () => withPsidts(freshFullJar(), rotatedValue));
 
-    const diskJar = await cookieStore.load("test-profile");
-    const psidtsCookie = diskJar.cookies.find(c => c.name === "__Secure-1PSIDTS");
-    expect(psidtsCookie?.value).toBe(newPsidtsValue);
+    const deps = makeSessionDeps({ cookieStore, refresher, cooldown: new RotationCooldown() });
+    const result = await makeSession(deps).refresh("test-profile");
+
+    expect(result.rotated).toBe(true);
+    expect(psidtsValue(JSON.parse(readFileSync(jarPath("test-profile"), "utf-8")).cookies)).toBe(rotatedValue);
   });
 
-  test("recovery rung propagates new PSIDTS value to disk", async () => {
-    const deadJarLocal = deadJar();
-    const recoveredJar = freshFullJar();
-    const newPsidtsValue = "recovered-psidts-" + Date.now();
-    
-    recoveredJar.forEach(c => {
-      if (c.name === "__Secure-1PSIDTS") {
-        c.value = newPsidtsValue;
-      }
-    });
-    
+  test("recovery rung propagates the refreshed PSIDTS value to disk", async () => {
     const cookieStore = new CookieStore();
-    await cookieStore.saveFullJar("test-profile", deadJarLocal, new Map());
-    await cookieStore.saveFullJar("test-profile", recoveredJar, new Map());
+    await cookieStore.saveFullJar("test-profile", freshFullJar());
+    const recoveredValue = `recovered-psidts-${Date.now()}`;
+    const refresher = persistingRefresher(cookieStore, () => withPsidts(freshFullJar(), recoveredValue));
 
-    const diskJar = await cookieStore.load("test-profile");
-    const psidtsCookie = diskJar.cookies.find(c => c.name === "__Secure-1PSIDTS");
-    expect(psidtsCookie?.value).toBe(newPsidtsValue);
+    // Real RecoveryRung; fakes only at the refresher seam (design.md D1).
+    const recovery = new RecoveryRung({
+      refresher,
+      cookieStore,
+      rearm: async (profile) => {
+        const { cookies } = await cookieStore.load(profile);
+        return { secure_1psid: "psid", secure_1psidts: psidtsValue(cookies) ?? null, cookies };
+      },
+      logger: makeLogger(),
+    });
+
+    const armed = await recovery.recover("test-profile");
+    expect(armed.secure_1psidts).toBe(recoveredValue);
+    expect(psidtsValue(JSON.parse(readFileSync(jarPath("test-profile"), "utf-8")).cookies)).toBe(recoveredValue);
   });
 });
 
 describe("auth-regression: signed-out capture safety", () => {
-  test("no write on anonymous-cookie capture (no init tokens)", async () => {
-    const anonymousJar = [
-      { name: "CONSENT", value: "YES", domain: ".google.com", path: "/", expires: Date.now() / 1000 + 86400, httpOnly: false, secure: true, sameSite: "Lax" as const },
-    ];
-    
-    const driver = {
-      openHeaded: mock(async () => {}),
-      openHeadless: mock(async () => {}),
-      cookieList: mock(async () => anonymousJar),
-      cookieListFromState: mock(async () => anonymousJar),
-      closeSession: mock(async () => {}),
-    };
+  const anonymousJar = (): Cookie[] => [
+    {
+      name: "CONSENT",
+      value: "YES",
+      domain: ".google.com",
+      path: "/",
+      expires: Math.floor(Date.now() / 1000) + 86400,
+      httpOnly: false,
+      secure: true,
+      sameSite: "Lax",
+    },
+  ];
 
-    const cookieStore = new CookieStore();
-    let saveCalls = 0;
-    const originalSave = cookieStore.saveFullJar.bind(cookieStore);
-    cookieStore.saveFullJar = async (profile, cookies) => {
-      saveCalls++;
-      return originalSave(profile, cookies);
-    };
+  test("no write on anonymous-cookie capture (gate never passes; no state read)", async () => {
+    const driver = makeDriver(anonymousJar());
+    const deps = makeSessionDeps({ driver });
 
-    const deps = {
-      cookieStore,
-      validator: new CookieValidator({ logger: makeLogger() as never }),
-      refresher: { rotatePsidts: mock(async () => ({ rotated: false })) },
-      cooldown: new RotationCooldown(),
-      classifier: {
-        classify: mock(async () => "dead" as const),
-        classifyDetailed: mock(async () => ({ state: "dead" as const, chatCount: 0 })),
-      },
-      recovery: { recover: mock(async () => { throw new Error("Should not recover"); }) },
-      logger: makeLogger(),
-      spawnRefreshRunner: mock(() => {}),
-      listProfiles: mock(async () => []),
-      conversationLookup: { profileHasConversation: mock(async () => false) },
-      driver,
-      pollIntervalMs: 5,
-    };
-
-    const session = new CookieSession(deps as never);
-    
-    await expect(session.captureLogin("test-profile", { timeoutMs: 50 })).rejects.toThrow();
-    expect(saveCalls).toBe(0);
+    // timeoutMs keeps the gate poll short — the invariant is "no persist", fast-fail is fine.
+    await expect(makeSession(deps).captureLogin("test-profile", { timeoutMs: 50 })).rejects.toThrow();
     expect(driver.cookieListFromState).not.toHaveBeenCalled();
+    expect(await new CookieStore().getJarMtime("test-profile")).toBeNull();
   });
 
-  test("pre-existing jar is left unchanged on signed-out capture attempt", async () => {
-    const existingJar = freshFullJar();
-    const anonymousJar = [
-      { name: "CONSENT", value: "YES", domain: ".google.com", path: "/", expires: Date.now() / 1000 + 86400, httpOnly: false, secure: true, sameSite: "Lax" as const },
-    ];
-    
+  test("pre-existing jar is byte-unchanged on signed-out capture attempt", async () => {
     const cookieStore = new CookieStore();
-    await cookieStore.saveFullJar("test-profile", existingJar, new Map());
-    
-    const jarPath = join(TEST_DIR, "profiles", "test-profile", "storage_state.json");
-    const bytesBefore = readFileSync(jarPath, "utf-8");
+    await cookieStore.saveFullJar("test-profile", freshFullJar());
+    const bytesBefore = readFileSync(jarPath("test-profile"), "utf-8");
 
-    const driver = {
-      openHeaded: mock(async () => {}),
-      openHeadless: mock(async () => {}),
-      cookieList: mock(async () => anonymousJar),
-      cookieListFromState: mock(async () => anonymousJar),
-      closeSession: mock(async () => {}),
-    };
+    const deps = makeSessionDeps({ cookieStore, driver: makeDriver(anonymousJar()) });
+    await expect(makeSession(deps).captureLogin("test-profile", { timeoutMs: 50 })).rejects.toThrow();
 
-    const deps = {
-      cookieStore,
-      validator: new CookieValidator({ logger: makeLogger() as never }),
-      refresher: { rotatePsidts: mock(async () => ({ rotated: false })) },
-      cooldown: new RotationCooldown(),
-      classifier: {
-        classify: mock(async () => "dead" as const),
-        classifyDetailed: mock(async () => ({ state: "dead" as const, chatCount: 0 })),
-      },
-      recovery: { recover: mock(async () => { throw new Error("Should not recover"); }) },
-      logger: makeLogger(),
-      spawnRefreshRunner: mock(() => {}),
-      listProfiles: mock(async () => ["p"]),
-      conversationLookup: { profileHasConversation: mock(async () => false) },
-      driver,
-      pollIntervalMs: 5,
-    };
-
-    const session = new CookieSession(deps as never);
-    
-    await expect(session.captureLogin("test-profile", { timeoutMs: 50 })).rejects.toThrow();
-    
-    expect(readFileSync(jarPath, "utf-8")).toBe(bytesBefore);
+    expect(readFileSync(jarPath("test-profile"), "utf-8")).toBe(bytesBefore);
   });
 });

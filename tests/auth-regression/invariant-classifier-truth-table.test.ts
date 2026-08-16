@@ -1,249 +1,92 @@
+// Invariant: classifier truth table + probe purity (fix-4 tasks 2.6-2.7).
+// The classifier is read-only: it writes nothing and fires no rotation.
+// Probe-purity is asserted through the CookieSession facade so a future
+// "probe also rotates" regression cannot go unobserved (constant-ok guard).
 import { describe, test, expect, beforeEach, mock, afterEach } from "bun:test";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { SessionClassifier } from "../../src/auth/session-classifier.ts";
+import { readFileSync } from "node:fs";
 import { CookieStore } from "../../src/auth/cookie-store.ts";
-import { freshFullJar, phantomShapedJar, deadJar } from "./fixtures.ts";
+import { SessionClassifier } from "../../src/auth/session-classifier.ts";
+import { freshFullJar } from "./fixtures.ts";
+import {
+  TEST_DIR,
+  setupIsolation,
+  teardownIsolation,
+  makeLogger,
+  makeSessionDeps,
+  makeSession,
+} from "./harness.ts";
 
-const TEST_DIR = join(tmpdir(), "gemiterm-auth-regression");
+beforeEach(setupIsolation);
+afterEach(teardownIsolation);
 
-let logs: string[] = [];
-const origLog = console.log;
+const TOKEN_HTML = '<html><body><script data-initial-state="SNIPET">SNlM0e</script></body></html>';
+const SIGNED_OUT_HTML = "<html><body><p>Sign in to continue</p></body></html>";
 
-beforeEach(() => {
-  process.env.GEMITERM_CONFIG_DIR = TEST_DIR;
-  mkdirSync(TEST_DIR, { recursive: true });
-  mkdirSync(join(TEST_DIR, "profiles"), { recursive: true });
-  logs = [];
-  console.log = ((...args: unknown[]) => { logs.push(args.map(String).join(" ")); }) as typeof console.log;
-});
-
-afterEach(() => {
-  console.log = origLog;
-  delete process.env.GEMITERM_CONFIG_DIR;
-  try {
-    rmSync(TEST_DIR, { recursive: true, force: true });
-  } catch {
-    // Ignore cleanup errors
-  }
-});
-
-function makeLogger() {
-  return {
-    debug: mock(() => {}),
-    info: mock(() => {}),
-    warn: mock(() => {}),
-    error: mock(() => {}),
-  };
+function classifierFor(html: string, chats: unknown[]) {
+  return new SessionClassifier({
+    fetchInitHtml: mock(async () => html),
+    probeChats: mock(async () => chats),
+  });
 }
 
-async function setupTestProfile(jar: any[]) {
-  const cookieStore = new CookieStore();
-  await cookieStore.saveFullJar("test-profile", jar, new Map());
+async function seedJar(): Promise<void> {
+  await new CookieStore().saveFullJar("test-profile", freshFullJar());
 }
 
 describe("auth-regression: classifier truth table", () => {
-  test("reports 'live' for tokens present + listChats >= 1", async () => {
-    await setupTestProfile(freshFullJar());
-    
-    const initHtmlWithTokens = `
-      <html>
-        <body>
-          <script data-initial-state="SNIPET">SNlM0e</script>
-        </body>
-      </html>
-    `;
-    
-    const fakeFetch = mock(async () => initHtmlWithTokens);
-    const probeChats = mock(async () => ["chat1", "chat2"]);
-    
-    const classifier = new SessionClassifier({
-      fetchInitHtml: fakeFetch,
-      probeChats,
-      logger: makeLogger() as never,
-    });
-    
-    const result = await classifier.classifyDetailed("test-profile");
-    
-    expect(result.state).toBe("live");
-    expect(result.chatCount).toBe(2);
+  test("live: tokens present + listChats >= 1", async () => {
+    await seedJar();
+    const result = await classifierFor(TOKEN_HTML, ["chat1", "chat2"]).classifyDetailed("test-profile");
+    expect(result).toEqual({ state: "live", chatCount: 2 });
   });
 
-  test("reports 'phantom' for tokens present + listChats 0", async () => {
-    await setupTestProfile(phantomShapedJar());
-    
-    const initHtmlWithTokens = `
-      <html>
-        <body>
-          <script data-initial-state="SNIPET">SNlM0e</script>
-        </body>
-      </html>
-    `;
-    
-    const fakeFetch = mock(async () => initHtmlWithTokens);
-    const probeChats = mock(async () => []);
-    
-    const classifier = new SessionClassifier({
-      fetchInitHtml: fakeFetch,
-      probeChats,
-      logger: makeLogger() as never,
-    });
-    
-    const result = await classifier.classifyDetailed("test-profile");
-    
-    expect(result.state).toBe("phantom");
-    expect(result.chatCount).toBe(0);
+  test("phantom: tokens present + listChats 0", async () => {
+    await seedJar();
+    const result = await classifierFor(TOKEN_HTML, []).classifyDetailed("test-profile");
+    expect(result).toEqual({ state: "phantom", chatCount: 0 });
   });
 
-  test("reports 'dead' for no tokens", async () => {
-    await setupTestProfile(deadJar());
-    
-    const initHtmlWithoutTokens = `
-      <html>
-        <body>
-          <p>Sign in to continue</p>
-        </body>
-      </html>
-    `;
-    
-    const fakeFetch = mock(async () => initHtmlWithoutTokens);
-    const probeChats = mock(async () => []);
-    
-    const classifier = new SessionClassifier({
-      fetchInitHtml: fakeFetch,
-      probeChats,
-      logger: makeLogger() as never,
-    });
-    
-    const result = await classifier.classifyDetailed("test-profile");
-    
-    expect(result.state).toBe("dead");
-    expect(result.chatCount).toBe(0);
+  test("dead: no init tokens (probeChats never called)", async () => {
+    await seedJar();
+    const probeChats = mock(async () => ["chat1"]);
+    const classifier = new SessionClassifier({ fetchInitHtml: mock(async () => SIGNED_OUT_HTML), probeChats });
+    expect(await classifier.classify("test-profile")).toBe("dead");
     expect(probeChats).not.toHaveBeenCalled();
   });
 
-  test("deterministic across repeated runs with same jar shape", async () => {
-    await setupTestProfile(freshFullJar());
-    
-    const initHtmlWithTokens = `
-      <html>
-        <body>
-          <script data-initial-state="SNIPET">SNlM0e</script>
-        </body>
-      </html>
-    `;
-    
-    const fakeFetch = mock(async () => initHtmlWithTokens);
-    const probeChats = mock(async () => ["chat1"]);
-    
-    const classifier = new SessionClassifier({
-      fetchInitHtml: fakeFetch,
-      probeChats,
-      logger: makeLogger() as never,
-    });
-    
+  test("deterministic across repeated runs on the same jar shape", async () => {
+    await seedJar();
+    const classifier = classifierFor(TOKEN_HTML, ["chat1"]);
     const results = await Promise.all([
       classifier.classify("test-profile"),
       classifier.classify("test-profile"),
       classifier.classify("test-profile"),
     ]);
-    
-    expect(results.every(r => r === "live")).toBe(true);
+    expect(results).toEqual(["live", "live", "live"]);
   });
 });
 
-describe("auth-regression: probe purity (read-only, no side effects)", () => {
-  test("probe writes nothing to disk", async () => {
-    const testJar = freshFullJar();
-    await setupTestProfile(testJar);
-    
-    const initHtmlWithTokens = `
-      <html>
-        <body>
-          <script data-initial-state="SNIPET">SNlM0e</script>
-        </body>
-      </html>
-    `;
-    
-    const fakeFetch = mock(async () => initHtmlWithTokens);
-    const probeChats = mock(async () => ["chat1"]);
-    
-    const classifier = new SessionClassifier({
-      fetchInitHtml: fakeFetch,
-      probeChats,
-      logger: makeLogger() as never,
-    });
-    
-    const result = await classifier.classifyDetailed("test-profile");
-    
-    expect(result.state).toBe("live");
-    
-    const cookieStore = new CookieStore();
-    const finalJar = await cookieStore.load("test-profile");
-    expect(finalJar.cookies.length).toBe(testJar.length);
-  });
+describe("auth-regression: probe purity", () => {
+  test("probe writes nothing and fires no rotation (facade-level)", async () => {
+    await seedJar();
+    const jarPath = join(TEST_DIR, "profiles", "test-profile", "storage_state.json");
+    const bytesBefore = readFileSync(jarPath, "utf-8");
 
-  test("probe does not fire rotation", async () => {
-    await setupTestProfile(freshFullJar());
-    
-    const initHtmlWithTokens = `
-      <html>
-        <body>
-          <script data-initial-state="SNIPET">SNlM0e</script>
-        </body>
-      </html>
-    `;
-    
-    const fakeFetch = mock(async () => initHtmlWithTokens);
-    const probeChats = mock(async () => ["chat1"]);
-    
-    const rotateCalls: any[] = [];
-    const refresher = {
-      rotatePsidts: mock(async () => {
-        rotateCalls.push(Date.now());
-        return { rotated: false };
-      }),
-    };
-    
-    const classifier = new SessionClassifier({
-      fetchInitHtml: fakeFetch,
-      probeChats,
-      logger: makeLogger() as never,
+    const rotateCalls: string[] = [];
+    const deps = makeSessionDeps({
+      refresher: {
+        rotatePsidts: mock(async (profile: string) => {
+          rotateCalls.push(profile);
+          return { rotated: true };
+        }),
+      },
     });
-    
-    await classifier.classifyDetailed("test-profile");
-    
+    const session = makeSession(deps);
+
+    // probe() must route to the read-only classifier, not refresh().
+    expect(await session.probe("test-profile")).toBe("live");
     expect(rotateCalls.length).toBe(0);
-  });
-
-  test("jar is byte-identical before and after probe", async () => {
-    const testJar = freshFullJar();
-    await setupTestProfile(testJar);
-    const jarBefore = JSON.stringify(testJar);
-    
-    const initHtmlWithTokens = `
-      <html>
-        <body>
-          <script data-initial-state="SNIPET">SNlM0e</script>
-        </body>
-      </html>
-    `;
-    
-    const fakeFetch = mock(async () => initHtmlWithTokens);
-    const probeChats = mock(async () => ["chat1"]);
-    
-    const classifier = new SessionClassifier({
-      fetchInitHtml: fakeFetch,
-      probeChats,
-      logger: makeLogger() as never,
-    });
-    
-    await classifier.classifyDetailed("test-profile");
-    
-    const cookieStore = new CookieStore();
-    const finalJar = await cookieStore.load("test-profile");
-    const jarAfter = JSON.stringify(finalJar.cookies);
-    expect(jarAfter).toBe(jarBefore);
+    expect(readFileSync(jarPath, "utf-8")).toBe(bytesBefore);
   });
 });

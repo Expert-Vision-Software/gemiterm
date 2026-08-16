@@ -112,9 +112,9 @@ async function writeJsonFile(path: string, data: unknown): Promise<void> {
 
 /**
  * Creates the file at `path` with `content` only if it does not already
- * exist (the `wx` exclusive-create flag). Returns `true` when the file was
- * created, `false` when it already existed — the cross-process lock
- * acquisition primitive.
+ * exist (the `wx` exclusive-create flag), ensuring the parent directory
+ * exists first. Returns `true` when the file was created, `false` when it
+ * already existed — the cross-process lock acquisition primitive.
  */
 async function writeFileExclusive(path: string, content: string): Promise<boolean> {
   const absolute = resolve(path);
