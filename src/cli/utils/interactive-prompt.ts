@@ -1,6 +1,5 @@
 import chalk from "chalk";
 import { CancellationError, text, type TextOptions } from "./prompts.ts";
-export { CancellationError, text };
 
 export interface MessageHandlerResult {
   response: string;

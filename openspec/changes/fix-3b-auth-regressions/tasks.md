@@ -16,8 +16,8 @@ Baseline: post-fix-3 suite (905 pass / 2 skip / 0 fail / 1934 expects / 61 files
 
 ## 3. Prompt facade re-export removal
 
-- [ ] 3.1 Remove `export { CancellationError, text }` from `src/cli/utils/interactive-prompt.ts`; switch `chat-session.ts` to import both from `./prompts.ts` (grep gate: no file imports `CancellationError` or `text` from `interactive-prompt.ts`)
-- [ ] 3.2 RED-first contract test pinning the no-re-export rule: reading `src/cli/utils/interactive-prompt.ts` finds no re-export of facade symbols (greppable pin, same style as `tests/auth/full-jar-contract.test.ts`)
+- [x] 3.1 Remove `export { CancellationError, text }` from `src/cli/utils/interactive-prompt.ts`; switch `chat-session.ts` to import both from `./prompts.ts` (grep gate: no file imports `CancellationError` or `text` from `interactive-prompt.ts`)
+- [x] 3.2 RED-first contract test pinning the no-re-export rule: reading `src/cli/utils/interactive-prompt.ts` finds no re-export of facade symbols (greppable pin, same style as `tests/auth/full-jar-contract.test.ts`)
 
 ## 4. Verification
 

@@ -1,7 +1,8 @@
 import chalk from "chalk";
 import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
 import type { Logger } from "../../infrastructure/logger.ts";
-import { runInteractiveLoop, type MessageHandlerResult, type SessionKeepaliveHandle, text, CancellationError } from "./interactive-prompt.ts";
+import { runInteractiveLoop, type MessageHandlerResult, type SessionKeepaliveHandle } from "./interactive-prompt.ts";
+import { text, CancellationError } from "./prompts.ts";
 
 export interface StartChatSessionParams {
   effectiveMessage: string | null;
