@@ -1,6 +1,7 @@
-import { describe, test, expect, beforeEach, mock } from "bun:test";
+import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
 import { writeFileSync } from "node:fs";
 import {
+  BunPlaywrightRunner,
   PlaywrightCliDriver,
   PlaywrightCliError,
   PlaywrightCliUnavailableError,
@@ -583,5 +584,46 @@ describe("PlaywrightCliDriver", () => {
 
       expect(candidate._run).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe("BunPlaywrightRunner spawn options", () => {
+  function fakeSpawnSpy(): ReturnType<typeof spyOn> {
+    return spyOn(Bun, "spawn").mockImplementation((() => ({
+      stdout: new Response("1.0.0"),
+      stderr: new Response(""),
+      exited: Promise.resolve(0),
+    })) as never);
+  }
+
+  test("run spawns with windowsHide so Windows console windows do not flash", async () => {
+    const spawnSpy = fakeSpawnSpy();
+    try {
+      const runner = new BunPlaywrightRunner("direct");
+
+      const result = await runner.run(["--version"]);
+
+      expect(result.exitCode).toBe(0);
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+      const opts = spawnSpy.mock.calls[0][1] as { windowsHide?: boolean };
+      expect(opts.windowsHide).toBe(true);
+    } finally {
+      spawnSpy.mockRestore();
+    }
+  });
+
+  test("spawnDetached spawns with windowsHide so Windows console windows do not flash", () => {
+    const spawnSpy = fakeSpawnSpy();
+    try {
+      const runner = new BunPlaywrightRunner("direct");
+
+      runner.spawnDetached(["open", "--browser=chromium"]);
+
+      expect(spawnSpy).toHaveBeenCalledTimes(1);
+      const opts = spawnSpy.mock.calls[0][1] as { windowsHide?: boolean };
+      expect(opts.windowsHide).toBe(true);
+    } finally {
+      spawnSpy.mockRestore();
+    }
   });
 });

@@ -181,6 +181,7 @@ export class ListCommand implements CliCommand {
         stdin: new TextEncoder().encode(text),
         stdout: "ignore",
         stderr: "ignore",
+        windowsHide: true,
       });
       return await proc.exited === 0;
     } catch {

@@ -39,7 +39,10 @@ export interface PlaywrightRunner {
   spawnDetached(args: string[]): void;
 }
 
-class BunPlaywrightRunner implements PlaywrightRunner {
+// windowsHide: Bun.spawn defaults it to false at the JS layer, so every
+// short-lived playwright-cli subprocess would flash its own console window
+// on Windows (no-op elsewhere).
+export class BunPlaywrightRunner implements PlaywrightRunner {
   readonly strategy: PlaywrightStrategy;
   private readonly bin: string[];
 
@@ -53,6 +56,7 @@ class BunPlaywrightRunner implements PlaywrightRunner {
       stdout: "pipe",
       stderr: "pipe",
       stdin: "ignore",
+      windowsHide: true,
     });
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -71,6 +75,7 @@ class BunPlaywrightRunner implements PlaywrightRunner {
       stdout: "ignore",
       stderr: "ignore",
       stdin: "ignore",
+      windowsHide: true,
     });
     proc.exited.catch(() => {});
   }
