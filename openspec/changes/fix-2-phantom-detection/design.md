@@ -40,7 +40,7 @@ After a user-accepted recovery that succeeds, the list query re-runs exactly onc
 
 ## Risks / Trade-offs
 
-- **Probe cost in the degraded path** - one init GET + one `listChats({limit:1})` only when a single-profile list already returned empty; acceptable.
+- **Probe cost in the degraded path** - one init GET + one `listChats` probe (unbounded, so the observed count is real) only when a single-profile list already returned empty; network-identical to the `limit: 1` form because the SDK fetches the full list and slices client-side.
 - **Phantom-during-retry race** - a session can decay between probe and retry; bounded by D4's single retry.
 - **Status probe latency under `--verbose` with many profiles** - sequential and opt-in; documented in-flag.
 - **Compiled-build detached spawn gap (excluded)** - `refresh-runner.ts` resolves from `import.meta.dir` and won't exist beside `dist/gemiterm`; the recovery rung in this change is synchronous and unaffected, but proactive refresh in compiled builds needs a multi-entry build - tracked as a build-surface follow-up, not this change.

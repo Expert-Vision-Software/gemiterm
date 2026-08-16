@@ -5,7 +5,8 @@ import { listChatsForRequest, type ListChatsRequest } from "../utils/gemini-quer
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { GemitermError } from "../../core/errors.ts";
-import { browser, confirm, select, text, CancellationError, type BrowserAction } from "../utils/prompts.ts";
+import { browser, confirm, select, text, CancellationError, NonInteractiveError, type BrowserAction } from "../utils/prompts.ts";
+import type { SessionProbeResult } from "../../auth/cookie-session.ts";
 import { invokeCommand } from "../utils/command-invoker.ts";
 import { render, sortChats, filterChatsByDate } from "../utils/chat-output.ts";
 
@@ -127,7 +128,7 @@ export class ListCommand implements CliCommand {
     }
     if (!profileName) return chats;
 
-    let state: "live" | "phantom" | "dead";
+    let state: SessionProbeResult["state"];
     try {
       state = await context.cookieSession.probe(profileName);
     } catch (error) {
@@ -138,19 +139,20 @@ export class ListCommand implements CliCommand {
 
     if (state === "live") return chats;
 
-    if (process.stdin.isTTY !== true) {
-      console.error(chalk.yellow(
-        `Profile '${profileName}' session is ${state} — the server reports no conversations for this profile. Run 'gemiterm auth' to re-authenticate.`,
-      ));
-      return chats;
-    }
-
-    let accepted = false;
+    let accepted: boolean;
     try {
       accepted = await confirm({
         message: `Profile '${profileName}' session is ${state} (no conversations visible). Attempt session recovery now?`,
       });
     } catch (error) {
+      // The facade owns the TTY gate: non-interactive runs fall through to the
+      // stderr diagnostic; a user cancel is a decline. Stdout stays untouched either way.
+      if (error instanceof NonInteractiveError) {
+        console.error(chalk.yellow(
+          `Profile '${profileName}' session is ${state} — the server reports no conversations for this profile. Run 'gemiterm auth' to re-authenticate.`,
+        ));
+        return chats;
+      }
       if (error instanceof CancellationError) return chats;
       throw error;
     }

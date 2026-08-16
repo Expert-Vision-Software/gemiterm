@@ -319,7 +319,7 @@ describe("status command integration", () => {
       expect(cookieSessionFake.captureLogin).not.toHaveBeenCalled();
     });
 
-    test("probe failure renders dead and warns", async () => {
+    test("probe failure renders unknown (—) and warns, never dead", async () => {
       setupProfilesWithStatus([
         { name: "work", exists: true, isActive: true, expiresAt: "2099-12-31T00:00:00.000Z", isDefault: true },
         { name: "broken", exists: true, isActive: false, expiresAt: null, isDefault: false },
@@ -332,7 +332,9 @@ describe("status command integration", () => {
       await command.execute(["--verbose"], context);
 
       const output = getOutput(logSpy);
-      expect(output).toContain("✗ dead");
+      expect(output).toContain("live (1)");
+      expect(output).toContain("—");
+      expect(output).not.toContain("dead");
       const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join("\n");
       expect(stderrOutput).toContain("WARN");
       expect(stderrOutput).toContain("broken");

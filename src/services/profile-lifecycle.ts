@@ -158,9 +158,10 @@ export class ProfileLifecycle {
         try {
           status.probe = await this.cookieSession.probeDetailed(status.name);
         } catch (error) {
+          // Unknown is not dead: leave probe unset so the column renders the
+          // em-dash placeholder instead of misreporting a server-side verdict.
           const message = error instanceof Error ? error.message : String(error);
           this.logger.warn(`Session probe failed for profile '${status.name}': ${message}`);
-          status.probe = { state: "dead", chatCount: 0 };
         }
       }
     }
