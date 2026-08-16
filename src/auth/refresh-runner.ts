@@ -6,17 +6,40 @@ import { CookieStore } from "./cookie-store.ts";
 import { BrowserRefresher } from "./browser-refresher.ts";
 import { PSIDTS_COOKIE_NAME } from "./auth-constants.ts";
 import { findRoutableCookieValue } from "./cookie-validation.ts";
-import { joinPath } from "../infrastructure/path-utils.ts";
+import { joinPath, getLogFilePath, getConfigDir, resolvePath } from "../infrastructure/path-utils.ts";
+import { openAppendFd } from "../infrastructure/io.ts";
 
 export function refreshRunnerEntryPath(): string {
   return joinPath(import.meta.dir, "refresh-runner.ts");
 }
 
-export function spawnDetachedRefreshRunner(profile: string): void {
-  const proc = Bun.spawn([process.execPath, refreshRunnerEntryPath(), profile], {
+export interface DetachedSpawnOptions {
+  stdin: "ignore";
+  stdout: number | "ignore";
+  stderr: number | "ignore";
+  detached: boolean;
+  env: Record<string, string | undefined>;
+}
+
+export interface DetachedSpawnDeps {
+  openLogFd?: (path: string) => number;
+  spawn?: (cmd: string[], options: DetachedSpawnOptions) => { exited: Promise<number> };
+}
+
+export function spawnDetachedRefreshRunner(profile: string, deps: DetachedSpawnDeps = {}): void {
+  const spawn = deps.spawn ?? ((cmd: string[], options: DetachedSpawnOptions) => Bun.spawn(cmd, options));
+  let output: number | "ignore" = "ignore";
+  try {
+    output = (deps.openLogFd ?? openAppendFd)(getLogFilePath());
+  } catch {
+    // ignore — a logging failure must never block a refresh
+  }
+  const proc = spawn([process.execPath, refreshRunnerEntryPath(), profile], {
     stdin: "ignore",
-    stdout: "ignore",
-    stderr: "ignore",
+    stdout: output,
+    stderr: output,
+    detached: true,
+    env: { ...process.env, GEMITERM_CONFIG_DIR: resolvePath(getConfigDir()) },
   });
   proc.exited.catch(() => {});
 }
@@ -28,6 +51,7 @@ export interface RunRefreshDeps {
 }
 
 export async function runRefresh(profile: string, deps: RunRefreshDeps): Promise<{ rotated: boolean }> {
+  deps.logger.info(`refresh-runner(${profile}): starting (pid=${process.pid})`);
   let baseline: string | null = null;
   try {
     const { cookies } = await deps.cookieStore.load(profile);

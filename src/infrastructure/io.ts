@@ -20,6 +20,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { mkdirSync, openSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 export class IOError extends Error {
@@ -214,10 +215,27 @@ async function getFileMtime(path: string): Promise<Date | null> {
   }
 }
 
+/**
+ * Synchronously opens (creating if needed) the file at `path` for appending
+ * and returns the raw file descriptor. Sync is required because
+ * `Bun.spawn` needs a numeric fd at spawn time to redirect a detached
+ * child's stdio to a log file. Parent directories are created recursively.
+ */
+function openAppendFd(path: string): number {
+  const absolute = resolve(path);
+  try {
+    mkdirSync(dirname(absolute), { recursive: true });
+    return openSync(absolute, "a");
+  } catch (err) {
+    throw wrap("openAppendFd", absolute, err instanceof Error ? err : undefined);
+  }
+}
+
 export {
   ensureDir,
   existsFile,
   getFileMtime,
+  openAppendFd,
   readTextFile,
   safeReadTextFile,
   writeTextFile,

@@ -118,6 +118,18 @@ describe("CookieSession.ensureSession", () => {
     expect(deps.spawnRefreshRunner).toHaveBeenCalledWith("p");
   });
 
+  test("repeated stale arms within one process spawn the runner only once per profile", async () => {
+    const stale = new Date(Date.now() - 60 * 60 * 1000);
+    const deps = makeDeps({ cookieStore: makeStore(GATE_JAR, stale) });
+    const session = makeSession(deps);
+
+    await session.ensureSession("p");
+    await session.ensureSession("p");
+    await session.ensureSession("p");
+
+    expect(deps.spawnRefreshRunner).toHaveBeenCalledTimes(1);
+  });
+
   test("legacy 2-cookie jar arms without error", async () => {
     const deps = makeDeps({ cookieStore: makeStore(GATE_JAR) });
     const session = makeSession(deps);

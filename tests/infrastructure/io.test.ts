@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { closeSync, writeSync } from "node:fs";
 import {
   ensureDir,
   existsFile,
@@ -13,6 +14,7 @@ import {
   renameDir,
   isDirectory,
   listSubdirectories,
+  openAppendFd,
   IOError,
 } from "../../src/infrastructure/io.ts";
 
@@ -193,5 +195,23 @@ describe("listSubdirectories", () => {
 
   test("returns an empty array for a missing path", async () => {
     expect(await listSubdirectories(join(TEST_ROOT, "nope"))).toEqual([]);
+  });
+});
+
+describe("openAppendFd", () => {
+  test("creates parent dirs and the file, and appends across reopens", async () => {
+    const file = join(TEST_ROOT, "nested", "dir", "gemiterm.log");
+    const fd1 = openAppendFd(file);
+    writeSync(fd1, "first\n");
+    closeSync(fd1);
+    const fd2 = openAppendFd(file);
+    writeSync(fd2, "second\n");
+    closeSync(fd2);
+    expect(await readTextFile(file)).toBe("first\nsecond\n");
+  });
+
+  test("wraps failures in IOError", async () => {
+    await writeTextFile(join(TEST_ROOT, "blocker.txt"), "x");
+    expect(() => openAppendFd(join(TEST_ROOT, "blocker.txt", "child.log"))).toThrow(IOError);
   });
 });

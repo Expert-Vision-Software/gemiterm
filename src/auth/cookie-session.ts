@@ -79,6 +79,7 @@ export function psidtsExpiry(cookies: Cookie[]): Date | null {
 export class CookieSession {
   private readonly deps: CookieSessionDeps;
   private readonly pollIntervalMs: number;
+  private readonly spawnedRunnerProfiles = new Set<string>();
 
   constructor(deps: CookieSessionDeps) {
     this.deps = deps;
@@ -93,7 +94,8 @@ export class CookieSession {
     this.deps.validator.validate(cookies);
 
     const mtime = await this.deps.cookieStore.getJarMtime(name);
-    if (mtime === null || Date.now() - mtime.getTime() > STALE_JAR_MS) {
+    if ((mtime === null || Date.now() - mtime.getTime() > STALE_JAR_MS) && !this.spawnedRunnerProfiles.has(name)) {
+      this.spawnedRunnerProfiles.add(name);
       this.deps.spawnRefreshRunner(name);
     }
 
