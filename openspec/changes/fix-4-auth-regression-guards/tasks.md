@@ -4,26 +4,32 @@ Prerequisite: fix-1, fix-2, fix-3 implemented and archived. Baseline test counts
 
 ## 1. Fixtures and suite scaffolding
 
-- [ ] 1.1 Create `tests/auth-regression/fixtures.ts` with the five jar builders (`freshFullJar`, `staleFullJar`, `phantomShapedJar`, `deadJar`, `trimmedFourCookieJar`), shapes derived from `docs/cookie-ablation-findings.md`, plus a per-file isolated `GEMITERM_CONFIG_DIR` bootstrap (no imports from the global mock-cookie fixtures)
-- [ ] 1.2 Create the fake seams: driver fake (state-save output, page outcomes) and wire fake (init-token/listChats behavior per jar shape), injected through the existing DI surfaces
+- [x] 1.1 Create `tests/auth-regression/fixtures.ts` with the five jar builders (`freshFullJar`, `staleFullJar`, `phantomShapedJar`, `deadJar`, `trimmedFourCookieJar`), shapes derived from `docs/cookie-ablation-findings.md`, plus a per-file isolated `GEMITERM_CONFIG_DIR` bootstrap (no imports from the global mock-cookie fixtures)
+- [x] 1.2 Create the fake seams: driver fake (state-save output, page outcomes) and wire fake (init-token/listChats behavior per jar shape), injected through the existing DI surfaces
 
 ## 2. Invariant tests (one per historical bug class)
 
-- [ ] 2.1 Full-jar capture integrity: capture persists every offered cookie; RED if any name-subset filter reappears (H6 / `REQUIRED_COOKIES` class)
-- [ ] 2.2 Rotation propagation: PSIDTS value-change lands on disk via store save, detached refresh runner, and recovery rung; RED if any path discards the new value (discarded-rotation class)
-- [ ] 2.3 Signed-out capture safety: no write, no overwrite of an existing jar on anonymous-cookie captures (save-on-login-page class)
-- [ ] 2.4 CAS semantics: stale in-memory jar cannot clobber fresher disk PSIDTS (#361 class)
-- [ ] 2.5 Validator contract: tier-1 raises on absent `__Secure-1PSID` or non-routable PSIDTS (expired / wrong-scope); tier-2 warns once on missing companions (#2061 class)
-- [ ] 2.6 Classifier truth table: live / phantom / dead across jar shapes, deterministic on repeat
-- [ ] 2.7 Probe purity: read-only classifier writes nothing and fires no rotation (byte-identical jar before/after)
-- [ ] 2.8 Run `bun test tests/auth-regression` green; record net test-count delta vs pre-change baseline in this file
+- [x] 2.1 Full-jar capture integrity: capture persists every offered cookie; RED if any name-subset filter reappears (H6 / `REQUIRED_COOKIES` class)
+- [x] 2.2 Rotation propagation: PSIDTS value-change lands on disk via store save, detached refresh runner, and recovery rung; RED if any path discards the new value (discarded-rotation class)
+- [x] 2.3 Signed-out capture safety: no write, no overwrite of an existing jar on anonymous-cookie captures (save-on-login-page class)
+- [x] 2.4 CAS semantics: stale in-memory jar cannot clobber fresher disk PSIDTS (#361 class)
+- [x] 2.5 Validator contract: tier-1 raises on absent `__Secure-1PSID` or non-routable PSIDTS (expired / wrong-scope); tier-2 warns once on missing companions (#2061 class)
+- [x] 2.6 Classifier truth table: live / phantom / dead across jar shapes, deterministic on repeat
+- [x] 2.7 Probe purity: read-only classifier writes nothing and fires no rotation (byte-identical jar before/after)
+- [x] 2.8 Run `bun test tests/auth-regression` green; record net test-count delta vs pre-change baseline in this file
+  - Baseline before this change: 917 pass / 0 fail. After: 937 pass / 0 fail under `bun test --isolate` (2 pre-existing skips) — net +20, all from `tests/auth-regression/` (4 files: capture-integrity 6, cas-semantics 2, validator-contract 5, classifier-truth-table 7).
+  - Implementation note: unblocked by fixing `writeFileExclusive` in `src/infrastructure/io.ts` (missing `ensureDir` on the lock-file parent — ENOENT when capturing into a fresh profile dir).
 
 ## 3. Gate mechanics
 
-- [ ] 3.1 Author `AUTH_SENSITIVE_PATHS` list (paths + content regex incl. `docs/auth-cookie-lifecycle.md`) with a reviewed benign-allowlist file
-- [ ] 3.2 Implement `scripts/check-auth-gate` (bash + pwsh parity, diff-driven with merge-base fallback, `SKIP_AUTH_REGRESSION_GATE=1` opt-out requiring a stated reason) and wire `bun run check:auth-gate`
-- [ ] 3.3 Add the CI step to `.github/workflows/test.yml` as warn-only; verify it triggers on a synthetic auth-only diff and stays silent on a docs-only diff outside the regex
+- [x] 3.1 Author `AUTH_SENSITIVE_PATHS` list (paths + content regex incl. `docs/auth-cookie-lifecycle.md`) with a reviewed benign-allowlist file
+  - List: `AUTH_SENSITIVE_PATHS` (doc form) + `PATH_SPECS` in `scripts/check-auth-gate.{sh,ps1}` (executable form); allowlist: `scripts/auth-gate-allowlist`.
+- [x] 3.2 Implement `scripts/check-auth-gate` (bash + pwsh parity, diff-driven with merge-base fallback, `SKIP_AUTH_REGRESSION_GATE=1` opt-out requiring a stated reason) and wire `bun run check:auth-gate`
+  - Also supports `GATE_BASE=<sha>` for CI; local fallback: merge-base with upstream, then `HEAD~1`.
+- [x] 3.3 Add the CI step to `.github/workflows/test.yml` as warn-only; verify it triggers on a synthetic auth-only diff and stays silent on a docs-only diff outside the regex
+  - Step added as warn-only (`::warning`, non-blocking) with PR-base/push-before sha resolution. Synthetic-diff verification done locally: auth-only diff → exit 1, covered diff → exit 0, opt-out → exit 0 with audit note. Full CI verification rides the fix-4 PR itself.
 - [ ] 3.4 Flip the CI step to blocking after one green warn-only run; update AGENTS.md build/test section with the new command
+  - AGENTS.md hardening is tracked under 5.3; flip happens after the first green warn-only run in CI.
 
 ## 4. Mutation canary
 
