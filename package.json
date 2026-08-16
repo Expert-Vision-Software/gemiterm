@@ -38,6 +38,7 @@
     "lint:mediation:ps": "pwsh scripts/lint-path-mediation.ps1",
     "check:auth-gate": "bash scripts/check-auth-gate.sh",
     "check:auth-gate:ps": "pwsh scripts/check-auth-gate.ps1",
+    "canary:auth": "bash scripts/run-auth-mutation-canary.sh",
     "build": "bun run scripts/build.ts",
     "build:linux": "bun run scripts/build.ts linux",
     "build:windows": "bun run scripts/build.ts windows",

@@ -33,9 +33,12 @@ Prerequisite: fix-1, fix-2, fix-3 implemented and archived. Baseline test counts
 
 ## 4. Mutation canary
 
-- [ ] 4.1 Author mutation patches under `tests/auth-regression/mutations/`: capture name-filter, persist-discards-PSIDTS, stale-clobber save
-- [ ] 4.2 Implement the canary runner (clean worktree, apply patch, run suite, assert RED, fail loudly when a patch no longer applies)
-- [ ] 4.3 Schedule nightly in CI; verify one full canary pass
+- [x] 4.1 Author mutation patches under `tests/auth-regression/mutations/`: capture name-filter, persist-discards-PSIDTS, stale-clobber save
+  - `capture-name-filter.patch` (H6 class), `persist-discards-psidts.patch` (discarded-rotation class), `stale-clobber-save.patch` (#361 class); generated via `git diff` so they apply byte-exact.
+- [x] 4.2 Implement the canary runner (clean worktree, apply patch, run suite, assert RED, fail loudly when a patch no longer applies)
+  - `scripts/run-auth-mutation-canary.sh` (+ `bun run canary:auth`); refuses dirty trees, reverts via trap, treats patch-rot and surviving mutations as failures.
+- [x] 4.3 Schedule nightly in CI; verify one full canary pass
+  - `.github/workflows/auth-canary.yml` (nightly `0 3 * * *` + `workflow_dispatch`). Full local pass verified: all 3 mutations detected (suite RED each); first scheduled CI run pending merge.
 
 ## 5. Documentation consolidation
 

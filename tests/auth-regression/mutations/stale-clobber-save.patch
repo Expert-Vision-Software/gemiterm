@@ -1,0 +1,13 @@
+diff --git a/src/auth/cookie-store.ts b/src/auth/cookie-store.ts
+index eef2248..307b628 100644
+--- a/src/auth/cookie-store.ts
++++ b/src/auth/cookie-store.ts
+@@ -141,7 +141,7 @@ export class CookieStore {
+       if (target) {
+         if (snapValue === undefined) {
+           merged.push(target);
+-        } else if (diskValues.get(key) === snapValue || diskCookie.value === target.value) {
++        } else if (true || diskValues.get(key) === snapValue || diskCookie.value === target.value) {
+           merged.push(target);
+         } else {
+           merged.push(diskCookie);
