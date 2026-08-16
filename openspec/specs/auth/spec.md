@@ -5,15 +5,27 @@ The interactive authentication capability for `gemiterm`. It owns the end-to-end
 ## Requirements
 
 ### Requirement: CookieSession facade is the single authentication surface
-The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as the only authentication surface consumed by the CLI. The facade MUST expose `ensureSession(profile)`, `captureLogin(profile)`, `probe(profile)`, `refresh(profile)`, `activeProfiles()`, and `findProfileForConversation(conversationId)`, and MUST accept all collaborators (`BrowserRefresher`, `CookieStore`, `CookieValidator`, recovery rung, logger) through a single `CookieSessionDeps` deps-object so the implementation is replaceable at the seam. No file outside `src/auth/` may import the collaborators directly.
+The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as the only authentication surface consumed by the CLI. The facade MUST expose `ensureSession(profile)`, `captureLogin(profile)`, `probe(profile)`, `refresh(profile)`, `activeProfiles()`, `findProfileForConversation(conversationId)`, and `createKeepalive(profile)` (constructing a wired session-keepalive loop for the profile that satisfies the REPL's start/stop handle contract), and MUST accept all collaborators (`BrowserRefresher`, `CookieStore`, `CookieValidator`, recovery rung, logger) through a single `CookieSessionDeps` deps-object so the implementation is replaceable at the seam. No file outside `src/auth/` may import the collaborators directly, and the facade MUST NOT expose raw collaborator accessors (e.g. getters returning the cookie store or the refresher) — CLI files obtain keepalive instances through `createKeepalive` only. `refresh(profile)` and the keepalive loop MUST share one in-process rotation floor: a rotation recorded by either consumer suppresses the other within the floor window (60 seconds by default), per the session-keepalive requirement.
 
 #### Scenario: Facade wires collaborators from a deps-object
 - **WHEN** a `CookieSession` is constructed with fakes for every collaborator in `CookieSessionDeps`
-- **THEN** `ensureSession`, `captureLogin`, `probe`, and `refresh` each complete using only the injected fakes (no direct construction of concrete collaborators inside the facade)
+- **THEN** `ensureSession`, `captureLogin`, `probe`, `refresh`, and `createKeepalive` each complete using only the injected fakes (no direct construction of concrete collaborators inside the facade)
 
 #### Scenario: Conversation routing contract is preserved
 - **WHEN** `findProfileForConversation("<cid>")` is called and exactly one active profile's client reports owning the conversation
 - **THEN** it resolves that profile's name; and when no active profile owns it, it resolves `null`
+
+#### Scenario: Keepalive is constructed through the facade factory
+- **WHEN** a command calls `createKeepalive("p")` on the facade
+- **THEN** the returned loop is wired to the facade's injected cookie store, refresher, and shared rotation floor, and exposes `start()`/`stop()`
+
+#### Scenario: Manual refresh is suppressed inside the shared floor window
+- **WHEN** the keepalive loop completes a rotation for profile "p" and `refresh("p")` is invoked 30 seconds later in the same process
+- **THEN** `refresh` resolves `{ rotated: false }` without spawning the browser, and the suppression is logged at debug level
+
+#### Scenario: Scheduled tick is suppressed inside the shared floor window
+- **WHEN** a manual `refresh("p")` completes a rotation and a keepalive tick for "p" fires 30 seconds later in the same process
+- **THEN** the tick skips the browser and reschedules
 
 ### Requirement: CookieSession.ensureSession arms from the on-disk jar
 `ensureSession(profile)` MUST load the profile's stored jar, run tier validation, and return the armed cookies without any network call or browser launch when the jar is fresh (storage mtime within 30 minutes). When the jar's mtime exceeds 30 minutes, the method MUST spawn a detached refresh-runner process for the profile (fire-and-forget) and STILL return the on-disk armed cookies immediately - the current command is never blocked on the browser. Legacy 2/4-cookie jars MUST arm without error (shape is not a validity signal) and self-upgrade via the detached refresh.
