@@ -7,7 +7,10 @@ import { validateProfileName } from "../infrastructure/validators.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
 import { CookieValidator, findRoutableCookieValue } from "./cookie-validation.ts";
 import { CookieStore } from "./cookie-store.ts";
-import { SessionClassifier } from "./session-classifier.ts";
+import { SessionClassifier, type SessionProbeResult } from "./session-classifier.ts";
+
+// The facade is the only sanctioned import surface outside src/auth — re-export the probe result type for commands.
+export type { SessionProbeResult } from "./session-classifier.ts";
 import { BrowserRefresher, type RefresherDriver, type RotationResult } from "./browser-refresher.ts";
 import { RecoveryRung } from "./recovery.ts";
 import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
@@ -41,7 +44,7 @@ export interface CookieSessionDeps {
   cookieStore: Pick<CookieStore, "load" | "getJarMtime" | "saveFullJar">;
   validator: Pick<CookieValidator, "validate">;
   refresher: Pick<BrowserRefresher, "rotatePsidts">;
-  classifier: Pick<SessionClassifier, "classify">;
+  classifier: Pick<SessionClassifier, "classify" | "classifyDetailed">;
   recovery: Pick<RecoveryRung, "recover">;
   logger: Logger;
   spawnRefreshRunner: (profile: string) => void;
@@ -138,6 +141,10 @@ export class CookieSession {
 
   async probe(profile: string): Promise<"live" | "phantom" | "dead"> {
     return await this.deps.classifier.classify(profile);
+  }
+
+  async probeDetailed(profile: string): Promise<SessionProbeResult> {
+    return await this.deps.classifier.classifyDetailed(profile);
   }
 
   async refresh(profile: string): Promise<RotationResult> {
@@ -254,8 +261,10 @@ export function createCookieSession(deps: CreateCookieSessionDeps): CookieSessio
 
   const classifier = new SessionClassifier({
     cookieStore,
+    // No limit: GeminiClientService.listChats fetches all chats and slices client-side,
+    // so the probe sees the full list and classifyDetailed's chatCount is real.
     probeChats: async (profile) =>
-      await makeProbeClient(profile).then((c) => c.listChats({ limit: 1 })).catch(() => []),
+      await makeProbeClient(profile).then((c) => c.listChats()).catch(() => []),
   });
 
   let session!: CookieSession;

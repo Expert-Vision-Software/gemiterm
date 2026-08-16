@@ -74,7 +74,10 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     cookieStore: makeStore(GATE_JAR),
     validator: new CookieValidator({ logger: makeLogger() as never }),
     refresher: { rotatePsidts: mock(async () => ({ rotated: false })) },
-    classifier: { classify: mock(async () => "live" as const) },
+    classifier: {
+      classify: mock(async () => "live" as const),
+      classifyDetailed: mock(async () => ({ state: "live" as const, chatCount: 1 })),
+    },
     recovery: { recover: mock(async () => ({ secure_1psid: "psid", secure_1psidts: "ts", cookies: GATE_JAR })) },
     logger: makeLogger(),
     spawnRefreshRunner: mock(() => {}),
@@ -239,6 +242,18 @@ describe("CookieSession delegation", () => {
     expect(deps.classifier.classify).toHaveBeenCalledWith("p");
   });
 
+  test("probeDetailed delegates to the classifier", async () => {
+    const deps = makeDeps({
+      classifier: {
+        classify: mock(async () => "phantom" as const),
+        classifyDetailed: mock(async () => ({ state: "phantom" as const, chatCount: 0 })),
+      },
+    });
+    const session = makeSession(deps);
+    expect(await session.probeDetailed("p")).toEqual({ state: "phantom", chatCount: 0 });
+    expect(deps.classifier.classifyDetailed).toHaveBeenCalledWith("p");
+  });
+
   test("refresh uses the on-disk PSIDTS as baseline", async () => {
     const rotatePsidts = mock(async (_p: string, baseline: string | null) => {
       expect(baseline).toBe("ts");
@@ -308,6 +323,7 @@ describe("createCookieSession factory", () => {
     });
 
     expect(await session.probe("facade-p")).toBe("live");
+    expect(await session.probeDetailed("facade-p")).toEqual({ state: "live", chatCount: 2 });
     expect(await session.activeProfiles()).toEqual(["facade-p"]);
     expect(await session.findProfileForConversation("c1")).toBe("facade-p");
     expect(await session.findProfileForConversation("missing")).toBeNull();
