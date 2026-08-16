@@ -1,11 +1,11 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import { listChatsForRequest } from "../utils/gemini-queries.ts";
+import { listChatsForRequest, type ListChatsRequest } from "../utils/gemini-queries.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { GemitermError } from "../../core/errors.ts";
-import { browser, select, text, type BrowserAction } from "../utils/prompts.ts";
+import { browser, confirm, select, text, CancellationError, type BrowserAction } from "../utils/prompts.ts";
 import { invokeCommand } from "../utils/command-invoker.ts";
 import { render, sortChats, filterChatsByDate } from "../utils/chat-output.ts";
 
@@ -89,6 +89,10 @@ export class ListCommand implements CliCommand {
       return;
     }
 
+    if (chats.length === 0) {
+      chats = await this.resolvePhantomEmptyResult(chats, request, context, logger);
+    }
+
     chats = filterChatsByDate(chats, {
       after: options.after || undefined,
       before: options.before || undefined,
@@ -108,6 +112,59 @@ export class ListCommand implements CliCommand {
       { kind: "chat-list", chats, includeProfileColumn },
       { format: options.format, out: options.out || undefined },
     );
+  }
+
+  private async resolvePhantomEmptyResult(
+    chats: ChatInfo[],
+    request: ListChatsRequest,
+    context: CliCommandContext,
+    logger: Logger,
+  ): Promise<ChatInfo[]> {
+    let profileName = request.profile;
+    if (!profileName && !request.allProfiles) {
+      const profiles = await context.listProfiles();
+      if (profiles.length === 1) profileName = profiles[0];
+    }
+    if (!profileName) return chats;
+
+    let state: "live" | "phantom" | "dead";
+    try {
+      state = await context.cookieSession.probe(profileName);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`Session classification failed for profile '${profileName}': ${message}`);
+      return chats;
+    }
+
+    if (state === "live") return chats;
+
+    if (process.stdin.isTTY !== true) {
+      console.error(chalk.yellow(
+        `Profile '${profileName}' session is ${state} — the server reports no conversations for this profile. Run 'gemiterm auth' to re-authenticate.`,
+      ));
+      return chats;
+    }
+
+    let accepted = false;
+    try {
+      accepted = await confirm({
+        message: `Profile '${profileName}' session is ${state} (no conversations visible). Attempt session recovery now?`,
+      });
+    } catch (error) {
+      if (error instanceof CancellationError) return chats;
+      throw error;
+    }
+    if (!accepted) return chats;
+
+    await context.cookieSession.recover(profileName);
+
+    const retried = await listChatsForRequest(context.getGeminiClient, context.listProfiles, request);
+    if (retried.length > 0) return retried;
+
+    console.error(chalk.yellow(
+      `Recovery finished, but profile '${profileName}' still reports no conversations (session was ${state}). Run 'gemiterm auth' to re-authenticate if this persists.`,
+    ));
+    return retried;
   }
 
   private async copyToClipboard(text: string): Promise<boolean> {

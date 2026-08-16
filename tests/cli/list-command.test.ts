@@ -23,14 +23,19 @@ describe("ListCommand", () => {
   let command: ListCommand;
   let client: ReturnType<typeof makeClient>;
   let context: CliCommandContext;
+  let cookieSession: { probe: ReturnType<typeof mock>; recover: ReturnType<typeof mock> };
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new ListCommand();
     client = makeClient();
+    cookieSession = {
+      probe: mock(async () => "live" as const),
+      recover: mock(async () => ({})),
+    };
     context = {
       verbose: false,
-      cookieSession: {} as unknown as CliCommandContext["cookieSession"],
+      cookieSession: cookieSession as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => ["default"],
     };
@@ -140,6 +145,15 @@ describe("ListCommand", () => {
     expect(output).toContain("No conversations found");
   });
 
+  test("empty single-profile default probes the sole configured profile", async () => {
+    client.listChats = mock(async () => []);
+
+    await command.execute([], context);
+
+    expect(cookieSession.probe).toHaveBeenCalledTimes(1);
+    expect(cookieSession.probe).toHaveBeenCalledWith("default");
+  });
+
   test("applies --all-profiles flag in query", async () => {
     client.listChats = mock(async () => []);
     context.listProfiles = () => ["work", "personal"];
@@ -225,15 +239,20 @@ describe("ListCommand --interactive flag", () => {
   let command: ListCommand;
   let client: ReturnType<typeof makeClient>;
   let context: CliCommandContext;
+  let cookieSession: { probe: ReturnType<typeof mock>; recover: ReturnType<typeof mock> };
   let logSpy: ReturnType<typeof spyOn>;
   let promptsModule: typeof import("../../src/cli/utils/prompts.ts");
 
   beforeEach(async () => {
     command = new ListCommand();
     client = makeClient();
+    cookieSession = {
+      probe: mock(async () => "live" as const),
+      recover: mock(async () => ({})),
+    };
     context = {
       verbose: false,
-      cookieSession: {} as unknown as CliCommandContext["cookieSession"],
+      cookieSession: cookieSession as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => ["default"],
     };
