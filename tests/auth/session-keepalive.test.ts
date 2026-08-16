@@ -1,6 +1,7 @@
 import { describe, test, expect, mock } from "bun:test";
 import type { Cookie } from "../../src/core/types.ts";
 import { SessionKeepalive } from "../../src/auth/session-keepalive.ts";
+import { RotationCooldown } from "../../src/auth/rotation-cooldown.ts";
 
 function cookie(name: string, value: string): Cookie {
   return {
@@ -51,6 +52,7 @@ describe("SessionKeepalive", () => {
     const keepalive = new SessionKeepalive("p", {
       cookieStore: store,
       refresher,
+      cooldown: new RotationCooldown(),
       logger,
       now: () => 0,
       setInterval: () => ({ unref: () => {} }),
@@ -69,6 +71,7 @@ describe("SessionKeepalive", () => {
     const keepalive = new SessionKeepalive("p", {
       cookieStore: store,
       refresher,
+      cooldown: new RotationCooldown(),
       logger,
       now: () => 0,
       setInterval: () => ({ unref: () => {} }),
@@ -99,6 +102,7 @@ describe("SessionKeepalive", () => {
     const keepalive = new SessionKeepalive("p", {
       cookieStore: store,
       refresher,
+      cooldown: new RotationCooldown(),
       logger,
       now: () => time,
       setInterval: () => ({ unref: () => {} }),
@@ -112,8 +116,17 @@ describe("SessionKeepalive", () => {
     expect(refresher.rotatePsidts).toHaveBeenCalledTimes(2);
   });
 
-  test("60s floor suppresses immediate re-rotation", async () => {
-    const store = makeCookieStore("ts");
+  test("60s floor suppresses re-rotation when the baseline changed within the window", async () => {
+    let storeValue = "ts1";
+    const store = {
+      load: mock(async () => ({
+        cookies: [
+          cookie("__Secure-1PSID", "psid"),
+          cookie("__Secure-1PSIDTS", storeValue),
+        ],
+        snapshot: new Map(),
+      })),
+    };
     const refresher = makeRefresher();
     const logger = makeLogger();
     let time = 0;
@@ -121,6 +134,7 @@ describe("SessionKeepalive", () => {
     const keepalive = new SessionKeepalive("p", {
       cookieStore: store,
       refresher,
+      cooldown: new RotationCooldown({ now: () => time }),
       logger,
       now: () => time,
       setInterval: () => ({ unref: () => {} }),
@@ -130,6 +144,7 @@ describe("SessionKeepalive", () => {
     expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
 
     time += 30_000;
+    storeValue = "ts2";
     await keepalive.tick();
     expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
   });
@@ -146,6 +161,7 @@ describe("SessionKeepalive", () => {
     const keepalive = new SessionKeepalive("p", {
       cookieStore: store,
       refresher,
+      cooldown: new RotationCooldown(),
       logger,
       now: () => 0,
       setInterval: () => ({ unref: () => {} }),
@@ -166,6 +182,7 @@ describe("SessionKeepalive", () => {
     const keepalive = new SessionKeepalive("p", {
       cookieStore: store,
       refresher,
+      cooldown: new RotationCooldown(),
       logger,
       now: () => 0,
       setInterval: () => ({ unref: () => {} }),
@@ -196,6 +213,7 @@ describe("SessionKeepalive", () => {
     const keepalive = new SessionKeepalive("p", {
       cookieStore: store,
       refresher,
+      cooldown: new RotationCooldown(),
       logger,
       now: () => time,
       setInterval: () => ({ unref: () => {} }),
@@ -218,6 +236,7 @@ describe("SessionKeepalive", () => {
     const keepalive = new SessionKeepalive("p", {
       cookieStore: store,
       refresher,
+      cooldown: new RotationCooldown(),
       logger,
       now: () => 0,
       setInterval: () => ({ unref: () => {} }),
@@ -227,8 +246,17 @@ describe("SessionKeepalive", () => {
     expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
   });
 
-  test("rotatePsidts uses custom rotation floor from options", async () => {
-    const store = makeCookieStore("ts");
+  test("custom cooldown floor is honored when the baseline changed within the window", async () => {
+    let storeValue = "ts1";
+    const store = {
+      load: mock(async () => ({
+        cookies: [
+          cookie("__Secure-1PSID", "psid"),
+          cookie("__Secure-1PSIDTS", storeValue),
+        ],
+        snapshot: new Map(),
+      })),
+    };
     const refresher = makeRefresher();
     const logger = makeLogger();
     let time = 0;
@@ -236,16 +264,23 @@ describe("SessionKeepalive", () => {
     const keepalive = new SessionKeepalive("p", {
       cookieStore: store,
       refresher,
+      cooldown: new RotationCooldown({ floorMs: 120_000, now: () => time }),
       logger,
       now: () => time,
       setInterval: () => ({ unref: () => {} }),
-    }, { rotationFloorMs: 120_000 });
+    });
 
     await keepalive.tick();
     expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
 
     time += 90_000;
+    storeValue = "ts2";
     await keepalive.tick();
     expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
+
+    time += 31_000;
+    storeValue = "ts3";
+    await keepalive.tick();
+    expect(refresher.rotatePsidts).toHaveBeenCalledTimes(2);
   });
 });

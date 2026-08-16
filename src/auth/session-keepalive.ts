@@ -3,18 +3,18 @@ import type { CookieStore } from "./cookie-store.ts";
 import { BrowserRefresher } from "./browser-refresher.ts";
 import { PSIDTS_COOKIE_NAME } from "./auth-constants.ts";
 import { findRoutableCookieValue } from "./cookie-validation.ts";
+import type { RotationCooldownSeam } from "./rotation-cooldown.ts";
 
 const KEEPALIVE_INTERVAL_MS = 10 * 60 * 1000;
-const ROTATION_FLOOR_MS = 60 * 1000;
 
 export interface SessionKeepaliveOptions {
   intervalMs?: number;
-  rotationFloorMs?: number;
 }
 
 export interface SessionKeepaliveDeps {
   cookieStore: Pick<CookieStore, "load">;
   refresher: Pick<BrowserRefresher, "rotatePsidts">;
+  cooldown: RotationCooldownSeam;
   logger: Logger;
   now?: () => number;
   setInterval?: (fn: () => void, ms: number) => number | { unref: () => void };
@@ -26,7 +26,6 @@ export class SessionKeepalive {
   private readonly profile: string;
   private readonly deps: SessionKeepaliveDeps;
   private readonly intervalMs: number;
-  private readonly rotationFloorMs: number;
   private lastObservedBaseline: string | null = null;
   private lastRotationTime: number | null = null;
   private handle: TimerHandle | null = null;
@@ -36,7 +35,6 @@ export class SessionKeepalive {
     this.profile = profile;
     this.deps = deps;
     this.intervalMs = options.intervalMs ?? KEEPALIVE_INTERVAL_MS;
-    this.rotationFloorMs = options.rotationFloorMs ?? ROTATION_FLOOR_MS;
   }
 
   start(): void {
@@ -84,9 +82,9 @@ export class SessionKeepalive {
         return;
       }
 
-      if (this.lastRotationTime !== null && now - this.lastRotationTime < this.rotationFloorMs) {
+      if (!this.deps.cooldown.canRotate(this.profile, now)) {
         this.deps.logger.debug(
-          `Keepalive tick suppressed for profile '${this.profile}': within ${this.rotationFloorMs}ms rotation floor`,
+          `Keepalive tick suppressed for profile '${this.profile}': within the shared rotation floor window`,
         );
         return;
       }
@@ -96,6 +94,7 @@ export class SessionKeepalive {
       if (result.rotated) {
         this.lastObservedBaseline = currentBaseline;
         this.lastRotationTime = now;
+        this.deps.cooldown.record(this.profile, now);
         this.deps.logger.info(`Keepalive rotation complete for profile '${this.profile}'`);
       } else {
         this.deps.logger.debug(
@@ -105,9 +104,5 @@ export class SessionKeepalive {
     } catch (err) {
       this.deps.logger.warn(`Keepalive tick failed for profile '${this.profile}': ${err}; rescheduling`);
     }
-  }
-
-  getLastRotationTime(): number | null {
-    return this.lastRotationTime;
   }
 }

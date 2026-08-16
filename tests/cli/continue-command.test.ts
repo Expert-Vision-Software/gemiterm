@@ -1,7 +1,12 @@
 import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:test";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { ContinueCommand } from "../../src/cli/commands/continue-command.ts";
 import type { CliCommandContext } from "../../src/cli/command-registry.ts";
 import type { ChatInfo, Message } from "../../src/core/types.ts";
+
+const TEST_DIR = join(tmpdir(), "gemiterm-test-continue-cmd");
 
 function makeClient() {
   const client: any = {
@@ -26,12 +31,15 @@ describe("ContinueCommand", () => {
   beforeEach(() => {
     command = new ContinueCommand();
     client = makeClient();
+    process.env.GEMITERM_CONFIG_DIR = TEST_DIR;
+    mkdirSync(TEST_DIR, { recursive: true });
     context = {
       verbose: false,
       cookieSession: {
         activeProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => null),
         ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+        createKeepalive: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
       } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
@@ -42,6 +50,7 @@ describe("ContinueCommand", () => {
   afterEach(() => {
     mock.restore();
     logSpy.mockRestore();
+    delete process.env.GEMITERM_CONFIG_DIR;
   });
 
   test("has correct name and description", () => {
@@ -128,5 +137,57 @@ describe("ContinueCommand", () => {
 
     expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
     expect(client.fetchChat).toHaveBeenCalledWith("conv-evs");
+  });
+});
+
+describe("ContinueCommand keepalive wiring (fix-3b)", () => {
+  let command: ContinueCommand;
+  let client: any;
+  let context: CliCommandContext;
+  let logSpy: ReturnType<typeof spyOn>;
+  let startChatSessionSpy: ReturnType<typeof spyOn>;
+  let chatSessionModule: typeof import("../../src/cli/utils/chat-session.ts");
+
+  beforeEach(async () => {
+    command = new ContinueCommand();
+    client = makeClient();
+    process.env.GEMITERM_CONFIG_DIR = TEST_DIR;
+    mkdirSync(TEST_DIR, { recursive: true });
+    context = {
+      verbose: false,
+      cookieSession: {
+        activeProfiles: mock(() => ["default"]),
+        findProfileForConversation: mock(() => null),
+        ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+        createKeepalive: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
+      } as unknown as CliCommandContext["cookieSession"],
+      getGeminiClient: () => client,
+      listProfiles: () => [],
+    };
+    logSpy = spyOn(console, "log").mockImplementation(() => {});
+    chatSessionModule = await import("../../src/cli/utils/chat-session.ts");
+    startChatSessionSpy = spyOn(chatSessionModule, "startChatSession").mockImplementation(async () => {});
+  });
+
+  afterEach(() => {
+    startChatSessionSpy.mockRestore();
+    mock.restore();
+    logSpy.mockRestore();
+    delete process.env.GEMITERM_CONFIG_DIR;
+  });
+
+  test("REPL entry with null profile resolution starts exactly one keepalive for the default profile", async () => {
+    await command.execute(["conv123"], context);
+
+    expect((context.cookieSession as any).createKeepalive).toHaveBeenCalledTimes(1);
+    expect((context.cookieSession as any).createKeepalive).toHaveBeenCalledWith("default");
+  });
+
+  test("one-shot mode (message provided) constructs no keepalive", async () => {
+    client.sendMessage = mock(async () => "ok");
+
+    await command.execute(["conv123", "hello"], context);
+
+    expect((context.cookieSession as any).createKeepalive).not.toHaveBeenCalled();
   });
 });

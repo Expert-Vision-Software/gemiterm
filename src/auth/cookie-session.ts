@@ -1,12 +1,14 @@
 import chalk from "chalk";
 import type { AuthResult, Cookie } from "../core/types.ts";
-import type { Logger } from "../infrastructure/logger.ts";
+import { Logger } from "../infrastructure/logger.ts";
 import { AuthenticationError, LoginTimeoutError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
 import { CookieValidator, findRoutableCookieValue } from "./cookie-validation.ts";
 import { CookieStore } from "./cookie-store.ts";
+import { RotationCooldown } from "./rotation-cooldown.ts";
+import { SessionKeepalive, type SessionKeepaliveOptions } from "./session-keepalive.ts";
 import { SessionClassifier, type SessionProbeResult } from "./session-classifier.ts";
 
 // The facade is the only sanctioned import surface outside src/auth — re-export the probe result type for commands.
@@ -44,6 +46,7 @@ export interface CookieSessionDeps {
   cookieStore: Pick<CookieStore, "load" | "getJarMtime" | "saveFullJar">;
   validator: Pick<CookieValidator, "validate">;
   refresher: Pick<BrowserRefresher, "rotatePsidts">;
+  cooldown: RotationCooldown;
   classifier: Pick<SessionClassifier, "classify" | "classifyDetailed">;
   recovery: Pick<RecoveryRung, "recover">;
   logger: Logger;
@@ -89,12 +92,13 @@ export class CookieSession {
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   }
 
-  get cookieStore(): Pick<CookieStore, "load"> {
-    return this.deps.cookieStore;
-  }
-
-  get refresher(): Pick<BrowserRefresher, "rotatePsidts"> {
-    return this.deps.refresher;
+  createKeepalive(profile: string, options?: SessionKeepaliveOptions): SessionKeepalive {
+    return new SessionKeepalive(profile, {
+      cookieStore: this.deps.cookieStore,
+      refresher: this.deps.refresher,
+      cooldown: this.deps.cooldown,
+      logger: new Logger("session-keepalive"),
+    }, options);
   }
 
   async ensureSession(profile?: string): Promise<ArmedSession> {
@@ -156,9 +160,19 @@ export class CookieSession {
   }
 
   async refresh(profile: string): Promise<RotationResult> {
+    if (!this.deps.cooldown.canRotate(profile)) {
+      this.deps.logger.debug(
+        `Manual refresh suppressed for profile '${profile}': within the shared rotation floor window`,
+      );
+      return { rotated: false };
+    }
     const { cookies } = await this.deps.cookieStore.load(profile);
     const baseline = findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME);
-    return await this.deps.refresher.rotatePsidts(profile, baseline);
+    const result = await this.deps.refresher.rotatePsidts(profile, baseline);
+    if (result.rotated) {
+      this.deps.cooldown.record(profile);
+    }
+    return result;
   }
 
   async recover(profile: string): Promise<ArmedSession> {
@@ -287,6 +301,7 @@ export function createCookieSession(deps: CreateCookieSessionDeps): CookieSessio
     cookieStore,
     validator: new CookieValidator({ logger }),
     refresher,
+    cooldown: new RotationCooldown(),
     classifier,
     recovery,
     logger,
