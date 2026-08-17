@@ -872,8 +872,11 @@ do not re-litigate them.
   `waitForRotation(profile)` (bounded 30 s poll of the on-disk jar for a
   PSIDTS change; passive — spawns/writes nothing; never rejects) and
   `rotationInFlight(profile)`. `list`'s empty-result path awaits an in-flight
-  rotation and retries the query once before classifying; on timeout it hints
-  on stderr that a refresh is still running (stdout bytes unchanged).
+  rotation and retries the query once before classifying — for BOTH the
+  single-profile form and the aggregate default listing (field round 1 showed
+  the user's plain `list` is the multi-profile fan-out, which the initial
+  single-profile-only placement silently skipped); on timeout it hints on
+  stderr naming the still-in-flight profiles (stdout bytes unchanged).
   Arm-first D2 is untouched — fresh jars add zero latency; the wait engages
   only after a listing already failed. Invariant coverage:
   `tests/auth-regression/invariant-await-rotation.test.ts`

@@ -22,3 +22,6 @@
 ## 5. Field verification (manual, user-gated)
 
 - [ ] 5.1 Fresh login → `list` OK → idle ≥ 1h15m → single `gemiterm list` waits, then renders conversations; quick re-run shows no second-runner flashes in the common case
+
+  Round 1 (2026-08-17 15:14): wait did not engage — user's plain `list` is the aggregate multi-profile fan-out, and the stage was placed after the single-profile resolution bail. Fixed: stage now covers aggregate listings (per-profile in-flight awaits in parallel, single aggregate retry, hint names still-in-flight profiles); spec/design/proposal/changelog amended; +3 aggregate integration tests. Awaiting round 2 on a stale session.
+

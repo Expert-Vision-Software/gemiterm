@@ -479,8 +479,12 @@ describe("list command integration", () => {
 
     test("refreshed session with a still-empty retry falls through to classification", async () => {
       client.listChats = mock(async () => []);
-      cookieSession.rotationInFlight = mock(() => true);
-      cookieSession.waitForRotation = mock(async () => ({ cookies: [] }));
+      let inFlight = true;
+      cookieSession.rotationInFlight = mock(() => inFlight);
+      cookieSession.waitForRotation = mock(async () => {
+        inFlight = false;
+        return { cookies: [] };
+      });
       const errSpy = spyOn(console, "error").mockImplementation(() => {});
 
       try {
@@ -506,12 +510,69 @@ describe("list command integration", () => {
       expect(cookieSession.probe).toHaveBeenCalledTimes(1);
     });
 
-    test("multi-profile empty result never awaits a rotation", async () => {
+    test("multi-profile empty result awaits in-flight rotations and the retry renders", async () => {
+      const profiles = ["work", "personal"];
+      context.listProfiles = () => profiles;
+      cookieSession.rotationInFlight = mock((p: string) => p === "work");
+      cookieSession.waitForRotation = mock(async (p: string) =>
+        p === "work" ? ({ cookies: [] }) : null,
+      );
+      const callsPerProfile: Record<string, number> = {};
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => {
+          callsPerProfile[name] = (callsPerProfile[name] ?? 0) + 1;
+          return name === "work" && callsPerProfile[name] > 1
+            ? [{ id: "w1", title: "Rotated chat", isPinned: false, timestamp: Date.now(), profile: "work" }]
+            : [];
+        }),
+      }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute([], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(1);
+        expect(cookieSession.waitForRotation).toHaveBeenCalledWith("work");
+        expect(cookieSession.probe).not.toHaveBeenCalled();
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Rotated chat");
+        expect(output).not.toContain("No conversations found");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("multi-profile rotation timeout prints the hint and never classifies", async () => {
+      const profiles = ["work", "personal"];
+      context.listProfiles = () => profiles;
+      client.forProfile = mock((_name: string) => ({
+        listChats: mock(async () => []),
+      }));
+      cookieSession.rotationInFlight = mock(() => true);
+      cookieSession.waitForRotation = mock(async () => null);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute([], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(2);
+        expect(cookieSession.probe).not.toHaveBeenCalled();
+        const stderr = errSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(stderr).toContain("still in progress");
+        expect(stderr).toContain("profiles");
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("multi-profile empty result with no rotation in flight skips the wait", async () => {
       client.forProfile = mock((_name: string) => ({
         listChats: mock(async () => []),
       }));
       context.listProfiles = () => ["a", "b"];
-      cookieSession.rotationInFlight = mock(() => true);
 
       await command.execute([], context);
 

@@ -121,29 +121,39 @@ export class ListCommand implements CliCommand {
     context: CliCommandContext,
     logger: Logger,
   ): Promise<ChatInfo[]> {
+    // Rotation-await stage (openspec/changes/await-detached-rotation-on-empty-
+    // list): an empty result on a stale-armed jar usually means the detached
+    // rotation is still in flight — await it (bounded) before reaching for the
+    // heavier probe/recovery flow. Covers the aggregate default listing too
+    // (each configured profile was armed by the fan-out), not just the
+    // single-profile form. stderr-only: stdout bytes stay pinned.
+    const rotationCandidates = request.profile
+      ? [request.profile]
+      : await context.listProfiles();
+    const inFlight = rotationCandidates.filter((p) => context.cookieSession.rotationInFlight(p));
+    if (inFlight.length > 0) {
+      console.error(chalk.dim("Session refresh in progress — waiting for it to finish…"));
+      const refreshed = await Promise.all(
+        inFlight.map((p) => context.cookieSession.waitForRotation(p).catch(() => null)),
+      );
+      if (refreshed.some((r) => r !== null)) {
+        const retried = await listChatsForRequest(context.getGeminiClient, context.listProfiles, request);
+        if (retried.length > 0) return retried;
+      }
+      const stillInFlight = inFlight.filter((p) => context.cookieSession.rotationInFlight(p));
+      if (stillInFlight.length > 0) {
+        console.error(chalk.yellow(
+          `Session refresh still in progress for ${stillInFlight.length === 1 ? "profile" : "profiles"} '${stillInFlight.join("', '")}' — wait a few seconds and re-run 'gemiterm list'.`,
+        ));
+      }
+    }
+
     let profileName = request.profile;
     if (!profileName && !request.allProfiles) {
       const profiles = await context.listProfiles();
       if (profiles.length === 1) profileName = profiles[0];
     }
     if (!profileName) return chats;
-
-    // Rotation-await stage (openspec/changes/await-detached-rotation-on-empty-list):
-    // an empty result on a stale-armed jar usually means the detached rotation
-    // is still in flight — await it (bounded) before reaching for the heavier
-    // probe/recovery flow. stderr-only: stdout bytes stay pinned.
-    if (context.cookieSession.rotationInFlight(profileName)) {
-      console.error(chalk.dim("Session refresh in progress — waiting for it to finish…"));
-      const refreshed = await context.cookieSession.waitForRotation(profileName).catch(() => null);
-      if (refreshed) {
-        const retried = await listChatsForRequest(context.getGeminiClient, context.listProfiles, request);
-        if (retried.length > 0) return retried;
-      } else if (context.cookieSession.rotationInFlight(profileName)) {
-        console.error(chalk.yellow(
-          `Session refresh still in progress for profile '${profileName}' — wait a few seconds and re-run 'gemiterm list'.`,
-        ));
-      }
-    }
 
     let state: SessionProbeResult["state"];
     try {

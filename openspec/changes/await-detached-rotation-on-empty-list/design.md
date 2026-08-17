@@ -31,7 +31,7 @@ Hard constraints from the repo's governing docs:
 
 ### D1: Await reactively, only after an empty result
 
-The wait lives in the empty-result path, not in `ensureSession`. `ListCommand` checks `rotationInFlight(profile)` and only then calls `waitForRotation(profile)`. Alternative considered: blocking `ensureSession` until the rotation lands (rejected — violates D2; penalizes every command, not just the already-failing one).
+The wait lives in the empty-result path, not in `ensureSession`. `ListCommand` checks `rotationInFlight(profile)` and only then calls `waitForRotation(profile)`. The stage covers the aggregate default listing as well: without `--profile`, the fan-out arms every configured profile, so the stage awaits every profile whose rotation is in flight (parallel, each bounded) and retries the aggregate query once — classification stays single-profile-only (its confirm/recovery UX is per-profile). Field-verification round 1 (2026-08-17 15:14) caught the gap: the user's default `list` is aggregate (multi-profile), and the original single-profile-only placement never reached the wait. Alternative considered: blocking `ensureSession` until the rotation lands (rejected — violates D2; penalizes every command, not just the already-failing one).
 
 ### D2: Facade owns the state; PSIDTS value-change is the signal
 
