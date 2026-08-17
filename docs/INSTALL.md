@@ -234,3 +234,19 @@ Then install Chromium:
 ```bash
 bunx @playwright/cli install chromium
 ```
+
+## Development and Testing
+
+For contributors working from source, additional test and verification commands are available:
+
+```bash
+bun test                 # full test suite
+bun run test:unit        # unit tests only
+bun run test:integration # integration tests only
+bun run typecheck        # TypeScript type checking
+bun run lint:mediation   # path-mediation lint (enforces I/O boundary)
+bun run check:auth-gate  # auth-regression gate (warns if auth paths changed without auth tests)
+bun run canary:auth      # auth mutation canary (verifies regression tests catch bugs)
+```
+
+The auth-regression system prevents re-introduction of historical phantom-auth bugs. Changes touching auth-sensitive paths (`src/auth/**`, playwright driver, cookie plumbing, and `docs/auth-cookie-lifecycle.md`) must also update the `tests/auth-regression/` suite. The `check:auth-gate` command enforces this in CI with an opt-out requiring a stated reason. The mutation canary runs nightly to verify the regression tests would catch historical bug patterns.
