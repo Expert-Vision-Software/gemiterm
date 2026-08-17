@@ -8,6 +8,11 @@ const USER_AGENT =
 
 export type SessionState = "live" | "phantom" | "dead";
 
+export interface SessionProbeResult {
+  state: SessionState;
+  chatCount: number;
+}
+
 export interface SessionClassifierDeps {
   fetchInitHtml?: (cookieHeader: string) => Promise<string>;
   probeChats: (profile: string) => Promise<unknown[]>;
@@ -45,6 +50,10 @@ export class SessionClassifier {
   }
 
   async classify(profile: string): Promise<SessionState> {
+    return (await this.classifyDetailed(profile)).state;
+  }
+
+  async classifyDetailed(profile: string): Promise<SessionProbeResult> {
     const { cookies } = await this.cookieStore.load(profile);
     const cookieHeader = buildCookieHeader(cookies, GEMINI_APP_URL);
 
@@ -52,15 +61,15 @@ export class SessionClassifier {
     try {
       html = await this.fetchInitHtml(cookieHeader);
     } catch {
-      return "dead";
+      return { state: "dead", chatCount: 0 };
     }
 
     const hasTokens = INIT_TOKENS.some((token) => html.includes(token));
     if (!hasTokens) {
-      return "dead";
+      return { state: "dead", chatCount: 0 };
     }
 
     const chats = await this.probeChats(profile).catch(() => []);
-    return chats.length > 0 ? "live" : "phantom";
+    return { state: chats.length > 0 ? "live" : "phantom", chatCount: chats.length };
   }
 }

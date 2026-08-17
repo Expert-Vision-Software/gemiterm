@@ -96,6 +96,7 @@ interface SpawnCapture {
     stdout: unknown;
     stderr: unknown;
     detached: unknown;
+    windowsHide: unknown;
     env: Record<string, string | undefined>;
   };
 }
@@ -122,6 +123,7 @@ describe("spawnDetachedRefreshRunner", () => {
     expect(spawns[0].opts.stdin).toBe("ignore");
     expect(spawns[0].opts.stdout).toBe(77);
     expect(spawns[0].opts.stderr).toBe(77);
+    expect(spawns[0].opts.windowsHide).toBe(true);
     expect(spawns[0].opts.env.GEMITERM_CONFIG_DIR).toBe(resolvePath(getConfigDir()));
   });
 
@@ -139,6 +141,7 @@ describe("spawnDetachedRefreshRunner", () => {
 
     expect(spawns).toHaveLength(1);
     expect(spawns[0].opts.detached).toBe(true);
+    expect(spawns[0].opts.windowsHide).toBe(true);
     expect(spawns[0].opts.stdout).toBe("ignore");
     expect(spawns[0].opts.stderr).toBe("ignore");
   });

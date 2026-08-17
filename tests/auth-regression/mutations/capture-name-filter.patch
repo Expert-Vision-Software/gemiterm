@@ -1,0 +1,15 @@
+diff --git a/src/auth/cookie-session.ts b/src/auth/cookie-session.ts
+index 02aef97..8214fae 100644
+--- a/src/auth/cookie-session.ts
++++ b/src/auth/cookie-session.ts
+@@ -135,8 +135,8 @@ export class CookieSession {
+       await this.deps.driver.openHeaded(GEMINI_APP_URL, name, name);
+       await this.waitForGate(name, timeoutMs);
+ 
+-      const jar = await this.deps.driver.cookieListFromState(name);
+-      const payload = filterToGeminiDomains(jar);
++      const jar = await this.deps.driver.cookieListFromState(name);
++      const payload = filterToGeminiDomains(jar).filter((c) => c.name === PSID_COOKIE_NAME || c.name === PSIDTS_COOKIE_NAME);
+       await this.deps.cookieStore.saveFullJar(name, payload);
+ 
+       const expiresAt = psidtsExpiry(payload);

@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
@@ -28,3 +30,15 @@ jobs:
             | grep -v "src/infrastructure/io.ts" \
             | grep -v "src/services/chat-metadata-storage.ts" \
             | grep -q .
+      # fix-4 task 3.3: warn-only during rollout; flip to blocking after one
+      # green run (task 3.4). Base sha: PR base, else previous push head.
+      - name: Auth regression gate (warn-only)
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "No base sha available; skipping gate."
+            exit 0
+          fi
+          if ! GATE_BASE="$BASE" bash scripts/check-auth-gate.sh; then
+            echo "::warning title=auth-regression-gate::Auth-sensitive change without tests/auth-regression/ update (warn-only; will block once task 3.4 flips it)"
+          fi

@@ -23,14 +23,20 @@ describe("ListCommand", () => {
   let command: ListCommand;
   let client: ReturnType<typeof makeClient>;
   let context: CliCommandContext;
+  let cookieSession: { probe: ReturnType<typeof mock>; recover: ReturnType<typeof mock> };
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
     command = new ListCommand();
     client = makeClient();
+    cookieSession = {
+      probe: mock(async () => "live" as const),
+      recover: mock(async () => ({})),
+      createKeepalive: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
+    };
     context = {
       verbose: false,
-      cookieSession: {} as unknown as CliCommandContext["cookieSession"],
+      cookieSession: cookieSession as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => ["default"],
     };
@@ -64,6 +70,7 @@ describe("ListCommand", () => {
     expect(output).toContain("abc123");
     expect(output).toContain("Python tips");
     expect(output).toContain("Total: 3 conversations");
+    expect(cookieSession.createKeepalive).not.toHaveBeenCalled();
   });
 
   test("applies limit", async () => {
@@ -138,6 +145,15 @@ describe("ListCommand", () => {
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("No conversations found");
+  });
+
+  test("empty single-profile default probes the sole configured profile", async () => {
+    client.listChats = mock(async () => []);
+
+    await command.execute([], context);
+
+    expect(cookieSession.probe).toHaveBeenCalledTimes(1);
+    expect(cookieSession.probe).toHaveBeenCalledWith("default");
   });
 
   test("applies --all-profiles flag in query", async () => {
@@ -225,15 +241,20 @@ describe("ListCommand --interactive flag", () => {
   let command: ListCommand;
   let client: ReturnType<typeof makeClient>;
   let context: CliCommandContext;
+  let cookieSession: { probe: ReturnType<typeof mock>; recover: ReturnType<typeof mock> };
   let logSpy: ReturnType<typeof spyOn>;
   let promptsModule: typeof import("../../src/cli/utils/prompts.ts");
 
   beforeEach(async () => {
     command = new ListCommand();
     client = makeClient();
+    cookieSession = {
+      probe: mock(async () => "live" as const),
+      recover: mock(async () => ({})),
+    };
     context = {
       verbose: false,
-      cookieSession: {} as unknown as CliCommandContext["cookieSession"],
+      cookieSession: cookieSession as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => ["default"],
     };

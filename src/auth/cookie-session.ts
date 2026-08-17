@@ -1,13 +1,18 @@
 import chalk from "chalk";
 import type { AuthResult, Cookie } from "../core/types.ts";
-import type { Logger } from "../infrastructure/logger.ts";
+import { Logger } from "../infrastructure/logger.ts";
 import { AuthenticationError, LoginTimeoutError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
 import { CookieValidator, findRoutableCookieValue } from "./cookie-validation.ts";
 import { CookieStore } from "./cookie-store.ts";
-import { SessionClassifier } from "./session-classifier.ts";
+import { RotationCooldown, type RotationCooldownSeam } from "./rotation-cooldown.ts";
+import { SessionKeepalive, type SessionKeepaliveOptions } from "./session-keepalive.ts";
+import { SessionClassifier, type SessionProbeResult } from "./session-classifier.ts";
+
+// The facade is the only sanctioned import surface outside src/auth — re-export the probe result type for commands.
+export type { SessionProbeResult } from "./session-classifier.ts";
 import { BrowserRefresher, type RefresherDriver, type RotationResult } from "./browser-refresher.ts";
 import { RecoveryRung } from "./recovery.ts";
 import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
@@ -41,7 +46,8 @@ export interface CookieSessionDeps {
   cookieStore: Pick<CookieStore, "load" | "getJarMtime" | "saveFullJar">;
   validator: Pick<CookieValidator, "validate">;
   refresher: Pick<BrowserRefresher, "rotatePsidts">;
-  classifier: Pick<SessionClassifier, "classify">;
+  cooldown: RotationCooldownSeam;
+  classifier: Pick<SessionClassifier, "classify" | "classifyDetailed">;
   recovery: Pick<RecoveryRung, "recover">;
   logger: Logger;
   spawnRefreshRunner: (profile: string) => void;
@@ -84,6 +90,15 @@ export class CookieSession {
   constructor(deps: CookieSessionDeps) {
     this.deps = deps;
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  }
+
+  createKeepalive(profile: string, options?: SessionKeepaliveOptions): SessionKeepalive {
+    return new SessionKeepalive(profile, {
+      cookieStore: this.deps.cookieStore,
+      refresher: this.deps.refresher,
+      cooldown: this.deps.cooldown,
+      logger: new Logger("session-keepalive"),
+    }, options);
   }
 
   async ensureSession(profile?: string): Promise<ArmedSession> {
@@ -140,10 +155,24 @@ export class CookieSession {
     return await this.deps.classifier.classify(profile);
   }
 
+  async probeDetailed(profile: string): Promise<SessionProbeResult> {
+    return await this.deps.classifier.classifyDetailed(profile);
+  }
+
   async refresh(profile: string): Promise<RotationResult> {
+    if (!this.deps.cooldown.canRotate(profile)) {
+      this.deps.logger.debug(
+        `Manual refresh suppressed for profile '${profile}': within the shared rotation floor window`,
+      );
+      return { rotated: false };
+    }
     const { cookies } = await this.deps.cookieStore.load(profile);
     const baseline = findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME);
-    return await this.deps.refresher.rotatePsidts(profile, baseline);
+    const result = await this.deps.refresher.rotatePsidts(profile, baseline);
+    if (result.rotated) {
+      this.deps.cooldown.record(profile);
+    }
+    return result;
   }
 
   async recover(profile: string): Promise<ArmedSession> {
@@ -254,8 +283,10 @@ export function createCookieSession(deps: CreateCookieSessionDeps): CookieSessio
 
   const classifier = new SessionClassifier({
     cookieStore,
+    // No limit: GeminiClientService.listChats fetches all chats and slices client-side,
+    // so the probe sees the full list and classifyDetailed's chatCount is real.
     probeChats: async (profile) =>
-      await makeProbeClient(profile).then((c) => c.listChats({ limit: 1 })).catch(() => []),
+      await makeProbeClient(profile).then((c) => c.listChats()).catch(() => []),
   });
 
   let session!: CookieSession;
@@ -270,6 +301,7 @@ export function createCookieSession(deps: CreateCookieSessionDeps): CookieSessio
     cookieStore,
     validator: new CookieValidator({ logger }),
     refresher,
+    cooldown: new RotationCooldown(),
     classifier,
     recovery,
     logger,

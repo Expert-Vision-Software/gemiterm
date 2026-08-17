@@ -1,0 +1,22 @@
+name: Auth mutation canary
+
+# fix-4 task 4.3: nightly mutation canary. Applies each historical auth bug
+# shape as a patch and asserts tests/auth-regression goes RED. Not per-push:
+# runtime is ~3x the auth-regression suite.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Run auth mutation canary
+        run: bash scripts/run-auth-mutation-canary.sh

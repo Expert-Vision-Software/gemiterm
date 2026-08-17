@@ -1,9 +1,39 @@
-## [Unreleased]
+## [3.0.0] - 2026-08-16
+
+### Added
+
+- Auth-regression test suite at `tests/auth-regression/` pinning historical phantom-auth bug invariants against on-disk truth using driver/wire fakes and PSIDTS validation
+- Auth-regression CI gate (`bun run check:auth-gate`) enforcing that changes touching auth-sensitive paths must also update the regression test suite
+- Mutation canary (`bun run canary:auth`) applying historical bug patches to verify the regression suite would catch them
+- Session-keepalive loop for REPL sessions that refreshes cookies during active use
+- `CookieSession` facade with `refresh-and-retry` recovery rung and detached refresh-runner that survives script-tree teardown
+- Two-tier `CookieValidator` and read-only `SessionClassifier` for probing session liveness
+- `CookieStore` with CAS (compare-and-swap) saves and cross-process lock for safe concurrent cookie updates
+- `--verbose` column in `gemiterm status` showing session probe details per profile
+- Reactive phantom detection that emits warnings when `list` returns empty results on a single configured profile
 
 ### Changed
 
-- **BREAKING**: `gemiterm list` now defaults to aggregating conversations across **all** configured profiles (unless `--profile <name>` is given), skipping inaccessible profiles with a warning instead of failing the whole listing. In a single-profile setup the output is unchanged (4-column table); in multi-profile setups the default table gains a `PROFILE` column. `--all-profiles` remains accepted and is now redundant with the default; `--profile <name>` restores the exact per-profile output.
-- Consolidated the four output commands (`list`, `fetch`, `export`, `export-all`) onto a single `ChatOutput` module (`src/cli/utils/chat-output.ts`) with shared `sortChats` / `filterChatsByDate` helpers and one stdout-vs-file dispatch. The commands no longer carry their own sort/filter/output/write helpers.
+- **BREAKING**: Replaced mediator layer with direct CLI command handlers registered in `CommandRegistry` for simpler routing and reduced abstraction overhead
+- Replaced hand-rolled terminal input with `@inquirer/input` for better cross-platform behavior
+- Consolidated chat output logic into `ChatOutput` module with shared sorting/filtering helpers
+- Extracted `ProfileLifecycle` module behind `manageProfiles` action dispatch
+- Extracted `ExportStrategy` seam behind `export`/`export-all` commands
+- Converted IO-bound code to async-first using `node:fs/promises`
+- `gemiterm list` now defaults to aggregating conversations across all configured profiles (adds `PROFILE` column in multi-profile setups)
+- Auth flow now selects `gemini.google.com`-routable SDK cookies over same-name siblings
+
+### Fixed
+
+- Backspace not working in text prompts on Windows/Bun
+- `writeFileExclusive` now creates parent directory before creating lock file
+- Cookie session errors now properly mapped to `AuthenticationError`
+- Refresh-runner and playwright-cli spawns now hide Windows console flashes on spawn
+
+### Internal
+
+- Archived auth documentation (`docs/phantom-bug-synthesis.md`, `auth-replacement-plan.md`) to `docs/archive/` with superseding banners
+- Established documentation authority order in `docs/README.md`: `auth-cookie-lifecycle.md` (canonical) > `cookie-ablation-findings.md` (empirical) > `docs/archive/**` (historical)
 
 ---
 

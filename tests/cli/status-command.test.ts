@@ -31,7 +31,7 @@ describe("StatusCommand", () => {
   describe("execute", () => {
     test("delegates to the status action", async () => {
       await command.execute([], context);
-      expect(manageProfiles).toHaveBeenCalledWith("status", {});
+      expect(manageProfiles).toHaveBeenCalledWith("status", { verbose: false });
     });
 
     test("exits with code 2 when the module signals no profiles", async () => {
@@ -54,6 +54,30 @@ describe("StatusCommand", () => {
 
       expect(exitSpy).not.toHaveBeenCalled();
       exitSpy.mockRestore();
+    });
+  });
+
+  describe("--verbose", () => {
+    test("delegates verbose flag to the status action", async () => {
+      await command.execute(["--verbose"], context);
+      expect(manageProfiles).toHaveBeenCalledWith("status", { verbose: true });
+    });
+
+    test("omits verbose by default", async () => {
+      await command.execute([], context);
+      expect(manageProfiles).toHaveBeenCalledWith("status", { verbose: false });
+    });
+
+    test("--help documents --verbose", async () => {
+      const logSpy = spyOn(console, "log").mockImplementation(() => {});
+
+      await command.execute(["--help"], context);
+
+      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(output).toContain("--verbose");
+      expect(manageProfiles).not.toHaveBeenCalled();
+
+      logSpy.mockRestore();
     });
   });
 

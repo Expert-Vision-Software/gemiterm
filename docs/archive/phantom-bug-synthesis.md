@@ -1,3 +1,5 @@
+> **ARCHIVED (2026-08-16) - superseded by docs/auth-cookie-lifecycle.md (canonical) and docs/cookie-ablation-findings.md (empirical record).** Historical reference only; not normative. See docs/README.md for the documentation authority order.
+
 # Phantom Authentication — Write-Once Bug Ledger
 
 **Convention:** this is a **write-once ledger** of every attempt to deal with the phantom-auth bug. New entries are appended (never rewritten) when a bug, symptom, or finding is reported AFTER a supposed fix was implemented and failed, or when a new attempt (fix or refactor) is made. Past entries are not edited. See `docs/agents/domain.md` for the convention.
@@ -723,3 +725,13 @@ The phantom check is skipped for `allProfiles` queries (profiles aggregate, per-
 - "2026-08-08 - minimal wait time to reproduce phantom/dead state: ~1h15m idle" - the idle cadence this engine defect was hiding behind; with a live runner the jar now self-heals instead of rotting
 - "The 4-cookie discovery (2026-08-06, afternoon)" - jar shape was never the dormancy mechanism; PSIDTS freshness plus a rotation engine that actually runs were
 - "2026-08-15 - fix-1 implemented" - shipped the (silently dead) runner this entry resurrects
+
+---
+
+## Ledger closed (2026-08-16) - fix-1..3 landed; fix-4 guards the invariants
+
+fix-1 (CookieSession core), fix-2 (phantom detection in `list`/`status`), and fix-3 (REPL keepalive + shared rotation floor) are implemented and archived under `openspec/changes/archive/`. The validated replacement - full-jar capture, browser-backed PSIDTS rotation, CAS persistence, honest read-only classifier - runs in production code. Empirical basis: `docs/cookie-ablation-findings.md`; canonical design: `docs/auth-cookie-lifecycle.md`.
+
+fix-4 (`openspec/changes/fix-4-auth-regression-guards`) closes this ledger: every bug class recorded above now has a named invariant test in `tests/auth-regression/` asserting on-disk truth, an auth-sensitive-path gate (`scripts/check-auth-gate.sh`, `bun run check:auth-gate`) that fails CI when auth code changes without the suite changing, and a nightly mutation canary (`bun run canary:auth`) that re-applies the three historical bug shapes - capture name-filter, PSIDTS-discard on persist, stale-clobber save - and asserts the suite goes RED.
+
+**This ledger is now write-once history.** It lives in `docs/archive/` and is non-normative. New auth regressions get a new test in `tests/auth-regression/` plus a changelog entry in `docs/auth-cookie-lifecycle.md` - not a new ledger entry. See `docs/README.md` for the documentation authority order.

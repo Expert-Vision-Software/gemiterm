@@ -178,7 +178,7 @@ GEMITERM_TAG=v2.4.0-rc.1 bash install.sh
 
 | Command | Alias | Purpose |
 | --- | --- | --- |
-| `gemiterm auth` | `gemiterm login` | Sign in to Google and save cookies |
+| `gemiterm auth` | `gemiterm login` | Sign in to Google and manage profiles |
 | `gemiterm status` | — | Show config dir and profile table |
 | `gemiterm list` | — | List chats (filter, sort, search) |
 | `gemiterm fetch <id>` | — | Fetch a chat's full history |
@@ -187,7 +187,7 @@ GEMITERM_TAG=v2.4.0-rc.1 bash install.sh
 | `gemiterm export <id>` | — | Export one chat to Markdown / JSON |
 | `gemiterm export-all` | — | Bulk-export all chats with `index.md` |
 | `gemiterm delete <id>` | — | Delete a chat (with confirmation) |
-| `gemiterm profile <sub>` | — | Manage profiles (list / add / delete / rename / default) |
+| `gemiterm models` | — | List available Gemini models |
 | `gemiterm install-browser` | — | Install Playwright Chromium |
 | `gemiterm install-skills` | — | Install the cross-agent skills bundle |
 | `gemiterm -v <cmd>` | — | Verbose logging for any command |
@@ -309,17 +309,38 @@ gemiterm delete c_abc123 --force
 | --- | --- |
 | `-f, --force` | Skip the confirmation prompt |
 
-### `gemiterm profile <subcommand>`
+### `gemiterm models`
 
-Manage multiple Gemini profiles (separate Google accounts or isolated cookie stores).
+List all available Gemini models.
 
 ```bash
-gemiterm profile list
-gemiterm profile add work
-gemiterm profile delete work
-gemiterm profile rename work jobs
-gemiterm profile default work
+gemiterm models
 ```
+
+### `gemiterm auth`
+
+Sign in to Google and manage multiple Gemini profiles (separate Google accounts or isolated cookie stores).
+
+```bash
+gemiterm auth                    # sign in with default profile
+gemiterm auth work               # sign in with a specific profile
+gemiterm auth --list             # list all profiles
+gemiterm auth --add work         # create new profile and sign in
+gemiterm auth --delete work      # delete a profile
+gemiterm auth --rename work jobs # rename a profile
+gemiterm auth --default work     # set default profile
+gemiterm auth --renew work       # refresh/extend cookies for a profile
+```
+
+| Flag | Description |
+| --- | --- |
+| `-l, --list` | List all profiles |
+| `-a, --add <name>` | Create a new profile and authenticate |
+| `-d, --delete <name>` | Delete a profile |
+| `-r, --rename <old> <new>` | Rename a profile |
+| `-s, --default <name>` | Set default profile |
+| `-e, --renew <name>` | Renew session (extend/refresh cookies) |
+| `-y, --yes` | Skip confirmation prompts |
 
 ### `gemiterm install-browser`
 

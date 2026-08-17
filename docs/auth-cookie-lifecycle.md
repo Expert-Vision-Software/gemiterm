@@ -16,7 +16,7 @@
 > Companion documents:
 > [docs/cookie-ablation-findings.md](cookie-ablation-findings.md) — the empirical
 > study this doc embeds and must not contradict;
-> [docs/phantom-bug-synthesis.md](phantom-bug-synthesis.md) — the write-once bug
+> [docs/archive/phantom-bug-synthesis.md](archive/phantom-bug-synthesis.md) — the write-once bug
 > ledger (condensed into [Appendix A1](#a1--bug-history-the-phantom-saga-v240--v27x));
 > [docs/PLAYWRIGHT_CLI_API.md](PLAYWRIGHT_CLI_API.md) — browser command
 > reference for the L3 flow.
@@ -739,7 +739,7 @@ Tripwires that would shift the threat model:
   (`src/gemini_webapi/utils/rotate_1psidts.py`).
 - [W3C DBSC spec](https://w3c.github.io/webappsec-dbsc/).
 - In-repo: [docs/cookie-ablation-findings.md](cookie-ablation-findings.md),
-  [docs/phantom-bug-synthesis.md](phantom-bug-synthesis.md),
+  [docs/archive/phantom-bug-synthesis.md](archive/phantom-bug-synthesis.md),
   [docs/PLAYWRIGHT_CLI_API.md](PLAYWRIGHT_CLI_API.md),
   [AGENTS.md](../AGENTS.md).
 
@@ -784,7 +784,7 @@ master token:
 
 ### A1 · Bug history: the phantom saga (v2.4.0 → v2.7.x)
 
-Condensed from [docs/phantom-bug-synthesis.md](phantom-bug-synthesis.md)
+Condensed from [docs/archive/phantom-bug-synthesis.md](archive/phantom-bug-synthesis.md)
 (the write-once ledger is authoritative for detail). Several of its
 hypotheses are now **disproven by the 2026-08-15 ablation** — noted inline;
 do not re-litigate them.
@@ -852,3 +852,13 @@ do not re-litigate them.
   L3 browser-backed resurrection. Establishes the L1–L7 ladder with
   [CURRENT]/[PLANNED]/[FUTURE] statuses, the planned persistence and
   validation-gating designs, and the `CookieSession` design target.
+
+- **2026-08-16** — fix-4 auth-regression guards. (1) `writeFileExclusive`
+  (`src/infrastructure/io.ts`) now ensures the parent directory before the
+  exclusive create, so the first capture into a fresh profile dir no longer
+  fails with ENOENT on the lock file. (2) Added the `tests/auth-regression/`
+  invariant suite (on-disk assertions for every historical bug class), the
+  auth-sensitive-path gate (`bun run check:auth-gate`), and the nightly
+  mutation canary (`bun run canary:auth`). (3) Documentation consolidation:
+  this doc is the canonical authority; `docs/archive/` holds the closed
+  write-once ledger and superseded plans (see `docs/README.md`).

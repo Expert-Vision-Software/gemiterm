@@ -5,6 +5,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { Cookie } from "../../src/core/types.ts";
 import { CookieSession, createCookieSession, toSdkCookieConfig } from "../../src/auth/cookie-session.ts";
 import { CookieStore } from "../../src/auth/cookie-store.ts";
+import { RotationCooldown } from "../../src/auth/rotation-cooldown.ts";
+import { SessionKeepalive } from "../../src/auth/session-keepalive.ts";
 import { GEMINI_APP_URL } from "../../src/auth/auth-constants.ts";
 import { SessionValidationError, LoginTimeoutError } from "../../src/core/errors.ts";
 import { CookieValidator } from "../../src/auth/cookie-validation.ts";
@@ -74,7 +76,11 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     cookieStore: makeStore(GATE_JAR),
     validator: new CookieValidator({ logger: makeLogger() as never }),
     refresher: { rotatePsidts: mock(async () => ({ rotated: false })) },
-    classifier: { classify: mock(async () => "live" as const) },
+    cooldown: new RotationCooldown(),
+    classifier: {
+      classify: mock(async () => "live" as const),
+      classifyDetailed: mock(async () => ({ state: "live" as const, chatCount: 1 })),
+    },
     recovery: { recover: mock(async () => ({ secure_1psid: "psid", secure_1psidts: "ts", cookies: GATE_JAR })) },
     logger: makeLogger(),
     spawnRefreshRunner: mock(() => {}),
@@ -239,6 +245,18 @@ describe("CookieSession delegation", () => {
     expect(deps.classifier.classify).toHaveBeenCalledWith("p");
   });
 
+  test("probeDetailed delegates to the classifier", async () => {
+    const deps = makeDeps({
+      classifier: {
+        classify: mock(async () => "phantom" as const),
+        classifyDetailed: mock(async () => ({ state: "phantom" as const, chatCount: 0 })),
+      },
+    });
+    const session = makeSession(deps);
+    expect(await session.probeDetailed("p")).toEqual({ state: "phantom", chatCount: 0 });
+    expect(deps.classifier.classifyDetailed).toHaveBeenCalledWith("p");
+  });
+
   test("refresh uses the on-disk PSIDTS as baseline", async () => {
     const rotatePsidts = mock(async (_p: string, baseline: string | null) => {
       expect(baseline).toBe("ts");
@@ -308,9 +326,114 @@ describe("createCookieSession factory", () => {
     });
 
     expect(await session.probe("facade-p")).toBe("live");
+    expect(await session.probeDetailed("facade-p")).toEqual({ state: "live", chatCount: 2 });
     expect(await session.activeProfiles()).toEqual(["facade-p"]);
     expect(await session.findProfileForConversation("c1")).toBe("facade-p");
     expect(await session.findProfileForConversation("missing")).toBeNull();
     expect(listChats).toHaveBeenCalled();
+  });
+});
+
+describe("CookieSession.createKeepalive (fix-3b)", () => {
+  test("factory wires the facade's collaborators and the shared cooldown (both directions)", async () => {
+    const rotatePsidts = mock(async () => ({ rotated: true }));
+    const deps = makeDeps({ refresher: { rotatePsidts } });
+    const session = makeSession(deps);
+
+    const keepalive = session.createKeepalive("p");
+    expect(typeof keepalive.start).toBe("function");
+    expect(typeof keepalive.stop).toBe("function");
+
+    await keepalive.tick();
+    expect(rotatePsidts).toHaveBeenCalledTimes(1);
+
+    const suppressed = await session.refresh("p");
+    expect(suppressed.rotated).toBe(false);
+    expect(rotatePsidts).toHaveBeenCalledTimes(1);
+
+    const freshKeepalive = session.createKeepalive("p");
+    await freshKeepalive.tick();
+    expect(rotatePsidts).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("shared rotation floor (fix-3b)", () => {
+  test("manual refresh 30s after a keepalive rotation resolves { rotated: false } without touching the refresher", async () => {
+    let time = 0;
+    const rotatePsidts = mock(async () => ({ rotated: true }));
+    const logger = makeLogger();
+    const deps = makeDeps({
+      refresher: { rotatePsidts },
+      cooldown: new RotationCooldown({ now: () => time }),
+      logger,
+    });
+    const session = makeSession(deps);
+
+    const keepalive = new SessionKeepalive("p", {
+      cookieStore: deps.cookieStore,
+      refresher: deps.refresher,
+      cooldown: deps.cooldown,
+      logger,
+      now: () => time,
+      setInterval: () => ({ unref: () => {} }),
+    });
+    await keepalive.tick();
+    expect(rotatePsidts).toHaveBeenCalledTimes(1);
+
+    time += 30_000;
+    const result = await session.refresh("p");
+
+    expect(result).toEqual({ rotated: false });
+    expect(rotatePsidts).toHaveBeenCalledTimes(1);
+    const debugMessages = logger.debug.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(debugMessages).toContain("suppressed");
+  });
+
+  test("keepalive tick 30s after a manual rotation skips the browser and reschedules", async () => {
+    let time = 0;
+    const rotatePsidts = mock(async () => ({ rotated: true }));
+    const logger = makeLogger();
+    const deps = makeDeps({
+      refresher: { rotatePsidts },
+      cooldown: new RotationCooldown({ now: () => time }),
+      logger,
+    });
+    const session = makeSession(deps);
+
+    const result = await session.refresh("p");
+    expect(result.rotated).toBe(true);
+    expect(rotatePsidts).toHaveBeenCalledTimes(1);
+
+    const keepalive = new SessionKeepalive("p", {
+      cookieStore: deps.cookieStore,
+      refresher: deps.refresher,
+      cooldown: deps.cooldown,
+      logger,
+      now: () => time,
+      setInterval: () => ({ unref: () => {} }),
+    });
+    time += 30_000;
+    await keepalive.tick();
+
+    expect(rotatePsidts).toHaveBeenCalledTimes(1);
+    const debugMessages = logger.debug.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(debugMessages).toContain("suppressed");
+  });
+
+  test("manual refresh after the floor window expires rotates normally", async () => {
+    let time = 0;
+    const rotatePsidts = mock(async () => ({ rotated: true }));
+    const deps = makeDeps({
+      refresher: { rotatePsidts },
+      cooldown: new RotationCooldown({ now: () => time }),
+    });
+    const session = makeSession(deps);
+
+    await session.refresh("p");
+    time += 60_000;
+    const result = await session.refresh("p");
+
+    expect(result.rotated).toBe(true);
+    expect(rotatePsidts).toHaveBeenCalledTimes(2);
   });
 });

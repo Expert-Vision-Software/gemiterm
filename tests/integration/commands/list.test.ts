@@ -2,6 +2,8 @@ import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:
 import { ListCommand } from "../../../src/cli/commands/list-command.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import type { ChatInfo } from "../../../src/core/types.ts";
+import { CancellationError } from "../../../src/cli/utils/prompts.ts";
+import { AuthenticationError } from "../../../src/core/errors.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import { createMockChatList } from "../../fixtures/chat-fixtures.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
@@ -18,15 +20,20 @@ describe("list command integration", () => {
   let command: ListCommand;
   let context: CliCommandContext;
   let client: ReturnType<typeof makeClient>;
+  let cookieSession: { probe: ReturnType<typeof mock>; recover: ReturnType<typeof mock> };
   let logSpy: ReturnType<typeof spyOn>;
   let originalEnv: Record<string, string | undefined>;
 
   beforeEach(() => {
     command = new ListCommand();
     client = makeClient();
+    cookieSession = {
+      probe: mock(async () => "live" as const),
+      recover: mock(async () => ({})),
+    };
     context = {
       verbose: false,
-      cookieSession: {} as unknown as CliCommandContext["cookieSession"],
+      cookieSession: cookieSession as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => ["default"],
     };
@@ -404,6 +411,259 @@ describe("list command integration", () => {
       client.listChats.mockRejectedValue(new Error("Network error"));
 
       await expect(command.execute(["--profile", "work"], context)).rejects.toThrow("Network error");
+    });
+  });
+
+  describe("reactive phantom detection", () => {
+    let promptsModule: typeof import("../../../src/cli/utils/prompts.ts");
+
+    const setStdinTty = (value: boolean): void => {
+      Object.defineProperty(process.stdin, "isTTY", {
+        value,
+        configurable: true,
+        writable: true,
+      });
+    };
+    const restoreStdinTty = (): void => {
+      const desc = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+      if (desc) Object.defineProperty(process.stdin, "isTTY", desc);
+      else Reflect.deleteProperty(process.stdin, "isTTY");
+    };
+
+    beforeEach(async () => {
+      promptsModule = await import("../../../src/cli/utils/prompts.ts");
+    });
+
+    test("phantom result (TTY) triggers one probe, one recovery, one retry, renders retried chats", async () => {
+      setStdinTty(true);
+      const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(true);
+      const recoveredChat: ChatInfo = {
+        id: "conv-9",
+        title: "Recovered chat",
+        isPinned: false,
+        timestamp: 1717100000000,
+        profile: "work",
+      };
+      let listCalls = 0;
+      client.listChats = mock(async () => {
+        listCalls += 1;
+        return listCalls === 1 ? [] : [recoveredChat];
+      });
+      cookieSession.probe = mock(async () => "phantom" as const);
+      cookieSession.recover = mock(async () => ({}));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        expect(cookieSession.probe).toHaveBeenCalledTimes(1);
+        expect(cookieSession.probe).toHaveBeenCalledWith("work");
+        expect(cookieSession.recover).toHaveBeenCalledTimes(1);
+        expect(cookieSession.recover).toHaveBeenCalledWith("work");
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect(client.listChats).toHaveBeenCalledTimes(2);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Recovered chat");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).not.toContain("phantom");
+      } finally {
+        errSpy.mockRestore();
+        restoreStdinTty();
+      }
+    });
+
+    test("live empty result probes once and never recovers", async () => {
+      setStdinTty(false);
+      const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(true);
+      cookieSession.probe = mock(async () => "live" as const);
+      client.listChats = mock(async () => []);
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        expect(cookieSession.probe).toHaveBeenCalledTimes(1);
+        expect(cookieSession.probe).toHaveBeenCalledWith("work");
+        expect(cookieSession.recover).not.toHaveBeenCalled();
+        expect(confirmSpy).not.toHaveBeenCalled();
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("multi-profile query never classifies", async () => {
+      const profileChats: Record<string, ChatInfo[]> = {
+        work: [],
+        personal: [{ id: "conv-2", title: "Chat 2", isPinned: false, timestamp: Date.now(), profile: "personal" }],
+      };
+      context.listProfiles = () => Object.keys(profileChats);
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => profileChats[name] ?? []),
+      }));
+
+      await command.execute(["--all-profiles"], context);
+      expect(cookieSession.probe).not.toHaveBeenCalled();
+
+      client.forProfile = mock((_name: string) => ({
+        listChats: mock(async () => []),
+      }));
+      await command.execute([], context);
+      expect(cookieSession.probe).not.toHaveBeenCalled();
+    });
+
+    test("non-interactive phantom keeps stdout byte-identical and diagnoses on stderr", async () => {
+      setStdinTty(false);
+      client.listChats = mock(async () => []);
+      cookieSession.probe = mock(async () => "phantom" as const);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--profile", "work"], context);
+        const stdoutPhantom = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        const stderrPhantom = errSpy.mock.calls.map((c) => c[0]).join("\n");
+
+        logSpy.mockClear();
+        cookieSession.probe = mock(async () => "live" as const);
+        cookieSession.recover.mockClear();
+
+        await command.execute(["--profile", "work"], context);
+        const stdoutLive = logSpy.mock.calls.map((c) => c[0]).join("\n");
+
+        expect(stdoutPhantom).toBe(stdoutLive);
+        expect(stderrPhantom).toContain("work");
+        expect(stderrPhantom).toContain("phantom");
+        expect(stderrPhantom).toContain("gemiterm auth");
+        expect(cookieSession.recover).not.toHaveBeenCalled();
+      } finally {
+        errSpy.mockRestore();
+        restoreStdinTty();
+      }
+    });
+
+    test("non-interactive dead classification names the state", async () => {
+      setStdinTty(false);
+      cookieSession.probe = mock(async () => "dead" as const);
+      client.listChats = mock(async () => []);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        const stderr = errSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(stderr).toContain("dead");
+        expect(stderr).toContain("gemiterm auth");
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+      } finally {
+        errSpy.mockRestore();
+        restoreStdinTty();
+      }
+    });
+
+    test("TTY decline leaves the empty output and skips recovery", async () => {
+      setStdinTty(true);
+      const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(false);
+      cookieSession.probe = mock(async () => "phantom" as const);
+      client.listChats = mock(async () => []);
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        expect(cookieSession.probe).toHaveBeenCalledTimes(1);
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect(cookieSession.recover).not.toHaveBeenCalled();
+        expect(client.listChats).toHaveBeenCalledTimes(1);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("TTY CancellationError is treated as decline", async () => {
+      setStdinTty(true);
+      const confirmSpy = spyOn(promptsModule, "confirm").mockRejectedValue(
+        new CancellationError("cancel"),
+      );
+      cookieSession.probe = mock(async () => "phantom" as const);
+      client.listChats = mock(async () => []);
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        expect(cookieSession.probe).toHaveBeenCalledTimes(1);
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect(cookieSession.recover).not.toHaveBeenCalled();
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("recovery failure surfaces AuthenticationError", async () => {
+      setStdinTty(true);
+      spyOn(promptsModule, "confirm").mockResolvedValue(true);
+      cookieSession.probe = mock(async () => "phantom" as const);
+      cookieSession.recover = mock(async () => {
+        throw new AuthenticationError(
+          "Session refresh failed for profile 'work'. Run 'gemiterm auth' to re-authenticate.",
+        );
+      });
+      client.listChats = mock(async () => []);
+
+      try {
+        await expect(
+          command.execute(["--profile", "work"], context),
+        ).rejects.toThrow("Session refresh failed for profile 'work'");
+        expect(client.listChats).toHaveBeenCalledTimes(1);
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("still-empty retry prints the honest diagnostic", async () => {
+      setStdinTty(true);
+      spyOn(promptsModule, "confirm").mockResolvedValue(true);
+      cookieSession.probe = mock(async () => "phantom" as const);
+      cookieSession.recover = mock(async () => ({}));
+      client.listChats = mock(async () => []);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        expect(client.listChats).toHaveBeenCalledTimes(2);
+        const stderr = errSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(stderr).toContain("still reports no conversations");
+        expect(stderr).toContain("gemiterm auth");
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+      } finally {
+        errSpy.mockRestore();
+        restoreStdinTty();
+      }
+    });
+
+    test("probe failure degrades to the normal empty output", async () => {
+      setStdinTty(false);
+      cookieSession.probe = mock(async () => {
+        throw new Error("classifier blew up");
+      });
+      client.listChats = mock(async () => []);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        expect(cookieSession.probe).toHaveBeenCalledTimes(1);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).not.toContain("phantom");
+      } finally {
+        errSpy.mockRestore();
+        restoreStdinTty();
+      }
     });
   });
 });

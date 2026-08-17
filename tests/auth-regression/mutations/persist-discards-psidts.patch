@@ -1,0 +1,18 @@
+diff --git a/src/auth/cookie-store.ts b/src/auth/cookie-store.ts
+index eef2248..818152a 100644
+--- a/src/auth/cookie-store.ts
++++ b/src/auth/cookie-store.ts
+@@ -114,7 +114,12 @@ export class CookieStore {
+       throw new LockUnavailableError(lockPath, this.fullLockTimeoutMs);
+     }
+     try {
+-      await writeTextFileAtomic(getProfilePath(profile), JSON.stringify({ cookies }, null, 2));
++      const disk = await readDiskCookies(getProfilePath(profile));
++      const diskPsidts = disk.find((c) => c.name === "__Secure-1PSIDTS");
++      const pinned = diskPsidts
++        ? cookies.map((c) => (c.name === "__Secure-1PSIDTS" ? { ...c, value: diskPsidts.value } : c))
++        : cookies;
++      await writeTextFileAtomic(getProfilePath(profile), JSON.stringify({ cookies: pinned }, null, 2));
+     } finally {
+       await releaseLock(lockPath);
+     }

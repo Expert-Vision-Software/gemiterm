@@ -13,6 +13,7 @@ import {
 import { GemitermError } from "../core/errors.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { formatProfileTable } from "../infrastructure/formatters.ts";
+import type { ProfileStatusWithProbe } from "../infrastructure/formatters.ts";
 import { text } from "../cli/utils/prompts.ts";
 
 export type ProfileAction =
@@ -44,7 +45,9 @@ export interface ProfileSetDefaultParams {
   name: string;
 }
 
-export interface ProfileStatusParams {}
+export interface ProfileStatusParams {
+  verbose?: boolean;
+}
 
 export interface ProfileAuthParams {
   profileName?: string;
@@ -106,7 +109,7 @@ export class ProfileLifecycle {
       case "set-default":
         return this.setDefault(params as ProfileSetDefaultParams);
       case "status":
-        return this.status();
+        return this.status(params as ProfileStatusParams);
       case "auth":
         return this.auth(params as ProfileAuthParams);
       default:
@@ -131,7 +134,7 @@ export class ProfileLifecycle {
     this.logger.info(`${active.length} of ${statuses.length} profile(s) active`);
   }
 
-  private async status(): Promise<ProfileLifecycleResult> {
+  private async status(params: ProfileStatusParams): Promise<ProfileLifecycleResult> {
     await ensureConfigDir();
 
     const configDir = getConfigDir();
@@ -147,8 +150,22 @@ export class ProfileLifecycle {
       return { exitCode: 2 };
     }
 
-    const statuses = await this.collectStatuses(profileNames);
-    this.renderProfileTable(statuses);
+    const statuses: ProfileStatusWithProbe[] = await this.collectStatuses(profileNames);
+    if (params.verbose) {
+      // Sequential per fix-2-phantom-detection design D3: each probe is a network
+      // round-trip; concurrent bursts against the classifier gain nothing.
+      for (const status of statuses) {
+        try {
+          status.probe = await this.cookieSession.probeDetailed(status.name);
+        } catch (error) {
+          // Unknown is not dead: leave probe unset so the column renders the
+          // em-dash placeholder instead of misreporting a server-side verdict.
+          const message = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`Session probe failed for profile '${status.name}': ${message}`);
+        }
+      }
+    }
+    this.renderProfileTable(statuses, { showProbe: params.verbose });
 
     const active = statuses.filter((s) => s.isActive);
     if (active.length > 0) {
@@ -398,9 +415,9 @@ export class ProfileLifecycle {
     return statuses;
   }
 
-  private renderProfileTable(statuses: ProfileStatus[]): void {
+  private renderProfileTable(statuses: ProfileStatusWithProbe[], options?: { showProbe?: boolean }): void {
     console.log(chalk.bold("Profiles"));
-    console.log(formatProfileTable(statuses));
+    console.log(formatProfileTable(statuses, options));
   }
 
   private promptInput(

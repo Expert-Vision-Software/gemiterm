@@ -59,8 +59,16 @@ export function formatChatAsJson(messages: Message[], conversationId: string): s
   return JSON.stringify({ conversationId, messages }, null, 2);
 }
 
-export function formatProfileTable(statuses: ProfileStatus[]): string {
-  const columns: ColumnDef<ProfileStatus>[] = [
+// Structural twin of SessionProbeResult from src/auth — keeps infrastructure decoupled from the auth module.
+export interface ProfileStatusWithProbe extends ProfileStatus {
+  probe?: { state: "live" | "phantom" | "dead"; chatCount: number };
+}
+
+export function formatProfileTable(
+  statuses: ProfileStatusWithProbe[],
+  options?: { showProbe?: boolean },
+): string {
+  const columns: ColumnDef<ProfileStatusWithProbe>[] = [
     {
       header: "NAME",
       width: 18,
@@ -76,6 +84,20 @@ export function formatProfileTable(statuses: ProfileStatus[]): string {
             ? chalk.red("\u2717 No")
             : chalk.dim("\u2014"),
     },
+  ];
+  if (options?.showProbe) {
+    columns.push({
+      header: "PROBE",
+      width: 14,
+      cell: (s) => {
+        if (!s.probe) return chalk.dim("\u2014");
+        if (s.probe.state === "live") return chalk.green(`\u2713 live (${s.probe.chatCount})`);
+        if (s.probe.state === "phantom") return chalk.yellow("! phantom");
+        return chalk.red("\u2717 dead");
+      },
+    });
+  }
+  columns.push(
     {
       header: "EXPIRES",
       width: 22,
@@ -95,9 +117,9 @@ export function formatProfileTable(statuses: ProfileStatus[]): string {
       width: 10,
       cell: (s) => (s.isDefault ? chalk.green("Yes") : ""),
     },
-  ];
+  );
 
-  return renderTable<ProfileStatus>({
+  return renderTable<ProfileStatusWithProbe>({
     columns,
     rows: statuses,
     emptyMessage: "No profiles found. Run 'gemiterm login' to create one.",

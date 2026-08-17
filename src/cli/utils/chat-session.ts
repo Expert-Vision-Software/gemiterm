@@ -1,7 +1,8 @@
 import chalk from "chalk";
 import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
 import type { Logger } from "../../infrastructure/logger.ts";
-import { runInteractiveLoop, type MessageHandlerResult } from "./interactive-prompt.ts";
+import { runInteractiveLoop, type MessageHandlerResult, type SessionKeepaliveHandle } from "./interactive-prompt.ts";
+import { text, CancellationError } from "./prompts.ts";
 
 export interface StartChatSessionParams {
   effectiveMessage: string | null;
@@ -12,6 +13,7 @@ export interface StartChatSessionParams {
   onFirstTurn?: (conversationId: string) => void;
   onInteractiveTurn?: (conversationId: string, isFirst: boolean) => void;
   beforeInteractiveLoop?: () => Promise<void>;
+  keepalive?: SessionKeepaliveHandle;
 }
 
 export async function startChatSession(params: StartChatSessionParams): Promise<void> {
@@ -24,6 +26,7 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
     onFirstTurn,
     onInteractiveTurn,
     beforeInteractiveLoop,
+    keepalive,
   } = params;
 
   const resolveClient = async (): Promise<GeminiClientService> =>
@@ -63,5 +66,5 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
     return { response: result.response };
   };
 
-  await runInteractiveLoop(messageHandler, { profileName });
+  await runInteractiveLoop(messageHandler, { profileName }, { text, CancellationError, keepalive });
 }

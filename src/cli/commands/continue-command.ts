@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
+import { getDefaultProfileName } from "../../infrastructure/config.ts";
 import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
 import { fetchChatForRequest } from "../utils/gemini-queries.ts";
 import { loadEffectivePrompt } from "../utils/prompt-file.ts";
@@ -92,12 +93,17 @@ export class ContinueCommand implements CliCommand {
 
     message = await loadEffectivePrompt(message, options.promptFile);
 
+    const keepalive = message === null
+      ? context.cookieSession.createKeepalive(profileName ?? await getDefaultProfileName())
+      : undefined;
+
     await startChatSession({
       effectiveMessage: message,
       conversationId,
       profileName,
       getGeminiClient: context.getGeminiClient,
       logger,
+      keepalive,
       beforeInteractiveLoop: async () => {
         await this.printLastMessage(context.getGeminiClient, conversationId, profileName);
       },

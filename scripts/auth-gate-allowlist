@@ -1,0 +1,10 @@
+# Known-benign paths for the auth-gate content regex (fix-4 task 3.1).
+# One path per line; # comments allowed. Reviewed in the fix-4 PR.
+# These files mention cookie/PSID/rotate vocabulary in non-auth contexts and
+# are excluded from the content-regex trigger (path-list matches still apply).
+package.json
+bun.lock
+CHANGELOG.md
+README.md
+scripts/check-auth-gate.sh
+scripts/check-auth-gate.ps1

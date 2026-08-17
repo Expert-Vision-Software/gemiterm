@@ -109,3 +109,31 @@ describe("SessionClassifier", () => {
     expect(header).not.toContain("EXPIRED");
   });
 });
+
+describe("classifyDetailed", () => {
+  test("tokens present + 3 chats -> { state: 'live', chatCount: 3 }", async () => {
+    writeJar("p");
+    const deps = makeDeps({ probeChats: mock(async () => [{ id: "c1" }, { id: "c2" }, { id: "c3" }]) });
+    expect(await makeClassifier(deps).classifyDetailed("p")).toEqual({ state: "live", chatCount: 3 });
+  });
+
+  test("tokens present + zero chats -> { state: 'phantom', chatCount: 0 }", async () => {
+    writeJar("p");
+    const deps = makeDeps({ probeChats: mock(async () => []) });
+    expect(await makeClassifier(deps).classifyDetailed("p")).toEqual({ state: "phantom", chatCount: 0 });
+  });
+
+  test("no tokens -> { state: 'dead', chatCount: 0 } and chats probe not consulted", async () => {
+    writeJar("p");
+    const deps = makeDeps({ fetchInitHtml: mock(async () => HTML_WITHOUT_TOKENS) });
+    expect(await makeClassifier(deps).classifyDetailed("p")).toEqual({ state: "dead", chatCount: 0 });
+    expect(deps.probeChats).not.toHaveBeenCalled();
+  });
+
+  test("classify and classifyDetailed agree on state for the live case", async () => {
+    writeJar("p");
+    const classifier = makeClassifier(makeDeps());
+    expect(await classifier.classify("p")).toBe("live");
+    expect((await classifier.classifyDetailed("p")).state).toBe("live");
+  });
+});

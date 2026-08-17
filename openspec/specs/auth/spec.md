@@ -5,15 +5,27 @@ The interactive authentication capability for `gemiterm`. It owns the end-to-end
 ## Requirements
 
 ### Requirement: CookieSession facade is the single authentication surface
-The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as the only authentication surface consumed by the CLI. The facade MUST expose `ensureSession(profile)`, `captureLogin(profile)`, `probe(profile)`, `refresh(profile)`, `activeProfiles()`, and `findProfileForConversation(conversationId)`, and MUST accept all collaborators (`BrowserRefresher`, `CookieStore`, `CookieValidator`, recovery rung, logger) through a single `CookieSessionDeps` deps-object so the implementation is replaceable at the seam. No file outside `src/auth/` may import the collaborators directly.
+The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as the only authentication surface consumed by the CLI. The facade MUST expose `ensureSession(profile)`, `captureLogin(profile)`, `probe(profile)`, `refresh(profile)`, `activeProfiles()`, `findProfileForConversation(conversationId)`, and `createKeepalive(profile)` (constructing a wired session-keepalive loop for the profile that satisfies the REPL's start/stop handle contract), and MUST accept all collaborators (`BrowserRefresher`, `CookieStore`, `CookieValidator`, recovery rung, logger) through a single `CookieSessionDeps` deps-object so the implementation is replaceable at the seam. No file outside `src/auth/` may import the collaborators directly, and the facade MUST NOT expose raw collaborator accessors (e.g. getters returning the cookie store or the refresher) — CLI files obtain keepalive instances through `createKeepalive` only. `refresh(profile)` and the keepalive loop MUST share one in-process rotation floor: a rotation recorded by either consumer suppresses the other within the floor window (60 seconds by default), per the session-keepalive requirement.
 
 #### Scenario: Facade wires collaborators from a deps-object
 - **WHEN** a `CookieSession` is constructed with fakes for every collaborator in `CookieSessionDeps`
-- **THEN** `ensureSession`, `captureLogin`, `probe`, and `refresh` each complete using only the injected fakes (no direct construction of concrete collaborators inside the facade)
+- **THEN** `ensureSession`, `captureLogin`, `probe`, `refresh`, and `createKeepalive` each complete using only the injected fakes (no direct construction of concrete collaborators inside the facade)
 
 #### Scenario: Conversation routing contract is preserved
 - **WHEN** `findProfileForConversation("<cid>")` is called and exactly one active profile's client reports owning the conversation
 - **THEN** it resolves that profile's name; and when no active profile owns it, it resolves `null`
+
+#### Scenario: Keepalive is constructed through the facade factory
+- **WHEN** a command calls `createKeepalive("p")` on the facade
+- **THEN** the returned loop is wired to the facade's injected cookie store, refresher, and shared rotation floor, and exposes `start()`/`stop()`
+
+#### Scenario: Manual refresh is suppressed inside the shared floor window
+- **WHEN** the keepalive loop completes a rotation for profile "p" and `refresh("p")` is invoked 30 seconds later in the same process
+- **THEN** `refresh` resolves `{ rotated: false }` without spawning the browser, and the suppression is logged at debug level
+
+#### Scenario: Scheduled tick is suppressed inside the shared floor window
+- **WHEN** a manual `refresh("p")` completes a rotation and a keepalive tick for "p" fires 30 seconds later in the same process
+- **THEN** the tick skips the browser and reschedules
 
 ### Requirement: CookieSession.ensureSession arms from the on-disk jar
 `ensureSession(profile)` MUST load the profile's stored jar, run tier validation, and return the armed cookies without any network call or browser launch when the jar is fresh (storage mtime within 30 minutes). When the jar's mtime exceeds 30 minutes, the method MUST spawn a detached refresh-runner process for the profile (fire-and-forget) and STILL return the on-disk armed cookies immediately - the current command is never blocked on the browser. Legacy 2/4-cookie jars MUST arm without error (shape is not a validity signal) and self-upgrade via the detached refresh.
@@ -132,15 +144,19 @@ The `src/auth/cookie-validation.ts` collaborator MUST raise a typed validation e
 - **THEN** validation passes both times and the tier-2 warning is logged exactly once
 
 ### Requirement: CookieSession.probe classifies live, phantom, or dead
-The facade's `probe(profile)` MUST classify a profile read-only as `live` (init GET yields session tokens AND `listChats({limit:1})` returns at least one chat), `phantom` (tokens present AND zero chats), or `dead` (init GET yields no session tokens). The probe MUST NOT write cookies, rotate, or spawn a browser, and MUST NOT use the SDK's `models()` as a signal (it is a static table). This is the only sanctioned session-state oracle.
+The facade's `probe(profile)` MUST classify a profile read-only as `live` (init GET yields session tokens AND the probe's `listChats` call returns at least one chat), `phantom` (tokens present AND zero chats), or `dead` (init GET yields no session tokens). The probe's `listChats` call MUST be unbounded so the observed chat count is real — this is network-identical to a `limit: 1` call because the SDK fetches the full chat list and slices client-side, and the ≥-one-chat signal is identical either way. The facade MUST additionally expose `probeDetailed(profile)` returning `{ state, chatCount }` (the same single classification pass, with the observed chat count; `dead` reports `chatCount: 0` without consulting the chats probe), and MUST re-export the result type so command layers never import the classifier collaborator directly. Both probes MUST NOT write cookies, rotate, or spawn a browser, and MUST NOT use the SDK's `models()` as a signal (it is a static table). The classifier remains the only sanctioned session-state oracle.
 
 #### Scenario: Phantom is distinguishable from dead
-- **WHEN** the init GET extracts tokens but `listChats({limit:1})` returns none
-- **THEN** `probe` resolves `phantom`; and when the init GET extracts no tokens, it resolves `dead`
+- **WHEN** the init GET extracts tokens but the probe's `listChats` call returns none
+- **THEN** `probe` resolves `phantom` (and `probeDetailed` resolves `{ state: "phantom", chatCount: 0 }`); and when the init GET extracts no tokens, they resolve `dead` / `{ state: "dead", chatCount: 0 }`
 
 #### Scenario: Probe is read-only
-- **WHEN** `probe` runs against any profile state
+- **WHEN** `probe` or `probeDetailed` runs against any profile state
 - **THEN** no cookie write occurs and no browser session is opened
+
+#### Scenario: Detailed probe reports the observed chat count
+- **WHEN** the init GET extracts tokens and the unbounded `listChats` probe observes N ≥ 1 chats
+- **THEN** `probeDetailed` resolves `{ state: "live", chatCount: N }` and `probe` resolves `live`
 
 ### Requirement: CookieSession refresh-and-retry recovery rung
 The `src/auth/recovery.ts` collaborator MUST implement a recovery operation that, given a degraded classification, runs the synchronous headless refresh (`BrowserRefresher.rotatePsidts` with the on-disk PSIDTS as baseline), persists via the full-jar writer, re-arms the session exactly once, and on failure throws the existing `AuthenticationError` type so the headed re-login prompt contract is preserved. The retry count MUST be exactly one.
@@ -335,3 +351,22 @@ When `AuthCommand.authenticateWithProfile` (or its delegates) throws, the comman
 #### Scenario: Auth flow errors are propagated
 - **WHEN** the auth flow rejects with an error whose message is `Browser launch failed`
 - **THEN** `execute` rejects with an error whose message contains `Browser launch failed`
+
+### Requirement: Session keepalive rotates PSIDTS on an interval
+The auth module MUST provide a session-keepalive loop for the active profile that, while running, triggers the synchronous headless PSIDTS rotation every 10 minutes (600 s), reusing the fix-1 refresher and CAS persistence unchanged. A 60-second in-process floor MUST suppress any second rotation within the same window (including one initiated manually through the facade's `refresh`). Each tick MUST first compare the on-disk `__Secure-1PSIDTS` against the loop's last-observed baseline and skip the browser entirely when the value is already current; a rotation MUST only spawn when genuinely due. A failed tick (browser unavailable, timeout, or `rotated: false`) MUST log without prompting or throwing into any active session and MUST reschedule.
+
+#### Scenario: Current PSIDTS skips the browser
+- **WHEN** a keepalive tick runs and the on-disk `__Secure-1PSIDTS` matches the loop's last-observed baseline with a successful rotation younger than the interval
+- **THEN** no browser session is opened and no write occurs
+
+#### Scenario: Due rotation runs and persists
+- **WHEN** a tick finds the baseline older than the interval
+- **THEN** the synchronous headless rotation runs exactly once and any rotated jar persists through the CAS store
+
+#### Scenario: The 60-second floor prevents double rotation
+- **WHEN** a scheduled rotation completes and a manual `refresh` is invoked 30 seconds later
+- **THEN** the manual call is suppressed by the floor within the same process
+
+#### Scenario: Failed tick never surfaces into the session
+- **WHEN** a rotation tick fails or reports `rotated: false`
+- **THEN** no error or prompt reaches the caller, a diagnostic is logged, and the next tick is scheduled

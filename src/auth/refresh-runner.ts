@@ -18,6 +18,7 @@ export interface DetachedSpawnOptions {
   stdout: number | "ignore";
   stderr: number | "ignore";
   detached: boolean;
+  windowsHide: boolean;
   env: Record<string, string | undefined>;
 }
 
@@ -40,6 +41,9 @@ export function spawnDetachedRefreshRunner(profile: string, deps: DetachedSpawnD
     stdout: output,
     stderr: output,
     detached: true,
+    // The detached runner's own console window would flash on Windows (and each
+    // detached-parent child spawn forces a new console); hide it.
+    windowsHide: true,
     env: { ...process.env, GEMITERM_CONFIG_DIR: resolvePath(getConfigDir()) },
   });
   proc.exited.catch(() => {});

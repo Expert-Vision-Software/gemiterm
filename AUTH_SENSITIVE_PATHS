@@ -1,0 +1,12 @@
+# Auth-sensitive paths for the auth-regression gate (fix-4).
+# One glob/path per line; # comments allowed. This is the SINGLE source of
+# truth — scripts/check-auth-gate.{sh,ps1} read it. AGENTS.md (fix-4 section)
+# is the doc form and must match. Content-regex trigger (cookie|PSID|
+# storage_state|CookieSession|silentRefresh|rotate) applies on top of these.
+src/auth/**
+src/infrastructure/storage.ts
+src/infrastructure/io.ts
+src/services/playwright-cli-driver.ts
+src/services/gemini-client-wrapper.ts
+src/services/profile-lifecycle.ts
+docs/auth-cookie-lifecycle.md
