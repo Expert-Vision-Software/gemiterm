@@ -1,6 +1,6 @@
 # Auth & cookie lifecycle — design notes and field findings
 
-**Last Updated:** 2026-08-15
+**Last Updated:** 2026-08-17
 
 > **Status:** design notes and field findings for GemiTerm's auth stack, and the
 > design target for the planned `CookieSession` deep-module replacement (see
@@ -862,3 +862,20 @@ do not re-litigate them.
   mutation canary (`bun run canary:auth`). (3) Documentation consolidation:
   this doc is the canonical authority; `docs/archive/` holds the closed
   write-once ledger and superseded plans (see `docs/README.md`).
+
+- **2026-08-17** — await-detached-rotation-on-empty-list. The first `list`
+  after the phantom-onset idle window (~1h15m) armed the superseded jar,
+  printed `No conversations found.`, and exited while the detached
+  refresh-runner it had spawned rotated PSIDTS seconds later — the empty-result
+  path raced and lost against the rotation it itself triggered. The facade now
+  records the armed PSIDTS baseline + staleness at arm time and exposes
+  `waitForRotation(profile)` (bounded 30 s poll of the on-disk jar for a
+  PSIDTS change; passive — spawns/writes nothing; never rejects) and
+  `rotationInFlight(profile)`. `list`'s empty-result path awaits an in-flight
+  rotation and retries the query once before classifying; on timeout it hints
+  on stderr that a refresh is still running (stdout bytes unchanged).
+  Arm-first D2 is untouched — fresh jars add zero latency; the wait engages
+  only after a listing already failed. Invariant coverage:
+  `tests/auth-regression/invariant-await-rotation.test.ts`
+  (openspec/changes/await-detached-rotation-on-empty-list).
+

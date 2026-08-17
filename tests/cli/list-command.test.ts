@@ -23,7 +23,12 @@ describe("ListCommand", () => {
   let command: ListCommand;
   let client: ReturnType<typeof makeClient>;
   let context: CliCommandContext;
-  let cookieSession: { probe: ReturnType<typeof mock>; recover: ReturnType<typeof mock> };
+  let cookieSession: {
+    probe: ReturnType<typeof mock>;
+    recover: ReturnType<typeof mock>;
+    rotationInFlight: ReturnType<typeof mock>;
+    waitForRotation: ReturnType<typeof mock>;
+  };
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
@@ -32,6 +37,8 @@ describe("ListCommand", () => {
     cookieSession = {
       probe: mock(async () => "live" as const),
       recover: mock(async () => ({})),
+      rotationInFlight: mock(() => false),
+      waitForRotation: mock(async () => null),
       createKeepalive: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
     };
     context = {

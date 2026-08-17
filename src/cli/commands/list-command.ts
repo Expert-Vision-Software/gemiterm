@@ -128,6 +128,23 @@ export class ListCommand implements CliCommand {
     }
     if (!profileName) return chats;
 
+    // Rotation-await stage (openspec/changes/await-detached-rotation-on-empty-list):
+    // an empty result on a stale-armed jar usually means the detached rotation
+    // is still in flight — await it (bounded) before reaching for the heavier
+    // probe/recovery flow. stderr-only: stdout bytes stay pinned.
+    if (context.cookieSession.rotationInFlight(profileName)) {
+      console.error(chalk.dim("Session refresh in progress — waiting for it to finish…"));
+      const refreshed = await context.cookieSession.waitForRotation(profileName).catch(() => null);
+      if (refreshed) {
+        const retried = await listChatsForRequest(context.getGeminiClient, context.listProfiles, request);
+        if (retried.length > 0) return retried;
+      } else if (context.cookieSession.rotationInFlight(profileName)) {
+        console.error(chalk.yellow(
+          `Session refresh still in progress for profile '${profileName}' — wait a few seconds and re-run 'gemiterm list'.`,
+        ));
+      }
+    }
+
     let state: SessionProbeResult["state"];
     try {
       state = await context.cookieSession.probe(profileName);

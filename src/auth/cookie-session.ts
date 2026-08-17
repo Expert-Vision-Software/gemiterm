@@ -28,6 +28,12 @@ import { spawnDetachedRefreshRunner } from "./refresh-runner.ts";
 const STALE_JAR_MS = 30 * 60 * 1000;
 const DEFAULT_LOGIN_TIMEOUT_MS = 300_000;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
+const DEFAULT_ROTATION_WAIT_MS = 30_000;
+
+interface ArmRecord {
+  psidts: string | null;
+  stale: boolean;
+}
 
 export interface ArmedSession {
   secure_1psid: string;
@@ -55,6 +61,7 @@ export interface CookieSessionDeps {
   conversationLookup: { profileHasConversation(profileName: string, conversationId: string): Promise<boolean> };
   driver: CaptureDriver;
   pollIntervalMs?: number;
+  rotationWaitMs?: number;
 }
 
 function arm(cookies: Cookie[]): ArmedSession {
@@ -85,11 +92,14 @@ export function psidtsExpiry(cookies: Cookie[]): Date | null {
 export class CookieSession {
   private readonly deps: CookieSessionDeps;
   private readonly pollIntervalMs: number;
+  private readonly rotationWaitMs: number;
   private readonly spawnedRunnerProfiles = new Set<string>();
+  private readonly lastArm = new Map<string, ArmRecord>();
 
   constructor(deps: CookieSessionDeps) {
     this.deps = deps;
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    this.rotationWaitMs = deps.rotationWaitMs ?? DEFAULT_ROTATION_WAIT_MS;
   }
 
   createKeepalive(profile: string, options?: SessionKeepaliveOptions): SessionKeepalive {
@@ -109,12 +119,61 @@ export class CookieSession {
     this.deps.validator.validate(cookies);
 
     const mtime = await this.deps.cookieStore.getJarMtime(name);
-    if ((mtime === null || Date.now() - mtime.getTime() > STALE_JAR_MS) && !this.spawnedRunnerProfiles.has(name)) {
+    const stale = mtime === null || Date.now() - mtime.getTime() > STALE_JAR_MS;
+    if (stale && !this.spawnedRunnerProfiles.has(name)) {
       this.spawnedRunnerProfiles.add(name);
       this.deps.spawnRefreshRunner(name);
     }
+    this.lastArm.set(name, {
+      psidts: findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME),
+      stale,
+    });
 
     return arm(cookies);
+  }
+
+  rotationInFlight(profile: string): boolean {
+    const record = this.lastArm.get(profile);
+    return record !== undefined && record.stale;
+  }
+
+  // Awaits the detached runner's rotation by observing the only cross-process
+  // truth the facade shares with it: the on-disk jar (openspec/changes/
+  // await-detached-rotation-on-empty-list, design D2). Passive by contract —
+  // spawns nothing, writes nothing, never rejects.
+  async waitForRotation(
+    profile: string,
+    opts: { timeoutMs?: number } = {},
+  ): Promise<ArmedSession | null> {
+    const record = this.lastArm.get(profile);
+    if (!record || !record.stale) {
+      return null;
+    }
+
+    const timeoutMs = opts.timeoutMs ?? this.rotationWaitMs;
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      try {
+        const { cookies } = await this.deps.cookieStore.load(profile);
+        const observed = findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME);
+        if (observed !== null && observed !== record.psidts) {
+          this.lastArm.set(profile, { psidts: observed, stale: false });
+          this.deps.logger.info(
+            `Rotation observed for profile '${profile}' — re-arming from the refreshed jar`,
+          );
+          return arm(cookies);
+        }
+      } catch (err) {
+        this.deps.logger.debug(`waitForRotation(${profile}): jar poll failed: ${err}`);
+      }
+      if (Date.now() >= deadline) {
+        this.deps.logger.info(
+          `waitForRotation(${profile}): no PSIDTS change within ${timeoutMs}ms (detached rotation still in flight)`,
+        );
+        return null;
+      }
+      await sleep(this.pollIntervalMs);
+    }
   }
 
   async captureLogin(
