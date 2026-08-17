@@ -141,7 +141,6 @@ Layout:
 - `openspec/specs/<capability>/spec.md` — committed main specs, the current state. Don't edit directly; deltas flow from changes.
 - `openspec/changes/<name>/{proposal,design,tasks}.md` — work in progress. Artifacts are documentation of what to build; the build is done by a follow-up implementation pass that the change's `tasks.md` tracks.
 - `openspec/changes/archive/` — completed changes, kept for history.
-- `openspec/MAESTRO_MIGRATION.md` — historical task-by-task migration status from the Python -> Bun rewrite. Useful background, not authoritative for current state.
 - `openspec/config.yaml` — project config for the OpenSpec CLI.
 
 Before proposing new work, list `openspec/changes/` (excluding `archive/`) to see what's already in flight.
