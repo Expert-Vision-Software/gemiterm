@@ -1,6 +1,6 @@
 # Auth & cookie lifecycle — design notes and field findings
 
-**Last Updated:** 2026-08-17
+**Last Updated:** 2026-08-18
 
 > **Status:** design notes and field findings for GemiTerm's auth stack, and the
 > design target for the planned `CookieSession` deep-module replacement (see
@@ -881,4 +881,28 @@ do not re-litigate them.
   only after a listing already failed. Invariant coverage:
   `tests/auth-regression/invariant-await-rotation.test.ts`
   (openspec/changes/await-detached-rotation-on-empty-list).
+
+- **2026-08-18** — cancel-auth-on-browser-close. Closing the headed browser
+  during `gemiterm auth --add <profile>` previously produced a five-minute
+  stream of `Gate poll failed` debug lines before the existing
+  `LoginTimeoutError` finally fired — masking the user's actual action
+  (cancel). `CookieSession.waitForGate` now classifies `PlaywrightCliError`
+  stderr text via a new shared helper `isBrowserClosedError`
+  (`src/services/playwright-cli-driver.ts`, matches `is not open` and the
+  existing `not found` teardown marker, both case-insensitive, only on
+  `PlaywrightCliError` instances). On a classified error the gate loop emits
+  one info-level `Gate poll cancelled` log and throws a new typed
+  `LoginCancelledError` (`src/core/errors.ts`); the capture `finally` still
+  runs `closeSession` (now pointing at the same helper, so `is not open`
+  during teardown is also swallowed). `cookieListFromState` and
+  `saveFullJar` are unreachable after cancellation, so a pre-existing jar is
+  preserved byte-for-byte. The CLI top-level handler renders the typed error
+  as a friendly info message and exits 0; the generic `Command 'auth' failed`
+  path is unchanged for every other error. `closeSession` reuses the same
+  helper to swallow `is not open` during teardown (no behavior change on the
+  happy path). Invariant coverage:
+  `tests/auth-regression/invariant-capture-integrity.test.ts` (new
+  `capture cancellation on browser close` block) + unit + integration tests
+  on the gate loop, the classifier, and the `AuthCommand` propagation path
+  (openspec/changes/cancel-auth-on-browser-close).
 

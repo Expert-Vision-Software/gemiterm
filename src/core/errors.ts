@@ -60,3 +60,10 @@ export class LoginTimeoutError extends GemitermError {
     this.name = "LoginTimeoutError";
   }
 }
+
+export class LoginCancelledError extends GemitermError {
+  constructor(message = "Authentication cancelled: the headed browser was closed before login completed.") {
+    super(message);
+    this.name = "LoginCancelledError";
+  }
+}

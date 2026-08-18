@@ -86,6 +86,16 @@ describe("auth command integration", () => {
 
       await expect(command.execute([], context)).rejects.toThrow("Browser launch failed");
     });
+
+    test("propagates LoginCancelledError unchanged (caller decides exit semantics)", async () => {
+      spyOn(configModule, "listProfiles").mockReturnValue(["default"]);
+      const { LoginCancelledError } = await import("../../../src/core/errors.ts");
+      (cookieSession.captureLogin as ReturnType<typeof mock>).mockRejectedValueOnce(
+        new LoginCancelledError(),
+      );
+
+      await expect(command.execute([], context)).rejects.toBeInstanceOf(LoginCancelledError);
+    });
   });
 
   describe("profile selection menu", () => {

@@ -1,13 +1,15 @@
 // Invariant: full-jar capture integrity + PSIDTS rotation propagation (fix-4 tasks 2.1-2.3).
 // Historical classes: H6/REQUIRED_COOKIES name-filter, discarded rotation,
 // save-on-login-page. Asserts on the on-disk storage_state.json artifact.
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import type { Cookie } from "../../src/core/types.ts";
 import { CookieStore } from "../../src/auth/cookie-store.ts";
 import { RotationCooldown } from "../../src/auth/rotation-cooldown.ts";
 import { RecoveryRung } from "../../src/auth/recovery.ts";
+import { PlaywrightCliError } from "../../src/services/playwright-cli-driver.ts";
+import { LoginCancelledError } from "../../src/core/errors.ts";
 import { freshFullJar, trimmedFourCookieJar } from "./fixtures.ts";
 import {
   TEST_DIR,
@@ -135,5 +137,26 @@ describe("auth-regression: signed-out capture safety", () => {
     await expect(makeSession(deps).captureLogin("test-profile", { timeoutMs: 50 })).rejects.toThrow();
 
     expect(readFileSync(jarPath("test-profile"), "utf-8")).toBe(bytesBefore);
+  });
+});
+
+describe("auth-regression: capture cancellation on browser close", () => {
+  test("browser closed mid-poll preserves on-disk jar byte-for-byte and persists nothing", async () => {
+    const cookieStore = new CookieStore();
+    await cookieStore.saveFullJar("test-profile", freshFullJar());
+    const bytesBefore = readFileSync(jarPath("test-profile"), "utf-8");
+
+    const driver = makeDriver([]);
+    driver.cookieList = mock(async () => {
+      throw new PlaywrightCliError("cookie-list", 1, "Browser test-profile is not open");
+    });
+
+    const deps = makeSessionDeps({ cookieStore, driver });
+    await expect(makeSession(deps).captureLogin("test-profile", { timeoutMs: 5_000 }))
+      .rejects.toBeInstanceOf(LoginCancelledError);
+
+    expect(driver.cookieListFromState).not.toHaveBeenCalled();
+    expect(readFileSync(jarPath("test-profile"), "utf-8")).toBe(bytesBefore);
+    expect(driver.closeSession).toHaveBeenCalledWith("test-profile");
   });
 });

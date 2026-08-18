@@ -1,9 +1,7 @@
 ## Purpose
 
 The interactive authentication capability for `gemiterm`. It owns the end-to-end login flow (launching a headed Chromium via `playwright-cli`, polling a running browser session for Google's sign-out indicator, capturing the `__Secure-1PSID` and `__Secure-1PSIDTS` cookies, persisting them to the profile storage, and closing the browser). It also owns the multi-profile management CLI surface (`auth` command) and the `playwright-cli` driver abstraction that auto-detects the local install (direct binary or `bunx @playwright/cli`).
-
 ## Requirements
-
 ### Requirement: CookieSession facade is the single authentication surface
 The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as the only authentication surface consumed by the CLI. The facade MUST expose `ensureSession(profile)`, `captureLogin(profile)`, `probe(profile)`, `refresh(profile)`, `activeProfiles()`, `findProfileForConversation(conversationId)`, and `createKeepalive(profile)` (constructing a wired session-keepalive loop for the profile that satisfies the REPL's start/stop handle contract), and MUST accept all collaborators (`BrowserRefresher`, `CookieStore`, `CookieValidator`, recovery rung, logger) through a single `CookieSessionDeps` deps-object so the implementation is replaceable at the seam. No file outside `src/auth/` may import the collaborators directly, and the facade MUST NOT expose raw collaborator accessors (e.g. getters returning the cookie store or the refresher) — CLI files obtain keepalive instances through `createKeepalive` only. `refresh(profile)` and the keepalive loop MUST share one in-process rotation floor: a rotation recorded by either consumer suppresses the other within the floor window (60 seconds by default), per the session-keepalive requirement.
 
@@ -370,3 +368,32 @@ The auth module MUST provide a session-keepalive loop for the active profile tha
 #### Scenario: Failed tick never surfaces into the session
 - **WHEN** a rotation tick fails or reports `rotated: false`
 - **THEN** no error or prompt reaches the caller, a diagnostic is logged, and the next tick is scheduled
+
+### Requirement: CookieSession.captureLogin rejects with LoginCancelledError on browser close
+
+`CookieSession.captureLogin(profile)` MUST classify any `PlaywrightCliError` whose stderr contains the markers `is not open` or `not found` (case-insensitive) as a browser-closed condition. On the first such error from `driver.cookieList`, the gate loop MUST throw `LoginCancelledError` (a new typed error in `src/core/errors.ts`) instead of retrying until the login timeout. The gate loop MUST emit exactly one info-level log line containing `Gate poll cancelled` per cancellation. The existing `LoginTimeoutError` timeout path MUST remain in effect for all other errors.
+
+The capture `finally` MUST still invoke `driver.closeSession` (which already swallows the `not found` teardown error). `driver.cookieListFromState` and `cookieStore.saveFullJar` MUST NOT be invoked after a `LoginCancelledError`.
+
+The CLI top-level handler (`src/cli/index.ts`) MUST log the `LoginCancelledError` message at info level and exit with code 0. All other errors MUST continue to follow the existing `Command '<name>' failed: <message>` + exit 1 path.
+
+#### Scenario: Headed browser closed mid-poll cancels capture with a typed error
+
+- **WHEN** `captureLogin("p")` is running and the headed browser is closed before the gate cookies appear
+- **THEN** the call rejects with `LoginCancelledError` (NOT `LoginTimeoutError`); `driver.closeSession("p")` is invoked; `driver.cookieListFromState("p")` and `cookieStore.saveFullJar("p", ...)` are NOT invoked; exactly one info-level log line containing `Gate poll cancelled` is emitted; no debug-level `Gate poll failed` lines are emitted for the closed-browser error.
+
+#### Scenario: Transient cookieList errors still poll until timeout
+
+- **WHEN** `driver.cookieList` rejects with a `PlaywrightCliError` whose stderr contains neither marker
+- **THEN** the gate loop continues polling and eventually rejects with `LoginTimeoutError` (no behavior change).
+
+#### Scenario: isBrowserClosedError matches both known markers
+
+- **WHEN** the classifier is given a `PlaywrightCliError` with stderr `Browser foo is not open` or `session not found`
+- **THEN** it returns `true`; for any other stderr text or a non-`PlaywrightCliError` value it returns `false`.
+
+#### Scenario: CLI exit semantics for cancellation
+
+- **WHEN** `AuthCommand.execute` rejects with `LoginCancelledError`
+- **THEN** the CLI logs the message at info level and exits with code 0; the generic `Command 'auth' failed` error path is not used.
+

@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import type { AuthResult, Cookie } from "../core/types.ts";
 import { Logger } from "../infrastructure/logger.ts";
-import { AuthenticationError, LoginTimeoutError } from "../core/errors.ts";
+import { AuthenticationError, LoginCancelledError, LoginTimeoutError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
@@ -15,7 +15,7 @@ import { SessionClassifier, type SessionProbeResult } from "./session-classifier
 export type { SessionProbeResult } from "./session-classifier.ts";
 import { BrowserRefresher, type RefresherDriver, type RotationResult } from "./browser-refresher.ts";
 import { RecoveryRung } from "./recovery.ts";
-import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
+import { PlaywrightCliDriver, isBrowserClosedError } from "../services/playwright-cli-driver.ts";
 import {
   GEMINI_APP_URL,
   PSIDTS_COOKIE_NAME,
@@ -264,7 +264,7 @@ export class CookieSession {
     return null;
   }
 
-  private async waitForGate(session: string, timeoutMs: number): Promise<void> {
+private async waitForGate(session: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       try {
@@ -274,6 +274,10 @@ export class CookieSession {
           return;
         }
       } catch (err) {
+        if (isBrowserClosedError(err)) {
+          this.deps.logger.info(`Gate poll cancelled: browser session '${session}' is no longer open`);
+          throw new LoginCancelledError();
+        }
         this.deps.logger.debug(`Gate poll failed: ${err}`);
       }
       if (Date.now() >= deadline) {

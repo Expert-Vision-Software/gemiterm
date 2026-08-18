@@ -10,7 +10,7 @@ import { ProfileManager, CookieStorage } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts";
 import { getPackageJson } from "../infrastructure/path-utils.ts";
 import { parseGlobalArgs, printVersion, printHelp } from "../infrastructure/cli-parser.ts";
-import { AuthenticationError } from "../core/errors.ts";
+import { AuthenticationError, LoginCancelledError } from "../core/errors.ts";
 import { createCookieSession } from "../auth/cookie-session.ts";
 import type { CookieSession } from "../auth/cookie-session.ts";
 
@@ -149,6 +149,10 @@ async function main(): Promise<void> {
       listProfiles: services.listProfiles,
     });
   } catch (error) {
+    if (error instanceof LoginCancelledError) {
+      logger.info(error.message);
+      process.exit(0);
+    }
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Command '${subcommand}' failed: ${message}`);
     process.exit(1);
