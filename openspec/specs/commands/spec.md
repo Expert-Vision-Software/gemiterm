@@ -448,7 +448,7 @@ The system MUST provide a `status` command implemented by `StatusCommand` in `sr
 
 ### Requirement: InstallBrowserCommand
 
-The system MUST provide an `install-browser` command implemented by `InstallBrowserCommand` in `src/cli/commands/install-browser-command.ts`. The command MUST be marked as hidden (its description starts with "Install Chromium browser for Playwright (hidden command)"). The command MUST print `Checking browser installation...` (dim) before invoking `InstallBrowserService.install()`. On success the command MUST print `Browser ready.` (green). On `InstallBrowserError` the command MUST log the error and cause, MUST print `Failed to install browser.` (red) and the hint `You may need to run: bunx @playwright/cli install chromium` (dim), and MUST exit with code 1.
+The system MUST provide an `install-browser` command implemented by `InstallBrowserCommand` in `src/cli/commands/install-browser-command.ts`. The command MUST be marked as hidden (its description starts with "Install Chrome for Testing browser for Playwright (hidden command)"). The command MUST print `Checking browser installation...` (dim) before invoking `InstallBrowserService.install()`. On success the command MUST print `Browser ready.` (green). On `InstallBrowserError` the command MUST log the error and cause, MUST print `Failed to install browser.` (red) and the hint `You may need to run: bunx @playwright/cli install-browser chrome-for-testing` (dim), and MUST exit with code 1.
 
 #### Scenario: Install-browser prints the success lines on a clean install
 - **WHEN** the user runs `gemiterm install-browser` and `InstallBrowserService.install()` resolves
@@ -456,7 +456,7 @@ The system MUST provide an `install-browser` command implemented by `InstallBrow
 
 #### Scenario: Install-browser exits 1 on InstallBrowserError
 - **WHEN** the user runs `gemiterm install-browser` and `InstallBrowserService.install()` throws an `InstallBrowserError`
-- **THEN** the output contains `Failed to install browser.` and the hint about `bunx @playwright/cli install chromium`, and the process exits with code 1
+- **THEN** the output contains `Failed to install browser.` and the hint about `bunx @playwright/cli install-browser chrome-for-testing`, and the process exits with code 1
 
 ### Requirement: CommandRegistry
 

@@ -163,13 +163,13 @@ gemiterm --version
 
 Or open a new terminal.
 
-### Chromium installation fails
+### Chrome for Testing installation fails
 
-The installer runs `bunx @playwright/cli install chromium` as part of the install flow. If it fails:
+The installer runs `bunx @playwright/cli install-browser chrome-for-testing` as part of the install flow. If it fails:
 
-1. Check your network connection (Chromium is ~100 MB).
+1. Check your network connection (Chrome for Testing is ~100 MB).
 2. Re-run the installer.
-3. Or manually run: `bunx @playwright/cli install chromium`
+3. Or manually run: `bunx @playwright/cli install-browser chrome-for-testing`
 
 ### Cannot reach GitHub releases
 
@@ -229,10 +229,10 @@ mkdir $env:LOCALAPPDATA\GemiTerm
 Move-Item dist\gemiterm.exe $env:LOCALAPPDATA\GemiTerm\GemiTerm.exe
 ```
 
-Then install Chromium:
+Then install Chrome for Testing:
 
 ```bash
-bunx @playwright/cli install chromium
+bunx @playwright/cli install-browser chrome-for-testing
 ```
 
 ## Development and Testing

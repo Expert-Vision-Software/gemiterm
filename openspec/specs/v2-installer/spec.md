@@ -103,27 +103,27 @@ The system MUST add the install dir to the user `PATH` on a fresh install and MU
 - **THEN** a second `install.sh` run does not append a second `source` line and does not duplicate the `export PATH=...` line inside `env.sh`
 
 ### Requirement: Browser Install Step Runs As Part Of Install And Is Verified
-The system MUST invoke `bunx @playwright/cli install chromium` directly (not via the `gemiterm install-browser` command) as part of the install flow, MUST verify that Chromium is on disk after the invocation, and MUST exit non-zero with a clear message if the verification fails. The verification check is a glob over `$env:LOCALAPPDATA\ms-playwright\chromium-*\chrome.exe` (Windows) or `~/.cache/ms-playwright/chromium-*/chrome-linux/chrome` (POSIX).
+The system MUST invoke `bunx @playwright/cli install-browser chrome-for-testing` directly (not via the `gemiterm install-browser` command) as part of the install flow, MUST verify that Chrome for Testing is on disk after the invocation, and MUST exit non-zero with a clear message if the verification fails. The verification check is a recursive glob over `$env:LOCALAPPDATA\ms-playwright\chromium-*\chrome.exe` (Windows) or `find ~/.cache/ms-playwright/chromium-* -name chrome -type f -executable` (POSIX) — both match the chrome-for-testing cache layout, which places the binary at `chromium-<rev>/chrome-linux64/chrome` on POSIX and `chromium-<rev>/chrome-win64/chrome.exe` on Windows.
 
-#### Scenario: Fresh install downloads Chromium via playwright-cli
-- **WHEN** `install.ps1` (or `install.sh`) runs on a system without Chromium and `bun` is in PATH
-- **THEN** `bunx @playwright/cli install chromium` is invoked, which downloads Chromium via Playwright, and the installer verifies the Chromium binary is present under the appropriate path before exiting 0
+#### Scenario: Fresh install downloads Chrome for Testing via playwright-cli
+- **WHEN** `install.ps1` (or `install.sh`) runs on a system without Chrome for Testing and `bun` is in PATH
+- **THEN** `bunx @playwright/cli install-browser chrome-for-testing` is invoked, which downloads Chrome for Testing via Playwright, and the installer verifies the binary is present under the appropriate path before exiting 0
 
 #### Scenario: Bun not present on system — installer bootstraps Bun first
 - **WHEN** `install.ps1` (or `install.sh`) runs and `bun` is not in PATH
-- **THEN** the installer downloads and installs Bun via the official installer (`irm https://bun.sh/install.ps1 | iex` on Windows, `curl -fsSL https://bun.sh/install | bash` on POSIX) before running `bunx @playwright/cli install chromium`
+- **THEN** the installer downloads and installs Bun via the official installer (`irm https://bun.sh/install.ps1 | iex` on Windows, `curl -fsSL https://bun.sh/install | bash` on POSIX) before running `bunx @playwright/cli install-browser chrome-for-testing`
 
 #### Scenario: Bun bootstrap failure fails the installer
 - **WHEN** the Bun bootstrap step fails (network error)
 - **THEN** the installer prints `"Bun installation failed. Install Bun manually from https://bun.sh and re-run this installer."` and exits non-zero; the existing binary (if upgrading) is left in place
 
-#### Scenario: playwright-cli install failure fails the installer
-- **WHEN** `bunx @playwright/cli install chromium` exits non-zero (e.g. network failure during the Chromium download)
-- **THEN** the installer prints `"Chromium installation verification failed. Re-run the installer after fixing the network, or run 'bunx @playwright/cli install chromium' manually."` and exits non-zero; the existing binary (if upgrading) is left in place
+#### Scenario: playwright-cli install-browser failure fails the installer
+- **WHEN** `bunx @playwright/cli install-browser chrome-for-testing` exits non-zero (e.g. network failure during the download)
+- **THEN** the installer prints `"Chrome for Testing installation verification failed. Re-run the installer after fixing the network, or run 'bunx @playwright/cli install-browser chrome-for-testing' manually."` and exits non-zero; the existing binary (if upgrading) is left in place
 
-#### Scenario: Re-install on a system with Chromium is a no-op for the browser step
-- **WHEN** `install.ps1` (or `install.sh`) runs on a system that already has Chromium
-- **THEN** `bunx @playwright/cli install chromium` returns quickly (no re-download), the verification step confirms Chromium is present, and the installer exits 0
+#### Scenario: Re-install on a system with Chrome for Testing is a no-op for the browser step
+- **WHEN** `install.ps1` (or `install.sh`) runs on a system that already has Chrome for Testing
+- **THEN** `bunx @playwright/cli install-browser chrome-for-testing` returns quickly (no re-download), the verification step confirms the binary is present, and the installer exits 0
 
 ### Requirement: Network Failure Is Handled Gracefully
 The system MUST detect when the GitHub API or the release download is unreachable and MUST exit non-zero with a clear remediation message. The installer MUST NOT replace the existing binary on a failed download (idempotency of the upgrade flow).

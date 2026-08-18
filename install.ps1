@@ -283,28 +283,28 @@ if ($PackageManagerX -eq 'bunx' -and -not (Get-Command bun -ErrorAction Silently
     }
 }
 
-# --- Install Chromium (task 2.6) ---
+# --- Install Chrome for Testing (task 2.6) ---
 if ($WhatIf) {
-    Write-Host "[WhatIf] Would run: $PackageManagerX @playwright/cli install chromium"
+    Write-Host "[WhatIf] Would run: $PackageManagerX @playwright/cli install-browser chrome-for-testing"
 } else {
-    Write-Host "Installing Chromium browser for Playwright..."
+    Write-Host "Installing Chrome for Testing browser for Playwright..."
     try {
-        & $PackageManagerX @playwright/cli install chromium
+        & $PackageManagerX @playwright/cli install-browser chrome-for-testing
         if ($LASTEXITCODE -ne 0) {
             throw "$PackageManagerX exited with code $LASTEXITCODE"
         }
     } catch {
-        Write-Host "Chromium installation failed. Re-run the installer after fixing the issue, or run '$PackageManagerX @playwright/cli install chromium' manually."
+        Write-Host "Chrome for Testing installation failed. Re-run the installer after fixing the issue, or run '$PackageManagerX @playwright/cli install-browser chrome-for-testing' manually."
         exit 1
     }
 }
 
-# --- Verify Chromium (task 2.7) ---
+# --- Verify Chrome for Testing (task 2.7) ---
 $chromeExe = Get-ChildItem "$env:LOCALAPPDATA\ms-playwright\chromium-*\chrome.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($chromeExe) {
-    Write-Host "Chromium verified at $($chromeExe.FullName)"
+    Write-Host "Chrome for Testing verified at $($chromeExe.FullName)"
 } else {
-    Write-Host "Chromium installation verification failed. Re-run the installer after fixing the network, or run '$PackageManagerX @playwright/cli install chromium' manually."
+    Write-Host "Chrome for Testing installation verification failed. Re-run the installer after fixing the network, or run '$PackageManagerX @playwright/cli install-browser chrome-for-testing' manually."
     exit 1
 }
 
@@ -324,7 +324,7 @@ if ($userPath -and -not $userPath.ToLower().Contains($InstallDir.ToLower())) {
 if ($WhatIf) {
     Write-Host ""
     Write-Host "WhatIf review complete. No changes were made." -ForegroundColor Cyan
-    Write-Host "GemiTerm $version would be installed to $ExePath using $($PackageManagerX).Chromium."
+    Write-Host "GemiTerm $version would be installed to $ExePath using $($PackageManagerX); Chrome for Testing browser would be provisioned."
     Write-Host "Run without -WhatIf to apply."
 } else {
     Write-Host "GemiTerm $version installed to $ExePath. Run 'gemiterm status' to verify, then 'gemiterm auth' to authenticate."

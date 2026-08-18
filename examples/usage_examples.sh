@@ -22,8 +22,8 @@ section1() {
     echo ""
 
     # Install browser dependencies
-    echo "2. Install Chromium for Playwright:"
-    echo "   playwright install chromium"
+    echo "2. Install Chrome for Testing for Playwright:"
+    echo "   playwright install-browser chrome-for-testing"
     echo ""
 
     # Authenticate
