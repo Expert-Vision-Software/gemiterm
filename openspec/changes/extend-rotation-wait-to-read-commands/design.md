@@ -56,21 +56,35 @@ from what 5.1 and the predecessor's probes actually observed; the default
 assumption is "typed `AuthenticationError` or empty result", whichever the
 command's existing error translation already surfaces.
 
-**Finalized (implementation, 2026-08-18):** the predicate is **both** shapes,
-uniformly, via a shared `runWithRotationRetry` helper. A thrown read error
-and a resolved-empty read both enter the wait; the helper rethrows the
-original error when no rotation is in flight (or the retry also throws) and
-returns the failed result on timeout, so each command's existing error
-handling is untouched. This removes the need to disambiguate `fetchChat`'s
-phantom shape on the live account — the single predicate covers whichever
-shape the SDK surfaces.
+**Finalized (implementation, 2026-08-18):** a single shared
+`runWithRotationRetry` helper carries the predicate as a parameter; a thrown
+error always enters the wait, and each command states whether an empty result
+counts too. Per command, justified by its failure shape:
+
+- `fetch` — **throw or empty**: an empty read is the phantom signal (the
+  `listChats` shape field-verified in 5.1), so `messages.length === 0` enters
+  the wait.
+- `continue` initial read — **throw or empty**: same phantom signal.
+- `export` / `export-all` — **throw-only**: an empty read is a valid
+  (degenerate) outcome — an empty conversation still exports to a file — so
+  only a thrown auth/network error is a failure.
+- `continue` send — **throw-only**: a send surfaces auth failure as a typed
+  `AuthenticationError`, never as an empty response.
+
+The helper rethrows the original error when no rotation is in flight (or the
+retry also throws) and returns the failed result on timeout, so each command's
+existing error handling is untouched. This removes the need to disambiguate
+`fetchChat`'s phantom shape on the live account — `fetch`/`continue`'s read
+covers the empty case, and `export`/`export-all` don't need to.
 
 ### D3: One retry, then existing behavior
 
-After a successful wait: retry the failed operation exactly once. Timeout or
-still-failing retry: print the predecessor's stderr hint and fall through to
-the command's existing failure handling unchanged. No new exit codes, no new
-error types.
+After a successful wait: retry the failed operation exactly once. On wait
+timeout (the rotation remains in flight): print the predecessor's stderr hint
+and fall through to the command's existing failure handling unchanged. A
+landed-but-still-failing retry also falls through to the existing failure
+handling, *without* the hint — the rotation has landed, so a "still in
+progress" message would be false. No new exit codes, no new error types.
 
 ## Risks / Trade-offs
 
@@ -88,7 +102,8 @@ Additive per-command branches; no persisted-state migration. Rollback = revert.
   account? (2026-08-18 field probe: `listChats` on a phantom jar resolves an
   EMPTY array, no error — `fetchChat`'s shape on the same jar remains to
   probed once during implementation planning; read-only, no recovery.)
-  **Resolved by implementation:** moot — the predicate covers both shapes, so
+  **Resolved by implementation:** moot — `fetch`/`continue`'s read covers both
+  shapes and `export`/`export-all` treat empty as a valid non-failure (D2), so
   no live probe was required.
 - Should `export-all` await per-profile or bail to the aggregate warning path
   on the first timeout? (Lean: per-conversation, matching its existing
