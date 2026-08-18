@@ -8,7 +8,7 @@ import { CookieStore } from "../../src/auth/cookie-store.ts";
 import { RotationCooldown } from "../../src/auth/rotation-cooldown.ts";
 import { SessionKeepalive } from "../../src/auth/session-keepalive.ts";
 import { GEMINI_APP_URL } from "../../src/auth/auth-constants.ts";
-import { SessionValidationError, LoginCancelledError, LoginTimeoutError } from "../../src/core/errors.ts";
+import { SessionValidationError, LoginCancelledError, LoginTimeoutError, LoginUnroutableError } from "../../src/core/errors.ts";
 import { CookieValidator } from "../../src/auth/cookie-validation.ts";
 import { PlaywrightCliError } from "../../src/services/playwright-cli-driver.ts";
 
@@ -229,6 +229,45 @@ describe("CookieSession.captureLogin", () => {
 
     expect(deps.driver.closeSession).toHaveBeenCalledWith("p");
     expect(deps.cookieStore.saveFullJar).not.toHaveBeenCalled();
+  });
+
+  test("youtube-only PSID/PSIDTS times out as LoginUnroutableError, never persists", async () => {
+    // PSID/PSIDTS exist by name but only at .youtube.com — a persistent profile's
+    // pre-existing sibling shape. Name-only gates let this through; the
+    // routable gate must not.
+    const youtubeOnly = [
+      cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
+      cookie("__Secure-1PSIDTS", "yt-psidts", ".youtube.com"),
+    ];
+    const driver = makeDriver(youtubeOnly);
+    const deps = makeDeps({ driver, pollIntervalMs: 1 });
+    const session = makeSession(deps);
+
+    const promise = session.captureLogin("p", { timeoutMs: 30 });
+    await expect(promise).rejects.toBeInstanceOf(LoginUnroutableError);
+
+    expect(driver.cookieListFromState).not.toHaveBeenCalled();
+    expect(deps.cookieStore.saveFullJar).not.toHaveBeenCalled();
+    expect(driver.closeSession).toHaveBeenCalledWith("p");
+  });
+
+  test("routable gate passes; backstop rejects unroutable state-save as LoginUnroutableError, never persists", async () => {
+    // Gate observes a .google.com-routable pair. state-save returns a jar
+    // where the PSID/PSIDTS sit only at .youtube.com — the validator catches
+    // it, the backstop rejects, the pre-existing jar is not overwritten.
+    const unroutable = [
+      cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
+      cookie("__Secure-1PSIDTS", "yt-psidts", ".youtube.com"),
+    ];
+    const driver = makeDriver(FULL_JAR, unroutable);
+    const deps = makeDeps({ driver });
+    const session = makeSession(deps);
+
+    await expect(session.captureLogin("p")).rejects.toBeInstanceOf(LoginUnroutableError);
+
+    expect(driver.cookieListFromState).toHaveBeenCalledTimes(1);
+    expect(deps.cookieStore.saveFullJar).not.toHaveBeenCalled();
+    expect(driver.closeSession).toHaveBeenCalledWith("p");
   });
 
   test("renew mode prints renewal text", async () => {

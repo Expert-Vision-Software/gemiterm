@@ -67,3 +67,12 @@ export class LoginCancelledError extends GemitermError {
     this.name = "LoginCancelledError";
   }
 }
+
+export class LoginUnroutableError extends GemitermError {
+  constructor(
+    message = "Authentication did not produce gemini-routable cookies (no __Secure-1PSID/TS routable to https://gemini.google.com). Re-run 'gemiterm auth' and complete sign-in on the gemini.google.com page.",
+  ) {
+    super(message);
+    this.name = "LoginUnroutableError";
+  }
+}

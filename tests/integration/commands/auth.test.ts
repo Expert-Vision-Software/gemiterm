@@ -96,6 +96,16 @@ describe("auth command integration", () => {
 
       await expect(command.execute([], context)).rejects.toBeInstanceOf(LoginCancelledError);
     });
+
+    test("propagates LoginUnroutableError unchanged (caller decides exit semantics)", async () => {
+      spyOn(configModule, "listProfiles").mockReturnValue(["default"]);
+      const { LoginUnroutableError } = await import("../../../src/core/errors.ts");
+      (cookieSession.captureLogin as ReturnType<typeof mock>).mockRejectedValueOnce(
+        new LoginUnroutableError(),
+      );
+
+      await expect(command.execute([], context)).rejects.toBeInstanceOf(LoginUnroutableError);
+    });
   });
 
   describe("profile selection menu", () => {

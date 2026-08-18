@@ -1,11 +1,11 @@
 import chalk from "chalk";
 import type { AuthResult, Cookie } from "../core/types.ts";
 import { Logger } from "../infrastructure/logger.ts";
-import { AuthenticationError, LoginCancelledError, LoginTimeoutError } from "../core/errors.ts";
+import { AuthenticationError, LoginCancelledError, LoginTimeoutError, LoginUnroutableError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
-import { CookieValidator, findRoutableCookieValue } from "./cookie-validation.ts";
+import { CookieValidator, findRoutableCookieValue, isRoutableTo } from "./cookie-validation.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { RotationCooldown, type RotationCooldownSeam } from "./rotation-cooldown.ts";
 import { SessionKeepalive, type SessionKeepaliveOptions } from "./session-keepalive.ts";
@@ -202,6 +202,14 @@ export class CookieSession {
 
       const jar = await this.deps.driver.cookieListFromState(name);
       const payload = filterToGeminiDomains(jar);
+      try {
+        this.deps.validator.validate(payload);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new LoginUnroutableError(
+          `Captured jar failed validation — ${detail} The pre-existing jar has been preserved byte-for-byte.`,
+        );
+      }
       await this.deps.cookieStore.saveFullJar(name, payload);
 
       const expiresAt = psidtsExpiry(payload);
@@ -285,12 +293,26 @@ export class CookieSession {
 
 private async waitForGate(session: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
+    let sawBothNamed = false;
+    const observedScopes = new Set<string>();
     for (;;) {
       try {
         const cookies = await this.deps.driver.cookieList(session);
-        const names = new Set(cookies.map((c) => c.name));
-        if (names.has(PSID_COOKIE_NAME) && names.has(PSIDTS_COOKIE_NAME)) {
+        const hasRoutablePair =
+          cookies.some((c) => c.name === PSID_COOKIE_NAME && isRoutableTo(c, GEMINI_APP_URL)) &&
+          cookies.some((c) => c.name === PSIDTS_COOKIE_NAME && isRoutableTo(c, GEMINI_APP_URL));
+        if (hasRoutablePair) {
           return;
+        }
+        const hasPsid = cookies.some((c) => c.name === PSID_COOKIE_NAME);
+        const hasPsidts = cookies.some((c) => c.name === PSIDTS_COOKIE_NAME);
+        if (hasPsid && hasPsidts) {
+          sawBothNamed = true;
+          for (const c of cookies) {
+            if (c.name === PSID_COOKIE_NAME || c.name === PSIDTS_COOKIE_NAME) {
+              observedScopes.add(c.domain);
+            }
+          }
         }
       } catch (err) {
         if (isBrowserClosedError(err)) {
@@ -300,6 +322,12 @@ private async waitForGate(session: string, timeoutMs: number): Promise<void> {
         this.deps.logger.debug(`Gate poll failed: ${err}`);
       }
       if (Date.now() >= deadline) {
+        if (sawBothNamed) {
+          const scopes = [...observedScopes].join(", ") || "(none)";
+          throw new LoginUnroutableError(
+            `Authentication timed out without a gemini-routable __Secure-1PSID/TS — observed scopes: [${scopes}]. Re-run 'gemiterm auth' and complete sign-in on the gemini.google.com page.`,
+          );
+        }
         throw new LoginTimeoutError(timeoutMs);
       }
       await sleep(this.pollIntervalMs);

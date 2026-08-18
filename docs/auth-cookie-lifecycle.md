@@ -988,3 +988,53 @@ do not re-litigate them.
   value fixtures matching the regex shape)
   (openspec/changes/fix-6-classifier-token-extraction).
 
+- **2026-08-18** — fix-7 capture gate routability. The capture gate
+  (`CookieSession.waitForGate`, `src/auth/cookie-session.ts`) matched cookies
+  by name only — `names.has(PSID) && names.has(PSIDTS)` — so a persistent
+  Chromium profile that already carried a `.youtube.com`-scoped
+  `__Secure-1PSIDTS` (a normal jar shape; see §2.1) satisfied the gate the
+  instant the page loaded, before Gemini's page JS minted the
+  `.google.com`-scoped sibling. `state-save` then snapshotted a youtube-only
+  jar and `captureLogin` persisted it. Field repro (DHBGAMING2,
+  2026-08-18, profile `evs-diegohb`): `auth --renew` printed "Session
+  renewed… (36 cookies captured)" while the next `fetch -p evs-diegohb`
+  was rejected by `CookieValidator.validate` with
+  `Cookie __Secure-1PSIDTS … not routable … present scopes: [.youtube.com]`,
+  and a renew/fetch loop persisted across renew attempts — the renew
+  reported success while persisting a jar the CLI's own validator rejects,
+  a self-inflicted A2.2 anti-pattern. (1) **Routable gate** —
+  `waitForGate` now requires BOTH `__Secure-1PSID` and `__Secure-1PSIDTS`
+  routable to `https://gemini.google.com` (RFC 6265
+  domain/path/expiry via the existing `isRoutableTo` helper that
+  `findRoutableCookieValue` and `CookieValidator.validate` already use);
+  name-matching rows at other scopes no longer satisfy the gate. The loop
+  also tracks whether the names were ever observed (regardless of
+  routability) to select the typed error at the deadline: timeout with
+  names observed but never routable → `LoginUnroutableError` (naming the
+  observed scopes); timeout with names never observed →
+  `LoginTimeoutError` (unchanged). (2) **Pre-save backstop** — the gate
+  observing a routable pair does not guarantee the `state-save` snapshot
+  is good (the gate reads `cookie-list`, the payload reads `state-save`:
+  TOCTOU). Immediately before `saveFullJar`, `captureLogin` runs
+  `CookieValidator.validate` on the filtered payload; on throw, `saveFullJar`
+  is skipped and `captureLogin` rejects with `LoginUnroutableError` wrapping
+  the validator's message. The pre-existing jar is preserved byte-for-byte
+  on every path. (3) **CLI rendering** — the top-level handler in
+  `src/cli/index.ts` recognizes `LoginUnroutableError` alongside
+  `LoginCancelledError`: friendly info message, non-zero exit (vs. exit 0
+  for the intentional-cancel path). The capture payload policy is
+  unchanged: full jar, `filterToGeminiDomains`, never name-filtered; the
+  gate gets stricter, the payload does not get narrower. **Accepted
+  risk** (per user decision 2026-08-18): an account that legitimately sets
+  PSID/PSIDTS only at the `.youtube.com` scope (not observed in any field
+  jar or ablation, per §2.1) would become unrenewable — i.e. the gate's
+  stricter scope requires Gemini to mint a `.google.com` row, which it
+  does for every signed-in browser session we've observed. Invariant
+  coverage: `tests/auth-regression/invariant-capture-integrity.test.ts`
+  (new `capture gate routability (fix-7)` block: youtube-only PSID/PSIDTS
+  never satisfies the gate; backstop rejects unroutable state-save with
+  no persist; name-absent timeout still resolves as `LoginTimeoutError`)
+  + gate-loop unit tests in `tests/auth/cookie-session.test.ts` +
+  `AuthCommand` propagation test in `tests/integration/commands/auth.test.ts`
+  (openspec/changes/fix-7-capture-gate-routability).
+
