@@ -1,7 +1,7 @@
 import type { Cookie } from "../core/types.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { isRoutableTo } from "./cookie-validation.ts";
-import { GEMINI_APP_URL, INIT_TOKENS } from "./auth-constants.ts";
+import { GEMINI_APP_URL, hasAnyExtractedInitToken } from "./auth-constants.ts";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
@@ -64,8 +64,7 @@ export class SessionClassifier {
       return { state: "dead", chatCount: 0 };
     }
 
-    const hasTokens = INIT_TOKENS.some((token) => html.includes(token));
-    if (!hasTokens) {
+    if (!hasAnyExtractedInitToken(html)) {
       return { state: "dead", chatCount: 0 };
     }
 

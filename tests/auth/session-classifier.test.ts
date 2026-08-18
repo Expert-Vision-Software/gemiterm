@@ -43,7 +43,7 @@ function writeJar(profile: string, extra: Cookie[] = []): void {
   );
 }
 
-const HTML_WITH_TOKENS = "<html>window.WIZ_global_data = {'SNlM0e':'tok','cfb2h':'x','FdrFJe':'y'};</html>";
+const HTML_WITH_TOKENS = '<html>window.WIZ_global_data = {"SNlM0e":"tok","cfb2h":"x","FdrFJe":"y"};</html>';
 const HTML_WITHOUT_TOKENS = "<html>Sign in to Gemini</html>";
 
 interface DepsShape {

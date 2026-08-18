@@ -957,3 +957,34 @@ do not re-litigate them.
   cases in `tests/auth/session-keepalive.test.ts`
   (openspec/changes/fix-5-audit-remediations).
 
+- **2026-08-18** — fix-6 classifier init-token value extraction. The session
+  classifier used a substring scan on the init-token *names*
+  (`INIT_TOKENS.some((t) => html.includes(t))`, `src/auth/session-classifier.ts:67`)
+  to decide token presence. Gemini's signed-out init HTML still embeds the
+  keys with empty values (e.g. `"cfb2h":""`), so a fully signed-out GET passed
+  the substring check, advanced to the chats probe, and could come back `live`
+  via the SDK's any-name cookie fallback. Field repro (DHBGAMING2,
+  2026-08-18): profile `evs-diegohb` — whose persisted jar's `__Secure-1PSIDTS`
+  existed only at the `.youtube.com` scope — reported `✓ live (23)` in
+  `status --verbose` while `fetch` on the same jar was rejected by the
+  validator. The classifier now extracts each required token's value with the
+  ablation §6.2 regex (`/"<token>":\s*"(.*?)"/` for `SNlM0e`, `cfb2h`,
+  `FdrFJe`) and requires **at least one** non-empty capture; an all-empty
+  init GET classifies `dead` without consulting the chats probe (the previous
+  SDK-fallback path is closed). `INIT_TOKENS` is removed; the constants
+  module now exports `INIT_TOKEN_EXTRACTION` as a `{ token, pattern }[]`
+  table, usable by future init-HTML consumers. **Visible `status` behavior
+  change**: profiles previously misread as `live` (token-key present but
+  value-extracted as empty — typically signed-out pages with leftover
+  identity family, or jars whose routable PSIDTS scope no longer covers
+  `gemini.google.com`) will now report `phantom` (if the chats probe returns
+  0) or `dead` (if the init GET has no non-empty extracted value); this is
+  the honest verdict, not a regression. Invariant coverage:
+  `tests/auth-regression/invariant-classifier-token-values.test.ts` (new
+  RED/green: signed-out-key fixture, one-non-empty fixture,
+  whitespace-tolerated fixture) + updated fixtures in
+  `tests/auth-regression/invariant-classifier-truth-table.test.ts` and
+  `tests/auth/session-classifier.test.ts` (key-name fixtures → double-quoted
+  value fixtures matching the regex shape)
+  (openspec/changes/fix-6-classifier-token-extraction).
+
