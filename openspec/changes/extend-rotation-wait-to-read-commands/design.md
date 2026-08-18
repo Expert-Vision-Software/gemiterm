@@ -1,9 +1,11 @@
 # Design: extend-rotation-wait-to-read-commands
 
-> **Status: blocked on predecessor field verification.** This design is
-> intentionally incomplete where the predecessor's field results must decide.
-> Do not implement until
-> `openspec/changes/await-detached-rotation-on-empty-list` task 5.1 passes.
+> **Status: unblocked 2026-08-18.** The predecessor's field gate (task 5.1,
+> round 2) cleared, and `fix-rotation-dead-end` (archived) hardened the
+> pipeline the wait observes: single-flight runner spawn, 90 s wait default,
+> de-raced recovery. This design is still intentionally incomplete where
+> per-command field observation must decide (D2); complete those sections
+> during implementation planning.
 
 ## Context
 
@@ -29,19 +31,20 @@ and already tolerate partial failure with warnings.
 **Non-Goals:**
 
 - Re-litigating the wait bounds or the PSIDTS-change signal (predecessor
-  owns them; tune there if field results demand it).
+  owns them; tune there if field results demand it). Note: the bounds were
+  already tuned once through exactly this path — 30 s -> 90 s in
+  `fix-rotation-dead-end` — so any further tuning re-opens that change, not
+  this one.
 - Write-command coverage (`new`, `delete`) — send/delete surfaces were not
   ablated and fail differently; explicitly out until separately proposed.
-- Cross-process spawn dedup (unchanged predecessor Non-Goal).
+- Cross-process spawn dedup — **shipped** by `fix-rotation-dead-end`
+  (`refresh-runner.lock` single-flight); no longer a Non-Goal, just done.
 
 ## Decisions
 
 ### D1: Predecessor field results are a hard gate
 
-Implementation starts only after the predecessor's task 5.1 (idle ≥ 1h15m →
-single `list` waits then renders; quick re-run flash-free in the common case)
-passes on a real session. If 5.1 surfaces signal/bounds problems, fix the
-facade in the predecessor's scope and re-verify before touching this change.
+~~Implementation starts only after the predecessor's task 5.1 passes on a real session.~~ **Gate cleared 2026-08-18** (task 5.1 round 2 + the `fix-rotation-dead-end` field validation: stale-armed multi-profile `list` runs spawned exactly one runner per profile, zero playwright collisions, and rendered conversations post-rotation). One D1 consequence already consumed: the signal/bounds question it reserved — the 30 s default was structurally shorter than the runner's 60 s budget — was fixed in the facade (90 s) by `fix-rotation-dead-end`, per this change's own rule that tuning happens there.
 
 ### D2: Per-command failing seam, decided by observed failure shapes
 
@@ -73,8 +76,9 @@ Additive per-command branches; no persisted-state migration. Rollback = revert.
 ## Open Questions
 
 - Does `fetchChat` on a phantom session throw or return empty on the real
-  account? (Predecessor 5.1 field notes should answer; if not, probe once
-  during implementation planning — read-only, no recovery.)
+  account? (2026-08-18 field probe: `listChats` on a phantom jar resolves an
+  EMPTY array, no error — `fetchChat`'s shape on the same jar remains to
+  probed once during implementation planning; read-only, no recovery.)
 - Should `export-all` await per-profile or bail to the aggregate warning path
   on the first timeout? (Lean: per-conversation, matching its existing
   partial-failure tolerance.)

@@ -1,5 +1,13 @@
 # Design: await-detached-rotation-on-empty-list
 
+> **2026-08-18 supersession note:** D3's "Timeout default 30 s (< the runner's
+> 60 s cap)" rationale below was invalidated by field results - the wait could
+> give up before the rotation it was awaiting could possibly land. The default
+> is now 90 s, and the detached spawn gained a cross-process single-flight
+> lock; recovery was de-raced to await this wait before opening its own
+> browser. All of that shipped in `fix-rotation-dead-end` (archived
+> `2026-08-18-fix-rotation-dead-end`); the main specs carry the current form.
+
 ## Context
 
 `CookieSession.ensureSession` (fix-1 design D2) arms the on-disk jar immediately and, when the jar mtime exceeds 30 minutes, spawns a detached refresh-runner fire-and-forget. When the jar's `__Secure-1PSIDTS` is server-side superseded (phantom state; observed onset floor ~1h15m idle), the first `list` after the idle window renders `No conversations found.` while the rotation lands seconds later — the command races and loses against the rotation it itself triggered. The existing rescue (`ListCommand.resolvePhantomEmptyResult`) probes + offers the synchronous recovery rung, which is the wrong tool while a rotation is already in flight (redundant browser work — the observed console-window flashes on quick re-runs) and, in the non-interactive path, advises `gemiterm auth` re-login even though the session self-heals momentarily.

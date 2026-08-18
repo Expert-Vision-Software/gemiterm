@@ -21,7 +21,9 @@
 
 ## 5. Field verification (manual, user-gated)
 
-- [ ] 5.1 Fresh login → `list` OK → idle ≥ 1h15m → single `gemiterm list` waits, then renders conversations; quick re-run shows no second-runner flashes in the common case
+- [x] 5.1 Fresh login → `list` OK → idle ≥ 1h15m → single `gemiterm list` waits, then renders conversations; quick re-run shows no second-runner flashes in the common case
 
   Round 1 (2026-08-17 15:14): wait did not engage — user's plain `list` is the aggregate multi-profile fan-out, and the stage was placed after the single-profile resolution bail. Fixed: stage now covers aggregate listings (per-profile in-flight awaits in parallel, single aggregate retry, hint names still-in-flight profiles); spec/design/proposal/changelog amended; +3 aggregate integration tests. Awaiting round 2 on a stale session.
+
+  Round 2 (2026-08-18 03:45Z, validated under `fix-rotation-dead-end`, post-hardening): 3 profiles stale-armed (~3 h idle, past the 1h15m floor) — `gemiterm.log` shows exactly one runner start per profile per window (dhb-diegohb 03:45:26, dhb-worker 03:45:47), each `rotated=true` in ~6 s, zero `open`/`state-save` exit-1 collisions (contrast the pre-fix windows at 02:36 and 15:14), and both previously-phantom profiles rendered 3 conversations each after the rotation. dhb-zeek correctly spawned nothing (jar < 30 min fresh). Caveat: the strict same-profile ~2 s overlap (lock-skip path) is covered by `tests/auth-regression/invariant-rotation-single-flight.test.ts` rather than witnessed in the field. Gate cleared — `extend-rotation-wait-to-read-commands` is unblocked.
 

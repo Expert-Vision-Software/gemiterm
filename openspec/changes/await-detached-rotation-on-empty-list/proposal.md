@@ -1,5 +1,12 @@
 ## Why
 
+> **2026-08-18 supersession note:** the `waitForRotation` default timeout
+> shipped here as 30 s; `fix-rotation-dead-end` (archived
+> `2026-08-18-fix-rotation-dead-end`) raised it to 90 s (>= the runner's 60 s
+> rotate budget) and added cross-process single-flight + recovery de-racing on
+> top of this change's facade surface. The 30 s figure below is the historical
+> as-shipped text; the main specs carry the current form.
+
 After ~1h15m idle (the documented phantom-onset floor), the first `gemiterm list` on a stale jar arms the superseded cookies, prints `No conversations found.`, and returns — while the detached refresh-runner it spawned rotates PSIDTS a few seconds later. The user must re-run `list` manually to see their conversations. The empty-result path races the very rotation the facade just triggered instead of awaiting it.
 
 ## What Changes
