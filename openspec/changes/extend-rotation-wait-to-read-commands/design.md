@@ -56,6 +56,15 @@ from what 5.1 and the predecessor's probes actually observed; the default
 assumption is "typed `AuthenticationError` or empty result", whichever the
 command's existing error translation already surfaces.
 
+**Finalized (implementation, 2026-08-18):** the predicate is **both** shapes,
+uniformly, via a shared `runWithRotationRetry` helper. A thrown read error
+and a resolved-empty read both enter the wait; the helper rethrows the
+original error when no rotation is in flight (or the retry also throws) and
+returns the failed result on timeout, so each command's existing error
+handling is untouched. This removes the need to disambiguate `fetchChat`'s
+phantom shape on the live account — the single predicate covers whichever
+shape the SDK surfaces.
+
 ### D3: One retry, then existing behavior
 
 After a successful wait: retry the failed operation exactly once. Timeout or
@@ -79,6 +88,11 @@ Additive per-command branches; no persisted-state migration. Rollback = revert.
   account? (2026-08-18 field probe: `listChats` on a phantom jar resolves an
   EMPTY array, no error — `fetchChat`'s shape on the same jar remains to
   probed once during implementation planning; read-only, no recovery.)
+  **Resolved by implementation:** moot — the predicate covers both shapes, so
+  no live probe was required.
 - Should `export-all` await per-profile or bail to the aggregate warning path
   on the first timeout? (Lean: per-conversation, matching its existing
   partial-failure tolerance.)
+  **Resolved:** per-conversation — the batch strategy's `fetchChat` closure is
+  wrapped, so each conversation awaits/retries independently and a timeout
+  degrades to that conversation's existing FAILED row, not a global bail.

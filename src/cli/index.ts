@@ -6,6 +6,7 @@ import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import { ProfileLifecycle } from "../services/profile-lifecycle.ts";
 import { SingleExport, BatchExport } from "../services/export-strategy.ts";
 import { fetchChatForRequest } from "./utils/gemini-queries.ts";
+import { runWithRotationRetry } from "./utils/rotation-await.ts";
 import { ProfileManager, CookieStorage } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts";
 import { getPackageJson } from "../infrastructure/path-utils.ts";
@@ -80,7 +81,13 @@ async function setupServices(): Promise<CliServices> {
       logger: new Logger("export-command"),
     }),
     batch: new BatchExport({
-      fetchChat: (id, profile) => fetchChatForRequest(getGeminiClient, id, profile),
+      fetchChat: async (id, profile) =>
+        await runWithRotationRetry(
+          cookieSession,
+          profile ?? await getDefaultProfileName(),
+          () => fetchChatForRequest(getGeminiClient, id, profile),
+          () => false,
+        ),
       listChatsForProfile: async (name, options) => await (await (await getGeminiClient()).forProfile(name)).listChats(options),
       listProfiles,
       logger: new Logger("export-all-command"),

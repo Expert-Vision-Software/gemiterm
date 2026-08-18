@@ -2,6 +2,8 @@ import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { fetchChatForRequest } from "../utils/gemini-queries.ts";
+import { runWithRotationRetry } from "../utils/rotation-await.ts";
+import { getDefaultProfileName } from "../../infrastructure/config.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
 import { invokeCommand } from "../utils/command-invoker.ts";
@@ -50,9 +52,15 @@ export class FetchCommand implements CliCommand {
     }
 
     const profileName = await resolveProfile(context, conversationId, options.profile || undefined);
+    const rotationProfile = profileName ?? await getDefaultProfileName();
 
     logger.debug(`Fetching chat: ${conversationId}`);
-    const messages = await fetchChatForRequest(context.getGeminiClient, conversationId, profileName ?? undefined);
+    const messages = await runWithRotationRetry(
+      context.cookieSession,
+      rotationProfile,
+      () => fetchChatForRequest(context.getGeminiClient, conversationId, profileName ?? undefined),
+      (messages) => messages.length === 0,
+    );
 
     await render(
       { kind: "conversation", conversationId, messages },

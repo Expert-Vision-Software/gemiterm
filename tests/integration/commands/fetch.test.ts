@@ -33,6 +33,8 @@ describe("fetch command integration", () => {
       ensureSession: mock(() => {
         throw new Error("not used");
       }),
+      rotationInFlight: mock(() => false),
+      waitForRotation: mock(async () => null),
     };
     context = {
       verbose: false,
@@ -312,6 +314,61 @@ describe("fetch command integration", () => {
       await expect(command.execute(["conv-orphan"], context)).rejects.toThrow(
         /Could not find a profile that owns conversation/,
       );
+    });
+  });
+
+  describe("rotation-await stage", () => {
+    test("in-flight rotation is awaited and the retried fetch renders", async () => {
+      const messages = createMockMessageHistory({ count: 2, contents: ["Hello!", "Hi there!"] });
+      let fetchCalls = 0;
+      client.fetchChat = mock(async () => {
+        fetchCalls += 1;
+        return fetchCalls === 1 ? [] : messages;
+      });
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => ({ cookies: [] }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["conv-abc123"], context);
+
+        expect((context.cookieSession as any).waitForRotation).toHaveBeenCalledTimes(1);
+        expect((context.cookieSession as any).waitForRotation).toHaveBeenCalledWith("default");
+        expect(client.fetchChat).toHaveBeenCalledTimes(2);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Hello!");
+        expect(output).not.toContain("No messages found");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("rotation wait timeout rethrows the original error and prints the hint", async () => {
+      client.fetchChat.mockRejectedValue(new Error("Session expired or invalid."));
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => null);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await expect(command.execute(["conv-abc123"], context)).rejects.toThrow(
+          "Session expired or invalid.",
+        );
+        expect(client.fetchChat).toHaveBeenCalledTimes(1);
+        const stderr = errSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(stderr).toContain("still in progress");
+        expect(stderr).toContain("re-run");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("happy path never consults the rotation state", async () => {
+      await command.execute(["conv-abc123"], context);
+
+      expect((context.cookieSession as any).rotationInFlight).not.toHaveBeenCalled();
+      expect((context.cookieSession as any).waitForRotation).not.toHaveBeenCalled();
+      expect(client.fetchChat).toHaveBeenCalledTimes(1);
     });
   });
 });

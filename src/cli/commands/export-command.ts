@@ -2,6 +2,8 @@ import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
 import { fetchChatForRequest } from "../utils/gemini-queries.ts";
+import { runWithRotationRetry } from "../utils/rotation-await.ts";
+import { getDefaultProfileName } from "../../infrastructure/config.ts";
 import { validateConversationId } from "../../infrastructure/validators.ts";
 import { resolveProfile } from "../utils/profile-resolution.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
@@ -59,9 +61,15 @@ export class ExportCommand implements CliCommand {
 
     try {
       const profileName = await resolveProfile(context, conversationId, options.profile || undefined);
+      const rotationProfile = profileName ?? await getDefaultProfileName();
 
       logger.debug(`Fetching chat for export: ${conversationId}`);
-      const messages = await fetchChatForRequest(context.getGeminiClient, conversationId, profileName ?? undefined);
+      const messages = await runWithRotationRetry(
+        context.cookieSession,
+        rotationProfile,
+        () => fetchChatForRequest(context.getGeminiClient, conversationId, profileName ?? undefined),
+        () => false,
+      );
 
       const results = await render(
         {

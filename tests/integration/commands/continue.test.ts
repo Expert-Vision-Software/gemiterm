@@ -33,6 +33,8 @@ describe("continue command integration", () => {
         activeProfiles: mock(() => ["work", "personal"]),
         findProfileForConversation: mock(() => "work"),
         ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+        rotationInFlight: mock(() => false),
+        waitForRotation: mock(async () => null),
       } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
@@ -128,6 +130,61 @@ describe("continue command integration", () => {
       const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
       expect(output).toContain("Model:");
       expect(output).toContain("Hello!");
+    });
+  });
+
+  describe("rotation-await stage", () => {
+    test("in-flight rotation is awaited and the send retries once", async () => {
+      let sendCalls = 0;
+      client.sendMessage = mock(async () => {
+        sendCalls += 1;
+        if (sendCalls === 1) throw new Error("Session expired or invalid.");
+        return "Recovered response!";
+      });
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => ({ cookies: [] }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["conv-123", "hello"], context);
+
+        expect((context.cookieSession as any).waitForRotation).toHaveBeenCalledTimes(1);
+        expect((context.cookieSession as any).waitForRotation).toHaveBeenCalledWith("work");
+        expect(client.sendMessage).toHaveBeenCalledTimes(2);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Recovered response!");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("rotation wait timeout rethrows the original send error", async () => {
+      client.sendMessage = mock(async () => {
+        throw new Error("Session expired or invalid.");
+      });
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => null);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await expect(command.execute(["conv-123", "hello"], context)).rejects.toThrow(
+          "Session expired or invalid.",
+        );
+        expect(client.sendMessage).toHaveBeenCalledTimes(1);
+        const stderr = errSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(stderr).toContain("still in progress");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("happy path never consults the rotation state", async () => {
+      await command.execute(["conv-123", "hello"], context);
+
+      expect((context.cookieSession as any).rotationInFlight).not.toHaveBeenCalled();
+      expect((context.cookieSession as any).waitForRotation).not.toHaveBeenCalled();
+      expect(client.sendMessage).toHaveBeenCalledTimes(1);
     });
   });
 });

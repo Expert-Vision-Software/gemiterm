@@ -4,6 +4,7 @@ import type { CliCommandContext } from "../../src/cli/command-registry.ts";
 import type { ChatInfo, Message } from "../../src/core/types.ts";
 import { SingleExport, BatchExport } from "../../src/services/export-strategy.ts";
 import { fetchChatForRequest } from "../../src/cli/utils/gemini-queries.ts";
+import { runWithRotationRetry } from "../../src/cli/utils/rotation-await.ts";
 import { Logger } from "../../src/infrastructure/logger.ts";
 import { mkdirSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -51,6 +52,10 @@ describe("ExportAllCommand", () => {
   let command: ExportAllCommand;
   let client: any;
   let context: CliCommandContext;
+  let cookieSession: {
+    rotationInFlight: ReturnType<typeof mock>;
+    waitForRotation: ReturnType<typeof mock>;
+  };
   let logSpy: ReturnType<typeof spyOn>;
   let writeSpy: ReturnType<typeof spyOn>;
   let tempDir: string;
@@ -60,9 +65,13 @@ describe("ExportAllCommand", () => {
     client = makeClient();
     tempDir = join(tmpdir(), `export-all-test-${Date.now()}`);
     mkdirSync(tempDir, { recursive: true });
+    cookieSession = {
+      rotationInFlight: mock(() => false),
+      waitForRotation: mock(async () => null),
+    };
     context = {
       verbose: false,
-      cookieSession: {} as CliCommandContext["cookieSession"],
+      cookieSession: cookieSession as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => [],
       exportStrategies: {
@@ -71,7 +80,13 @@ describe("ExportAllCommand", () => {
           logger: new Logger("test"),
         }),
         batch: new BatchExport({
-          fetchChat: (id, profile) => fetchChatForRequest(() => client, id, profile),
+          fetchChat: async (id, profile) =>
+            await runWithRotationRetry(
+              cookieSession as unknown as CliCommandContext["cookieSession"],
+              profile ?? "default",
+              () => fetchChatForRequest(() => client, id, profile),
+              () => false,
+            ),
           listChatsForProfile: (name, opts) => client.forProfile(name).listChats(opts),
           listProfiles: () => context.listProfiles(),
           logger: new Logger("test"),
@@ -308,5 +323,56 @@ describe("ExportAllCommand", () => {
 
     expect(profileClients["evs-diegohb"].fetchChat).toHaveBeenCalledWith("evs-1");
     expect(profileClients["dhb-work"].fetchChat).toHaveBeenCalledWith("dhb-1");
+  });
+
+  describe("rotation-await stage", () => {
+    test("in-flight rotation is awaited and the failed conversation retries once", async () => {
+      client.listChats = mock(async () => SAMPLE_CHATS);
+      let fetchCalls = 0;
+      client.fetchChat = mock(async () => {
+        fetchCalls += 1;
+        if (fetchCalls === 1) throw new Error("Session expired or invalid.");
+        return SAMPLE_MESSAGES;
+      });
+      cookieSession.rotationInFlight = mock(() => true);
+      cookieSession.waitForRotation = mock(async () => ({ cookies: [] }));
+
+      await command.execute(["--out-dir", tempDir], context);
+
+      expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(1);
+      expect(cookieSession.waitForRotation).toHaveBeenCalledWith("default");
+      expect(client.fetchChat).toHaveBeenCalledTimes(3);
+      const output = capturedLog(logSpy);
+      expect(output).toMatch(/Exported:\s+2/);
+      expect(output).not.toMatch(/Failed:/);
+    });
+
+    test("rotation wait timeout keeps the conversation failed", async () => {
+      client.listChats = mock(async () => SAMPLE_CHATS);
+      client.fetchChat = mock(async () => {
+        throw new Error("Session expired or invalid.");
+      });
+      cookieSession.rotationInFlight = mock(() => true);
+      cookieSession.waitForRotation = mock(async () => null);
+
+      await command.execute(["--out-dir", tempDir], context);
+
+      expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(2);
+      expect(client.fetchChat).toHaveBeenCalledTimes(2);
+      const output = capturedLog(logSpy);
+      expect(output).toMatch(/Exported:\s+0/);
+      expect(output).toMatch(/Failed:\s+2/);
+    });
+
+    test("happy path never consults the rotation state", async () => {
+      client.listChats = mock(async () => SAMPLE_CHATS);
+      client.fetchChat = mock(async () => SAMPLE_MESSAGES);
+
+      await command.execute(["--out-dir", tempDir], context);
+
+      expect(cookieSession.rotationInFlight).not.toHaveBeenCalled();
+      expect(cookieSession.waitForRotation).not.toHaveBeenCalled();
+      expect(client.fetchChat).toHaveBeenCalledTimes(2);
+    });
   });
 });
