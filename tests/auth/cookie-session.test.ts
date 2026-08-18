@@ -45,6 +45,14 @@ const FULL_JAR = [
   cookie("THIRD", "x", ".example.com"),
 ];
 
+// PSID/PSIDTS at .youtube.com only — the persistent-profile sibling shape
+// the new routable gate must reject (fix-7). Distinct value prefixes so
+// backstop tests can spot if the wrong jar is passed to state-save.
+const YOUTUBE_ONLY = [
+  cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
+  cookie("__Secure-1PSIDTS", "yt-psidts", ".youtube.com"),
+];
+
 function makeLogger() {
   return {
     debug: mock(() => {}),
@@ -235,11 +243,7 @@ describe("CookieSession.captureLogin", () => {
     // PSID/PSIDTS exist by name but only at .youtube.com — a persistent profile's
     // pre-existing sibling shape. Name-only gates let this through; the
     // routable gate must not.
-    const youtubeOnly = [
-      cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
-      cookie("__Secure-1PSIDTS", "yt-psidts", ".youtube.com"),
-    ];
-    const driver = makeDriver(youtubeOnly);
+    const driver = makeDriver(YOUTUBE_ONLY);
     const deps = makeDeps({ driver, pollIntervalMs: 1 });
     const session = makeSession(deps);
 
@@ -255,11 +259,7 @@ describe("CookieSession.captureLogin", () => {
     // Gate observes a .google.com-routable pair. state-save returns a jar
     // where the PSID/PSIDTS sit only at .youtube.com — the validator catches
     // it, the backstop rejects, the pre-existing jar is not overwritten.
-    const unroutable = [
-      cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
-      cookie("__Secure-1PSIDTS", "yt-psidts", ".youtube.com"),
-    ];
-    const driver = makeDriver(FULL_JAR, unroutable);
+    const driver = makeDriver(FULL_JAR, YOUTUBE_ONLY);
     const deps = makeDeps({ driver });
     const session = makeSession(deps);
 

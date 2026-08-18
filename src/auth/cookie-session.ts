@@ -207,7 +207,7 @@ export class CookieSession {
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         throw new LoginUnroutableError(
-          `Captured jar failed validation — ${detail} The pre-existing jar has been preserved byte-for-byte.`,
+          `Captured jar failed validation: ${detail}. The pre-existing jar has been preserved byte-for-byte.`,
         );
       }
       await this.deps.cookieStore.saveFullJar(name, payload);
