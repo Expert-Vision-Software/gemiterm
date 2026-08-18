@@ -176,31 +176,57 @@ The system MUST provide a `fetch` command implemented by `FetchCommand` in `src/
 
 ### Requirement: ContinueCommand
 
-The system MUST provide a `continue` command implemented by `ContinueCommand` in `src/cli/commands/continue-command.ts`. The command MUST accept an optional positional `<conversation_id>` and an optional positional `<message>`, plus `--help/-h`. When `<conversation_id>` is missing, the command MUST invoke the `list` command via the `CommandRegistry` and return. When both `<conversation_id>` and `<message>` are present, the command MUST look up the owning profile via `ProfileAuthManager.findProfileForConversation(conversationId)` and send a `SendMessageCommand` to the mediator with payload `{ conversationId, message, profileName? }`; when the lookup returns a profile name, `profileName` MUST be set on the payload so the handler routes to that profile's `GeminiClientService`. When no profile owns the conversation, the command MUST throw `AuthenticationError` with a remediation message and exit non-zero. When `<conversation_id>` is present and `<message>` is absent, the command MUST start an interactive REPL that reads lines from stdin and sends each non-empty line as a `SendMessageCommand` using the same profile-lookup logic; the REPL MUST exit on `/exit` or `/quit` and MUST ignore empty lines. In a single-profile setup the behavior MUST be unchanged: the default profile is used without a lookup.
+The system MUST provide a `continue` command implemented by `ContinueCommand` in `src/cli/commands/continue-command.ts`. The command MUST accept an optional positional `<conversation_id>` and an optional positional `<message>`, plus `--help/-h` and `--profile`. When `<conversation_id>` is missing, the command MUST invoke the `list` command via the shared command-invoker helper and return. When `<conversation_id>` is present, the command MUST resolve the owning profile through the shared `resolveProfile` helper (`src/cli/utils/profile-resolution.ts`), which consults `context.cookieSession.activeProfiles()` and - when more than one profile is active - `context.cookieSession.findProfileForConversation(conversationId)`, throwing `AuthenticationError` with the shared remediation message when no owner is found; in a single-profile setup the helper MUST return `null` and the default profile is used without a lookup. When both `<conversation_id>` and `<message>` are present, the command MUST send the message as a one-shot continuation through the shared chat-session dispatch with the resolved profile. When `<conversation_id>` is present and `<message>` is absent, the command MUST start an interactive chat session via the shared chat-session helper and MUST create exactly one session keepalive (through `context.cookieSession.createKeepalive`) for the resolved-or-default profile; the REPL MUST exit on `/exit` or `/quit` and MUST ignore empty lines. When no profile owns the conversation, the command MUST throw `AuthenticationError` with a remediation message and exit non-zero.
 
 #### Scenario: Continue with id and message sends a SendMessageCommand
+
 - **WHEN** the user runs `gemiterm continue conv-abc123 "Hello there"`
-- **THEN** the mediator receives a `SendMessageCommand` with `payload.conversationId === "conv-abc123"` and `payload.message === "Hello there"`, and the response text is printed after a `Model:` label
+- **THEN** the chat-session helper dispatches the message against the resolved profile's `GeminiClientService` and the response text is printed after a `Model:` label
 
 #### Scenario: Continue with no id invokes list
+
 - **WHEN** the user runs `gemiterm continue` with no positional argument
-- **THEN** the `list` command is executed and no `SendMessageCommand` is sent
+- **THEN** the `list` command is executed via the shared command-invoker helper and no chat-session dispatch occurs
 
 #### Scenario: Continue with id but no message starts an interactive REPL
+
 - **WHEN** the user runs `gemiterm continue conv-abc123` and types a line into stdin
-- **THEN** a `SendMessageCommand` is sent for that line and the model response is printed after a `Model:` label
+- **THEN** the chat-session helper dispatches the line against the resolved profile's `GeminiClientService` and the model response is printed after a `Model:` label, with exactly one keepalive created for the resolved profile
 
 #### Scenario: Continue REPL exits on /exit
+
 - **WHEN** the user types `/exit` or `/quit` in the continue REPL
 - **THEN** the readline interface closes and the command returns
 
 #### Scenario: Continue REPL ignores empty lines
+
 - **WHEN** the user enters a blank line in the continue REPL
-- **THEN** no `SendMessageCommand` is sent and the REPL continues prompting
+- **THEN** no chat-session dispatch occurs and the REPL continues prompting
 
 #### Scenario: Continue --help shows usage
+
 - **WHEN** the user runs `gemiterm continue --help`
 - **THEN** the output contains `Usage: gemiterm continue [conversation_id] [message] [options]` and documents `/exit`, `/quit`, and `--help`
+
+#### Scenario: Continue with id and message sends a one-shot continuation
+
+- **WHEN** `gemiterm continue <cid> hello` runs and `resolveProfile` resolves profile `work`
+- **THEN** the message is dispatched through the shared chat-session path against `work`'s client, and no interactive session or keepalive is created
+
+#### Scenario: Continue without a message opens the REPL with a keepalive
+
+- **WHEN** `gemiterm continue <cid>` runs
+- **THEN** an interactive session starts via the shared chat-session helper and exactly one keepalive is created for the resolved profile
+
+#### Scenario: Multi-profile ownership lookup routes through the auth facade
+
+- **WHEN** more than one profile is active and `context.cookieSession.findProfileForConversation(<cid>)` returns `work`
+- **THEN** the continuation is routed to `work`'s `GeminiClientService` and no legacy `ProfileAuthManager` is referenced
+
+#### Scenario: No owning profile fails with remediation
+
+- **WHEN** no active profile owns `<cid>` and no `--profile` is given
+- **THEN** the command exits non-zero with an `AuthenticationError` whose message names the conversation and suggests `gemiterm list --all-profiles` or `--profile <name>`
 
 ### Requirement: NewCommand
 
@@ -228,35 +254,57 @@ The system MUST provide a `new` command implemented by `NewCommand` in `src/cli/
 
 ### Requirement: DeleteCommand
 
-The system MUST provide a `delete` command implemented by `DeleteCommand` in `src/cli/commands/delete-command.ts`. The command MUST accept a single positional `<conversation_id>` argument and MUST support `--force/-f` and `--help/-h`. When `<conversation_id>` is missing, the command MUST print `Error: conversation ID is required.` and exit with code 1. When `<conversation_id>` is present, the command MUST validate the id via `validateConversationId`. When `--force` is not set, the command MUST prompt the user with `Delete conversation '<id>'? (yes/no):` via readline and MUST treat any answer starting with `y` (case-insensitive) as confirmation; on confirmation it MUST look up the owning profile via `ProfileAuthManager.findProfileForConversation(conversationId)` and send a `DeleteConversationCommand` to the mediator with payload `{ conversationId, profileName? }`; when the lookup returns a profile name, `profileName` MUST be set on the payload so the handler routes to that profile's `GeminiClientService`. When no profile owns the conversation, the command MUST throw `AuthenticationError` with a remediation message and exit non-zero. The command MUST print `Conversation '<id>' deleted.` on success and MUST exit with code 1 on a failed result or handler error. In a single-profile setup the behavior MUST be unchanged: the default profile is used without a lookup.
+The system MUST provide a `delete` command implemented by `DeleteCommand` in `src/cli/commands/delete-command.ts`. The command MUST accept a single positional `<conversation_id>` argument and MUST support `--force/-f`, `--profile`, and `--help/-h`. When `<conversation_id>` is missing, the command MUST print `Error: conversation ID is required.` and exit with code 1. When `<conversation_id>` is present, the command MUST validate the id via `validateConversationId`. The command MUST resolve the owning profile through the shared `resolveProfile` helper (`context.cookieSession.activeProfiles()` / `findProfileForConversation`), throwing `AuthenticationError` with the shared remediation message when no owner is found; in a single-profile setup the default profile is used without a lookup. When `--force` is not set, the command MUST prompt for confirmation and MUST treat a `y`-prefix (case-insensitive) answer as consent; declining MUST print `Cancelled.` and stop. On confirmation (or `--force`), the command MUST delete the conversation through the resolved profile's `GeminiClientService` obtained from the context client factory. The command MUST print `Conversation '<id>' deleted.` on success and MUST exit with code 1 on a failed result or error. When an explicit `--profile` names a profile without a valid session, the command MUST throw `AuthenticationError` suggesting `gemiterm auth --renew <name>`.
 
 #### Scenario: Delete with --force sends DeleteConversationCommand
+
 - **WHEN** the user runs `gemiterm delete conv-abc123 --force`
-- **THEN** the mediator receives a `DeleteConversationCommand` with `payload.conversationId === "conv-abc123"`, no readline prompt is shown, and on `result.success === true` the output contains `deleted.`
+- **THEN** the resolved profile's `GeminiClientService.deleteChat` is invoked with `"conv-abc123"`, no readline prompt is shown, and on success the output contains `deleted.`
 
 #### Scenario: Delete without --force prompts for confirmation
+
 - **WHEN** the user runs `gemiterm delete conv-abc123` and answers `yes` to the prompt
-- **THEN** the mediator receives a `DeleteConversationCommand` with `payload.conversationId === "conv-abc123"`
+- **THEN** the resolved profile's `GeminiClientService.deleteChat` is invoked with `"conv-abc123"`
 
 #### Scenario: Delete without --force and no confirmation aborts
+
 - **WHEN** the user runs `gemiterm delete conv-abc123` and answers `no` to the prompt
-- **THEN** no `DeleteConversationCommand` is sent and the output contains `Cancelled.`
+- **THEN** no delete is performed and the output contains `Cancelled.`
 
 #### Scenario: Delete with no id errors and exits 1
+
 - **WHEN** the user runs `gemiterm delete`
 - **THEN** the output contains `Error: conversation ID is required.` and the process exits with code 1
 
 #### Scenario: Delete with -f short flag
+
 - **WHEN** the user runs `gemiterm delete conv-abc123 -f`
-- **THEN** the command is equivalent to `--force` (no prompt, mediator call proceeds)
+- **THEN** the command is equivalent to `--force` (no prompt, delete proceeds)
 
 #### Scenario: Delete with failed result exits 1
-- **WHEN** the mediator handler returns `{ success: false }`
-- **THEN** the output contains `Failed to delete conversation.` and the process exits with code 1
+
+- **WHEN** the resolved profile's client reports failure or throws
+- **THEN** the process exits with code 1 and the output surfaces the failure
 
 #### Scenario: Delete --help shows usage
+
 - **WHEN** the user runs `gemiterm delete --help`
-- **THEN** the output contains `Usage: gemiterm delete <conversation_id> [options]` and documents `--force` and `--help`
+- **THEN** the output contains `Usage: gemiterm delete <conversation_id> [options]` and documents `--force`, `--profile`, and `--help`
+
+#### Scenario: Delete with --force skips the prompt
+
+- **WHEN** `gemiterm delete <cid> -f` runs and the profile is resolved
+- **THEN** no confirmation prompt is shown and the delete routes to the resolved profile's client
+
+#### Scenario: Declining confirmation cancels
+
+- **WHEN** the confirmation prompt is answered with `n`
+- **THEN** `Cancelled.` is printed, nothing is deleted, and the conversation remains
+
+#### Scenario: Missing id errors with code 1
+
+- **WHEN** `gemiterm delete` runs with no argument
+- **THEN** `Error: conversation ID is required.` is printed and the exit code is 1
 
 ### Requirement: ExportCommand
 
@@ -336,95 +384,67 @@ The system MUST provide an `export-all` command implemented by `ExportAllCommand
 
 ### Requirement: AuthCommand
 
-The system MUST provide an `auth` command implemented by `AuthCommand` in `src/cli/commands/auth-command.ts`. The command MUST be registered under the name `auth` (NOT `login`) and MUST take no positional arguments. The command MUST be a thin adapter: it MUST delegate all profile-lifecycle work to `context.profileLifecycle.manageProfiles(action, params)`, which forwards the actual browser-driven authentication to `AuthService.authenticate(profileName)`. The command MUST NOT construct `CookieStorage`, `ProfileManager`, `PlaywrightCliDriver`, `CookieMonitor`, or `AuthService` itself. When zero profiles exist, the command MUST create the default profile and authenticate against it. When exactly one profile exists, the command MUST authenticate against that profile directly. When more than one profile exists, the command MUST display a profile management menu using `formatProfileTable` and the options `[A] Add new profile`, `[D] Delete profile`, `[S] Set default`, `[R] Rename profile`, `[X] Exit and continue with current default`. The `A` and `R` options MUST trigger authentication against the resulting profile; `D`, `S`, and `X` MUST NOT trigger authentication. The `D` option MUST require a `[y/N]` confirmation before deletion. The `S` option MUST set the default profile through the module (which calls both `ProfileManager.setDefault` and `setDefaultProfileName`). Profile names MUST be validated via `validateProfileName`. All menu text, prompts, and error messages MUST be byte-equivalent to the pre-change baseline.
+The system MUST provide an `auth` command implemented by `AuthCommand` in `src/cli/commands/auth-command.ts`. The command MUST be registered under the name `auth` with `login` as a registered alias, and MUST accept an optional positional `<profile_name>` that authenticates an existing profile directly (equivalent to the `auth` action's `profileName` param). The command MUST be a thin adapter: it MUST delegate all profile-lifecycle work to `context.profileLifecycle.manageProfiles(action, params)`, which forwards the actual browser-driven authentication to `context.cookieSession.captureLogin` (the `create` action after `ProfileManager.create`, and the `auth` action's renewal via `captureLogin(profile, { mode: "renew" })` for `--renew`). The command MUST accept the subaction flags `--add <name>`, `--delete <name>`, `--rename <old> <new>` (or paired values), `--default <name>`, and `--renew <name>`, mapping them to the corresponding lifecycle actions; with no flags it MUST run the interactive flow. The command MUST NOT construct any profile, storage, browser, or auth collaborator itself - everything arrives via `CliCommandContext`. When zero profiles exist, the command MUST create the default profile and authenticate against it. When exactly one profile exists, the command MUST authenticate against that profile directly. When more than one profile exists, the command MUST display a profile management menu using `formatProfileTable` and the options `[A] Add new profile`, `[D] Delete profile`, `[S] Set default`, `[R] Rename profile`, `[E] Renew session (extend/refresh cookies)`, `[X] Exit and continue with current default`. The `A` and `R` options MUST trigger authentication against the resulting profile; the `E` option MUST renew the named profile's session via `captureLogin(name, { mode: "renew" })`; `D`, `S`, and `X` MUST NOT trigger authentication. The `D` option MUST require a `[y/N]` confirmation before deletion. Profile names MUST be validated via `validateProfileName`. All menu text, prompts, and error messages MUST be byte-equivalent to the pre-change baseline.
 
 #### Scenario: Auth with no profiles creates and authenticates the default profile
+
 - **WHEN** the user runs `gemiterm auth` and no profiles exist
-- **THEN** the default profile is created and `AuthService.authenticate` is invoked against it
+- **THEN** the default profile is created and `CookieSession.captureLogin` is invoked against it
 
 #### Scenario: Auth with one profile authenticates that profile directly
+
 - **WHEN** the user runs `gemiterm auth` and exactly one profile exists
-- **THEN** `AuthService.authenticate` is invoked against that profile and no menu is shown
+- **THEN** `CookieSession.captureLogin` is invoked against that profile and no menu is shown
 
 #### Scenario: Auth with multiple profiles shows the menu
+
 - **WHEN** the user runs `gemiterm auth` and more than one profile exists
 - **THEN** the profile management menu is printed and the user is prompted with `Select an option:`
 
 #### Scenario: Auth menu option A creates and authenticates
+
 - **WHEN** the user selects `A` and enters a valid new profile name
-- **THEN** the profile is created and `AuthService.authenticate` is invoked against the new name
+- **THEN** the profile is created and `CookieSession.captureLogin` is invoked against the new name
 
 #### Scenario: Auth menu option D requires confirmation
+
 - **WHEN** the user selects `D`, enters an existing profile name, and answers the `Delete profile '<name>'? [y/N]` prompt with `y`
 - **THEN** the profile is removed via `ProfileManager.delete`
 
 #### Scenario: Auth menu option S sets the default profile
+
 - **WHEN** the user selects `S` and enters an existing profile name
 - **THEN** `ProfileManager.setDefault(name)` and `setDefaultProfileName(name)` are both called
 
 #### Scenario: Auth menu option R renames and authenticates
+
 - **WHEN** the user selects `R` and enters an existing name and a new valid name
-- **THEN** `ProfileManager.rename(old, new)` is called and `AuthService.authenticate` is invoked against the new name
+- **THEN** `ProfileManager.rename(old, new)` is called and `CookieSession.captureLogin` is invoked against the new name
 
 #### Scenario: Auth menu option X exits without authenticating
+
 - **WHEN** the user selects `X` (or any other unhandled option) in the menu
-- **THEN** no `AuthService.authenticate` is invoked and the output contains `Continuing with current default profile.`
+- **THEN** no `captureLogin` is invoked and the output contains `Continuing with current default profile.`
 
 #### Scenario: Auth rejects invalid profile names
+
 - **WHEN** the user enters an invalid profile name in response to an `A` or `R` prompt
 - **THEN** `validateProfileName` throws and the command fails with the validator's error message
 
 #### Scenario: Auth --help shows usage
+
 - **WHEN** the user runs `gemiterm auth --help`
 - **THEN** the output contains `Usage: gemiterm auth` and documents `-h, --help`
 
 #### Scenario: Auth delegates through the context
+
 - **WHEN** `AuthCommand.execute` runs
 - **THEN** every profile-lifecycle operation is dispatched via `context.profileLifecycle.manageProfiles(...)` and the command file contains no inline service construction
 
-### Requirement: ProfileCommand
+#### Scenario: login alias resolves to the same command
 
-The system MUST provide a `profile` command implemented by `ProfileCommand` in `src/cli/commands/profile-command.ts`. The command MUST be a subcommand-style dispatcher with actions `add <name>`, `delete <name>`, `rename <old> <new>`, `default <name>`, and `list`. The first positional argument MUST select the action; the action name MUST be one of the five above, otherwise the command MUST throw a `GemitermError` whose message includes the substring `Unknown action` and lists the valid actions. When no action is provided, the command MUST print usage. The `add` action MUST validate the new name via `validateProfileName`, MUST throw `Profile '<name>' already exists.` if the name is taken, MUST create the profile via `ProfileManager.create`, and MUST then call `AuthService.authenticate(profileName)`. The `delete` action MUST require a `Delete profile '<name>'? [y/N]` confirmation before calling `ProfileManager.delete`. The `rename` action MUST validate the new name, MUST call `ProfileManager.rename(old, new)`, and MUST throw if `new` already exists. The `default` action MUST call both `ProfileManager.setDefault` and `setDefaultProfileName`. The `list` action MUST print `No profiles found.` when the profile list is empty (with a hint to run `gemiterm login`); otherwise it MUST print a profile table via `formatProfileTable` with the `* = default profile` legend.
-
-#### Scenario: Profile with no arguments prints usage
-- **WHEN** the user runs `gemiterm profile`
-- **THEN** the output contains `Usage: gemiterm profile <action> [args]` and lists all five actions with descriptions
-
-#### Scenario: Profile add creates a profile and authenticates
-- **WHEN** the user runs `gemiterm profile add new-name`
-- **THEN** `ProfileManager.create("new-name")` is called and `AuthService.authenticate("new-name")` is invoked
-
-#### Scenario: Profile add rejects duplicate name
-- **WHEN** the user runs `gemiterm profile add existing`
-- **THEN** the command throws `Profile 'existing' already exists.`
-
-#### Scenario: Profile delete requires confirmation
-- **WHEN** the user runs `gemiterm profile delete my-profile` and answers `n` to the confirmation prompt
-- **THEN** no `ProfileManager.delete` is called and the output contains `Cancelled.`
-
-#### Scenario: Profile rename calls ProfileManager.rename
-- **WHEN** the user runs `gemiterm profile rename old new`
-- **THEN** `ProfileManager.rename("old", "new")` is called
-
-#### Scenario: Profile default sets the default profile
-- **WHEN** the user runs `gemiterm profile default work`
-- **THEN** `ProfileManager.setDefault("work")` and `setDefaultProfileName("work")` are both called
-
-#### Scenario: Profile list prints the profile table
-- **WHEN** the user runs `gemiterm profile list` and profiles exist
-- **THEN** the output contains `Profiles` and a profile table produced by `formatProfileTable`
-
-#### Scenario: Profile list with no profiles prints the empty message
-- **WHEN** the user runs `gemiterm profile list` and no profiles exist
-- **THEN** the output contains `No profiles found.`
-
-#### Scenario: Profile with unknown action throws
-- **WHEN** the user runs `gemiterm profile bogus`
-- **THEN** the command throws a `GemitermError` whose message contains `Unknown action 'bogus'`
-
-#### Scenario: Profile --help shows usage
-- **WHEN** the user runs `gemiterm profile --help`
-- **THEN** the output contains `Usage: gemiterm profile <action> [args]` and documents all five actions
+- **WHEN** `gemiterm login --renew <name>` runs
+- **THEN** the registered `login` alias dispatches to `AuthCommand` and the renewal delegates to `captureLogin(name, { mode: "renew" })`
 
 ### Requirement: StatusCommand
 
@@ -460,27 +480,37 @@ The system MUST provide an `install-browser` command implemented by `InstallBrow
 
 ### Requirement: CommandRegistry
 
-The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all commands by name. The `CliCommandContext` interface MUST carry `{ verbose: boolean, profileAuthManager: ProfileAuthManager, profileLifecycle: ProfileLifecycle, exportStrategies: { single: ExportStrategy; batch: ExportStrategy }, getGeminiClient: () => GeminiClientService, listProfiles: () => string[] }` (no `mediator` field). The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
+The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all commands by name, with `login` registered as an alias of the `auth` command. The `CliCommandContext` interface MUST carry `{ verbose: boolean, cookieSession: CookieSession, profileLifecycle: ProfileLifecycle, exportStrategies: { single: ExportStrategy; batch: ExportStrategy }, getGeminiClient: () => Promise<GeminiClientService>, listProfiles: () => Promise<string[]> }` (no `mediator` field). The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
 
 #### Scenario: Registering the same name twice throws
+
 - **WHEN** `register("dup", handlerA)` is called and then `register("dup", handlerB)`
 - **THEN** the second call throws `Command already registered: dup`
 
 #### Scenario: getHandler returns the registered handler
+
 - **WHEN** `register("list", handler)` is called
 - **THEN** `getHandler("list")` returns the same handler instance
 
 #### Scenario: getHandler returns undefined for unknown names
+
 - **WHEN** no handler is registered for `nope`
 - **THEN** `getHandler("nope")` returns `undefined` and `has("nope")` returns `false`
 
 #### Scenario: registerAllCommands registers all 11 commands
+
 - **WHEN** `registerAllCommands()` is called
 - **THEN** `getRegisteredNames()` returns an array that includes `auth`, `login`, `status`, `list`, `fetch`, `continue`, `new`, `delete`, `export`, `export-all`, `install-browser`, `install-skills`, and `models`
 
 #### Scenario: Context carries services, not a mediator
+
 - **WHEN** a `CliCommandContext` is constructed for a command
-- **THEN** it exposes `verbose`, `profileAuthManager`, `profileLifecycle`, `exportStrategies`, `getGeminiClient`, and `listProfiles`, and does NOT expose a `mediator` field
+- **THEN** it exposes `verbose`, `cookieSession`, `profileLifecycle`, `exportStrategies`, `getGeminiClient`, and `listProfiles` (async), and does NOT expose a `mediator` or `profileAuthManager` field
+
+#### Scenario: login alias dispatches to the auth command
+
+- **WHEN** `registerAllCommands()` runs and `getHandler("login")` is called
+- **THEN** the returned handler is the same instance registered under `auth`
 
 ### Requirement: Command Help Output
 

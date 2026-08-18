@@ -1,9 +1,7 @@
 ## Purpose
 
 Multi-profile conversation ownership and routing. This capability enables the CLI to correctly identify which authenticated profile owns a given conversation, route `continue` and `delete` commands to the owning profile, and display profile ownership in `list --all-profiles` output.
-
 ## Requirements
-
 ### Requirement: findProfileForConversation returns the profile that owns a conversation
 
 The system MUST return the name of the profile whose server-side chat list contains the given conversation ID. The `conversationId` argument MUST be passed to the per-profile lookup helper; it MUST NOT be ignored. When no profile owns the conversation, the system MUST return `null`. When multiple profiles report ownership of the same conversation ID (an inconsistent state the user is responsible for), the system MUST return the first profile in `profileManager.list()` order that reports ownership.
@@ -26,11 +24,11 @@ The system MUST return the name of the profile whose server-side chat list conta
 
 ### Requirement: continue-command targets the profile that owns the conversation
 
-The system MUST look up the profile that owns the conversation via `ProfileAuthManager.findProfileForConversation` before sending the `SendMessageCommand`. The system MUST route the message to that profile's `GeminiClientService` instance. When no profile owns the conversation, the system MUST throw `AuthenticationError` with a remediation message and exit non-zero. In a single-profile setup (only the default profile is active), the behavior MUST be unchanged: the default profile is used.
+The system MUST look up the profile that owns the conversation via the auth facade (`CookieSession.findProfileForConversation`, reached through the shared `resolveProfile` helper in `src/cli/utils/profile-resolution.ts`) before dispatching the continuation. The system MUST route the message to that profile's `GeminiClientService` instance. When no profile owns the conversation, the system MUST throw `AuthenticationError` with a remediation message and exit non-zero. In a single-profile setup (only the default profile is active), the behavior MUST be unchanged: the default profile is used without a lookup.
 
 #### Scenario: Multi-profile continue routes to the owning profile
-- **WHEN** a user with active profiles `work` and `personal` runs `gemiterm continue abc-123 "hello"` and conversation `abc-123` is owned by `work`
-- **THEN** the `SendMessageCommand` is sent via the `work` profile's `GeminiClientService` (verified by the response content being scoped to the `work` account); the `personal` profile's `GeminiClientService` is NOT invoked for this send
+- **WHEN** two profiles are active and profile `work` owns `<cid>`
+- **THEN** `resolveProfile` returns `work` via `cookieSession.findProfileForConversation(<cid>)` and the continuation dispatches against `work`'s client
 
 #### Scenario: Continue on an unknown conversation ID exits non-zero
 - **WHEN** a user runs `gemiterm continue unknown-id "hello"` and no profile owns conversation `unknown-id`
@@ -40,13 +38,17 @@ The system MUST look up the profile that owns the conversation via `ProfileAuthM
 - **WHEN** a user with only the default profile active runs `gemiterm continue abc-123 "hello"`
 - **THEN** the behavior is identical to before the change: the default profile is used, no `findProfileForConversation` call is required, and the response is returned normally
 
+#### Scenario: Single-profile setup skips the lookup
+- **WHEN** only the default profile is active
+- **THEN** `resolveProfile` returns `null` without calling `findProfileForConversation` and the default profile is used
+
 ### Requirement: delete-command targets the profile that owns the conversation
 
-The system MUST look up the profile that owns the conversation via `ProfileAuthManager.findProfileForConversation` before sending the `DeleteConversationCommand`. The system MUST route the delete to that profile's `GeminiClientService` instance. When no profile owns the conversation, the system MUST throw `AuthenticationError` with the same remediation message used by `continue` and exit non-zero. In a single-profile setup, the behavior MUST be unchanged.
+The system MUST look up the profile that owns the conversation via the auth facade (`CookieSession.findProfileForConversation`, reached through the shared `resolveProfile` helper) before dispatching the delete. The system MUST route the delete to that profile's `GeminiClientService` instance. When no profile owns the conversation, the system MUST throw `AuthenticationError` with the same remediation message used by `continue` and exit non-zero. In a single-profile setup, the behavior MUST be unchanged.
 
 #### Scenario: Multi-profile delete routes to the owning profile
-- **WHEN** a user with active profiles `work` and `personal` runs `gemiterm delete abc-123 --force` and conversation `abc-123` is owned by `work`
-- **THEN** the `DeleteConversationCommand` is sent via the `work` profile's `GeminiClientService`; the `personal` profile's `GeminiClientService` is NOT invoked for this delete
+- **WHEN** two profiles are active and profile `work` owns `<cid>`
+- **THEN** the delete dispatches against `work`'s client resolved via the auth facade
 
 #### Scenario: Delete on an unknown conversation ID exits non-zero
 - **WHEN** a user runs `gemiterm delete unknown-id --force` and no profile owns conversation `unknown-id`
@@ -55,6 +57,10 @@ The system MUST look up the profile that owns the conversation via `ProfileAuthM
 #### Scenario: Single-profile delete is unchanged
 - **WHEN** a user with only the default profile active runs `gemiterm delete abc-123 --force`
 - **THEN** the behavior is identical to before the change: the default profile is used, no `findProfileForConversation` call is required, and the conversation is deleted
+
+#### Scenario: Explicit profile with no valid session fails with renewal hint
+- **WHEN** `--profile stale` is passed and `stale` has no active session
+- **THEN** `AuthenticationError` suggests `gemiterm auth --renew stale` and the delete does not run
 
 ### Requirement: list --all-profiles renders a Profile column in the text table
 
@@ -143,3 +149,4 @@ The 8 existing unit tests in the `describe("findProfileForConversation")` block 
 #### Scenario: The test file's leading comment documents the test changes
 - **WHEN** `tests/services/profile-auth-manager.test.ts` is read after the change
 - **THEN** the file contains a leading comment block stating: "The 8 tests in `describe('findProfileForConversation')` previously asserted the BUGGY 'first active profile' behavior; they have been updated to assert the CORRECT per-profile-lookup behavior. See `openspec/changes/command-spec-conformance/proposal.md` for context."
+

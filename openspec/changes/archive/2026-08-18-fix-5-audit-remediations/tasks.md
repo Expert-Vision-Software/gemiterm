@@ -8,7 +8,7 @@ Baseline: `bun test --isolate` -> 937 pass / 2 skip / 0 fail / 2007 expects / 66
 
 - [x] 1.1 RED test in the session-keepalive test file: a fake refresher whose `rotatePsidts` PERSISTS a new PSIDTS value into the fake cookie store and resolves `{ rotated: true, cookies: <rotated jar> }`; assert the next tick (within the interval, unchanged disk) skips the refresher entirely - this test MUST fail on current code
 - [x] 1.2 Fix `src/auth/session-keepalive.ts` `tick()`: on `result.rotated`, set `lastObservedBaseline` from the rotated jar (`findRoutableCookieValue(result.cookies, PSIDTS_COOKIE_NAME)`), falling back to a post-rotation store re-read when the result carries no cookies; GREEN the RED test; confirm the existing keepalive tests still pass
-- [ ] 1.3 Live verification (user-assisted; closes archived fix-3 task 3.2): open the REPL, idle > 30 min, then chat - session still live; verbose log shows the first due rotation spawning the browser and subsequent ticks skipping while PSIDTS is unchanged; annotate archived `openspec/changes/archive/2026-08-16-fix-3-session-keepalive/tasks.md` 3.2 with the closure pointer to this change
+- [x] 1.3 Live verification (user-assisted; closes archived fix-3 task 3.2): open the REPL, idle > 30 min, then chat - session still live; verbose log shows the first due rotation spawning the browser and subsequent ticks skipping while PSIDTS is unchanged; annotate archived `openspec/changes/archive/2026-08-16-fix-3-session-keepalive/tasks.md` 3.2 with the closure pointer to this change
 
 ## 2. Spec sync verification (audit finding 3 - deltas land at archive)
 
@@ -23,7 +23,7 @@ Baseline: `bun test --isolate` -> 937 pass / 2 skip / 0 fail / 2007 expects / 66
 ## 4. CI gate flip + archived-ledger annotations (audit finding 4)
 
 - [x] 4.1 Flip the auth-regression gate in the CI workflow from warn-only to blocking (completes archived fix-4 task 3.4); keep `SKIP_AUTH_REGRESSION_GATE=1` as the audited escape hatch
-- [ ] 4.2 Verify on this change's own CI run (completes archived fix-4 task 6.2): auth-gate (blocking) and the mutation canary both green
+- [x] 4.2 Verify on this change's own CI run (completes archived fix-4 task 6.2): auth-gate (blocking) and the mutation canary both green
 - [x] 4.3 Annotate archived `openspec/changes/archive/2026-08-16-fix-4-auth-regression-guards/tasks.md`: 6.3 closure note (validation executed post-archive; this annotation records the self-contradiction), and mark 3.4/6.2 as completed-by-fix-5 with pointers
 
 ## 5. chat-list-bulk-actions re-baseline (audit finding 4, second half)
@@ -34,4 +34,4 @@ Baseline: `bun test --isolate` -> 937 pass / 2 skip / 0 fail / 2007 expects / 66
 
 - [x] 6.1 `bun test --isolate` green with the new baseline recorded here (expect +1 net from task 1.1; 937 -> 938); `bun run typecheck` clean; `bun run lint:mediation` clean
 - [x] 6.2 `tests/integration/commands/list.test.ts` byte-equivalence green; no CLI output changes from this change's code edits (keepalive only)
-- [ ] 6.3 `openspec validate --all --strict` green; archive this change with spec sync per the repo workflow
+- [x] 6.3 `openspec validate --all --strict` green; archive this change with spec sync per the repo workflow
