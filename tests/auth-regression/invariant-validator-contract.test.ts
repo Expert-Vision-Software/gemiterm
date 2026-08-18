@@ -45,6 +45,11 @@ describe("auth-regression: validator contract", () => {
     expect(() => quietValidator().validate(jar)).toThrow(/routable/);
   });
 
+  test("tier-1 names the offending scope when PSIDTS is present-but-unroutable", () => {
+    const jar = freshFullJar().map((c) => (c.name === "__Secure-1PSIDTS" ? { ...c, domain: ".youtube.com" } : c));
+    expect(() => quietValidator().validate(jar)).toThrow(/present scopes: \[\.youtube\.com\]/);
+  });
+
   test("tier-1 raises on expired PSIDTS", () => {
     const jar = withPsidts(freshFullJar(), "expired-ts").map((c) =>
       c.name === "__Secure-1PSIDTS" ? { ...c, expires: Math.floor(Date.now() / 1000) - 3600 } : c,

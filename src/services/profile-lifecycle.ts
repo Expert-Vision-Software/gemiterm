@@ -198,6 +198,12 @@ export class ProfileLifecycle {
     this.logger.debug("Deleting profile:", params.name);
 
     if (!params.skipConfirm) {
+      if (process.stdin.isTTY !== true) {
+        throw new GemitermError(
+          `Deleting profile '${params.name}' requires explicit confirmation. ` +
+            `Re-run with --yes to delete in non-interactive mode.`,
+        );
+      }
       const confirmAnswer = await this.promptInput(`Delete profile '${params.name}'? [y/N]`);
       if (!confirmAnswer.toLowerCase().startsWith("y")) {
         console.log(chalk.dim("Cancelled."));
