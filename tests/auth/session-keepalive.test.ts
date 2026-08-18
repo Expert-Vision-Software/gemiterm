@@ -63,6 +63,84 @@ describe("SessionKeepalive", () => {
     expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
   });
 
+  test("post-rotation baseline is read from the rotated jar so the next in-interval tick skips the refresher", async () => {
+    let storeValue = "ts1";
+    const store = {
+      load: mock(async () => ({
+        cookies: [
+          cookie("__Secure-1PSID", "psid"),
+          cookie("__Secure-1PSIDTS", storeValue),
+        ],
+        snapshot: new Map(),
+      })),
+    };
+    const rotatedJar = [
+      cookie("__Secure-1PSID", "psid"),
+      cookie("__Secure-1PSIDTS", "ts2"),
+    ];
+    const refresher = {
+      rotatePsidts: mock(async () => {
+        storeValue = "ts2";
+        return { rotated: true, cookies: rotatedJar };
+      }),
+    };
+    const logger = makeLogger();
+    let time = 0;
+
+    const keepalive = new SessionKeepalive("p", {
+      cookieStore: store,
+      refresher,
+      cooldown: new RotationCooldown({ now: () => time }),
+      logger,
+      now: () => time,
+      setInterval: () => ({ unref: () => {} }),
+    });
+
+    await keepalive.tick();
+    expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
+
+    time += 120_000;
+    await keepalive.tick();
+    expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
+  });
+
+  test("post-rotation baseline falls back to a store re-read when the result carries no cookies", async () => {
+    let storeValue = "ts1";
+    const store = {
+      load: mock(async () => ({
+        cookies: [
+          cookie("__Secure-1PSID", "psid"),
+          cookie("__Secure-1PSIDTS", storeValue),
+        ],
+        snapshot: new Map(),
+      })),
+    };
+    const refresher = {
+      rotatePsidts: mock(async () => {
+        storeValue = "ts2";
+        return { rotated: true };
+      }),
+    };
+    const logger = makeLogger();
+    let time = 0;
+
+    const keepalive = new SessionKeepalive("p", {
+      cookieStore: store,
+      refresher,
+      cooldown: new RotationCooldown({ now: () => time }),
+      logger,
+      now: () => time,
+      setInterval: () => ({ unref: () => {} }),
+    });
+
+    await keepalive.tick();
+    expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
+
+    time += 120_000;
+    await keepalive.tick();
+    expect(refresher.rotatePsidts).toHaveBeenCalledTimes(1);
+  });
+
   test("no-op fast path: subsequent tick skips rotation when baseline unchanged and within interval", async () => {
     const store = makeCookieStore("current-ts");
     const refresher = makeRefresher();

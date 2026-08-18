@@ -1,4 +1,5 @@
 import type { Logger } from "../infrastructure/logger.ts";
+import type { Cookie } from "../core/types.ts";
 import type { CookieStore } from "./cookie-store.ts";
 import { BrowserRefresher } from "./browser-refresher.ts";
 import { PSIDTS_COOKIE_NAME } from "./auth-constants.ts";
@@ -94,7 +95,7 @@ export class SessionKeepalive {
       const result = await this.deps.refresher.rotatePsidts(this.profile, this.lastObservedBaseline);
 
       if (result.rotated) {
-        this.lastObservedBaseline = currentBaseline;
+        this.lastObservedBaseline = await this.resolvePostRotationBaseline(result.cookies);
         this.lastRotationTime = now;
         this.deps.cooldown.record(this.profile, now);
         this.deps.logger.info(`Keepalive rotation complete for profile '${this.profile}'`);
@@ -106,5 +107,17 @@ export class SessionKeepalive {
     } catch (err) {
       this.deps.logger.warn(`Keepalive tick failed for profile '${this.profile}': ${err}; rescheduling`);
     }
+  }
+
+  private async resolvePostRotationBaseline(cookies?: Cookie[]): Promise<string | null> {
+    const fromJar =
+      cookies && cookies.length > 0
+        ? findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME)
+        : null;
+    if (fromJar !== null) {
+      return fromJar;
+    }
+    const { cookies: reloaded } = await this.deps.cookieStore.load(this.profile);
+    return findRoutableCookieValue(reloaded, PSIDTS_COOKIE_NAME);
   }
 }

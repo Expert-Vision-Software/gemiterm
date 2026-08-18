@@ -942,3 +942,18 @@ do not re-litigate them.
   `tests/auth-regression/invariant-rotation-single-flight.test.ts`
   (openspec/changes/fix-rotation-dead-end).
 
+- **2026-08-18** — fix-5 keepalive fast-path baseline. The session-keepalive
+  loop's no-op fast path was dead code: `tick()` (`src/auth/session-keepalive.ts`)
+  recorded the *pre*-rotation disk PSIDTS as `lastObservedBaseline`, so after
+  the loop's first successful rotation every 10-minute tick re-read a different
+  on-disk value and spawned the headless browser forever (the skip scenario
+  the `auth` spec describes was unreachable after rotation #1). The fix records
+  the *post*-rotation PSIDTS as the baseline — read from the rotated jar
+  (`findRoutableCookieValue(result.cookies, PSIDTS_COOKIE_NAME)`) with a
+  post-rotation store re-read fallback when the refresher returns no jar —
+  so an unchanged-and-fresh jar now skips the browser. No auth-behavior change
+  beyond the keepalive tick's skip eligibility. Invariant coverage:
+  `tests/auth-regression/invariant-keepalive-baseline.test.ts` + the RED/green
+  cases in `tests/auth/session-keepalive.test.ts`
+  (openspec/changes/fix-5-audit-remediations).
+
