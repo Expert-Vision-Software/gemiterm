@@ -28,7 +28,11 @@ import { spawnDetachedRefreshRunner } from "./refresh-runner.ts";
 const STALE_JAR_MS = 30 * 60 * 1000;
 const DEFAULT_LOGIN_TIMEOUT_MS = 300_000;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_ROTATION_WAIT_MS = 30_000;
+// Wait ceiling >= the runner's rotation budget (60 s) plus browser-open
+// margin (openspec/changes/fix-rotation-dead-end): the await must be able to
+// cover the full rotation it is awaiting. Unraced field rotations land in
+// ~6-10 s, so the common case still returns on the first or second poll.
+const DEFAULT_ROTATION_WAIT_MS = 90_000;
 
 interface ArmRecord {
   psidts: string | null;
@@ -56,7 +60,7 @@ export interface CookieSessionDeps {
   classifier: Pick<SessionClassifier, "classify" | "classifyDetailed">;
   recovery: Pick<RecoveryRung, "recover">;
   logger: Logger;
-  spawnRefreshRunner: (profile: string) => void;
+  spawnRefreshRunner: (profile: string) => void | Promise<void>;
   listProfiles: () => Promise<string[]>;
   conversationLookup: { profileHasConversation(profileName: string, conversationId: string): Promise<boolean> };
   driver: CaptureDriver;
@@ -122,7 +126,9 @@ export class CookieSession {
     const stale = mtime === null || Date.now() - mtime.getTime() > STALE_JAR_MS;
     if (stale && !this.spawnedRunnerProfiles.has(name)) {
       this.spawnedRunnerProfiles.add(name);
-      this.deps.spawnRefreshRunner(name);
+      // Fire-and-forget: the spawn guard may skip (single-flight lock held by
+      // another process's runner) and never rejects.
+      void Promise.resolve(this.deps.spawnRefreshRunner(name)).catch(() => {});
     }
     this.lastArm.set(name, {
       psidts: findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME),
@@ -235,6 +241,19 @@ export class CookieSession {
   }
 
   async recover(profile: string): Promise<ArmedSession> {
+    // De-race (openspec/changes/fix-rotation-dead-end): a detached rotation
+    // may still be in flight for this profile; awaiting it is passive and,
+    // when it lands, recovery re-arms without opening a browser - and without
+    // colliding with the runner's shared playwright session/persistent dir.
+    if (this.rotationInFlight(profile)) {
+      const landed = await this.waitForRotation(profile);
+      if (landed !== null) {
+        this.deps.logger.info(
+          `recover(${profile}): detached rotation landed during the wait - re-arming instead of opening a recovery browser`,
+        );
+        return landed;
+      }
+    }
     return await this.deps.recovery.recover(profile);
   }
 
@@ -326,7 +345,7 @@ export interface CreateCookieSessionDeps {
   driver?: CaptureDriver & RefresherDriver;
   cookieStore?: CookieStore;
   listProfiles: () => Promise<string[]>;
-  spawnRefreshRunner?: (profile: string) => void;
+  spawnRefreshRunner?: (profile: string) => void | Promise<void>;
   createProbeClient: (
     config: { secure1psid: string; secure1psidts: string | null },
     profile: string,

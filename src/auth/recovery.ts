@@ -30,10 +30,23 @@ export class RecoveryRung {
     }
 
     try {
-      const result = await this.deps.refresher.rotatePsidts(profile, baseline);
+      // Distinct session name (openspec/changes/fix-rotation-dead-end):
+      // recovery may run while a detached runner is still alive for this
+      // profile; sharing `refresh-<profile>` would let either side's
+      // finally-close kill the other's browser mid-poll.
+      const result = await this.deps.refresher.rotatePsidts(
+        profile,
+        baseline,
+        undefined,
+        `recover-${profile}`,
+      );
       if (!result.rotated) {
+        // Field-validated diagnosis: an unraced rotation that produces no
+        // PSIDTS change within its own budget means the persistent-profile
+        // browser session is signed out server-side - a re-auth condition,
+        // not a transient (docs/auth-cookie-lifecycle.md, PSIDTS supersession).
         throw new AuthenticationError(
-          `Could not refresh session for profile '${profile}'. Run 'gemiterm auth' to re-authenticate.`,
+          `Could not rotate ${PSIDTS_COOKIE_NAME} for profile '${profile}' (no change from baseline within the rotate budget) - the browser session appears signed out server-side. Run 'gemiterm auth' to re-authenticate.`,
         );
       }
     } catch (err) {

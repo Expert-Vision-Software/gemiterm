@@ -906,3 +906,39 @@ do not re-litigate them.
   on the gate loop, the classifier, and the `AuthCommand` propagation path
   (openspec/changes/cancel-auth-on-browser-close).
 
+- **2026-08-18** - fix-rotation-dead-end. Field repro on two machines (3
+  profiles) showed the detached rotation pipeline losing to its own
+  concurrency, not to decay: `gemiterm.log` recorded concurrent runner sets
+  for the same profile (each CLI invocation spawned its own detached runner -
+  the old guard was per-process memory only), their playwright `open` /
+  `state-save` calls failing with exit 1 as they collided on the shared
+  `refresh-<profile>` session name and persistent profile dir, and both
+  runners reporting `rotated=true` while the persisted jar ended up one
+  rotation behind the live browser - instantly superseded server-side
+  (phantom). Recovery compounded it: its own rotation reused `refresh-<profile>`
+  (its `finally` close could kill a live runner's browser mid-poll), and its
+  30 s wait ceiling was structurally shorter than the runner's 60 s rotate
+  budget, so `list -p <profile>` could give up, trigger recovery, and race
+  the very runner it was waiting for. Changes: (1) cross-process single-flight
+  - `spawnDetachedRefreshRunner` acquires `<profiles>/<name>/refresh-runner.lock`
+  (atomic create, pid payload, 120 s stale sweep; `src/auth/refresh-runner-lock.ts`)
+  and skips the spawn while a fresh lock holds; the runner child releases on
+  exit; lock-write failures degrade to an unguarded spawn (never block a
+  refresh). (2) recovery de-race - `CookieSession.recover` awaits an in-flight
+  rotation first (passive) and resolves the landed arm without opening a
+  browser; when it must rotate, `RecoveryRung` drives the refresher under the
+  distinct session name `recover-<profile>` (`rotatePsidts` gained an optional
+  trailing session parameter, default `refresh-<profile>` unchanged). (3) the
+  `waitForRotation` default ceiling rose 30 s -> 90 s (>= rotate budget + open
+  margin). (4) `writeTextFileAtomic` (`src/infrastructure/io.ts`) retries the
+  rename briefly on Windows EPERM/EACCES - the detached runner persisting a
+  rotated jar races jar pollers, and a lost rename lost a completed rotation.
+  (5) the recovery `rotated: false` terminal error now names the
+  no-change-from-baseline condition and the server-side-signed-out diagnosis
+  ("browser session appears signed out server-side. Run 'gemiterm auth'").
+  Control field result: an unraced rotation took profile dhb-zeek from phantom
+  (listChats = 0) to live (3 chats) in ~6 s - the mechanism is sound; these
+  fixes remove the contention around it. Invariant coverage:
+  `tests/auth-regression/invariant-rotation-single-flight.test.ts`
+  (openspec/changes/fix-rotation-dead-end).
+
