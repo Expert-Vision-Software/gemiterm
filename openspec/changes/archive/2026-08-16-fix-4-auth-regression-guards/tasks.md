@@ -53,7 +53,7 @@ Prerequisite: fix-1, fix-2, fix-3 implemented and archived. Baseline test counts
 
 - [x] 6.1 Full gates: `bun run typecheck`, `bun run lint:mediation` (bash form), `bun test` — baseline intact plus net additions recorded
   - typecheck clean; `bash scripts/lint-path-mediation.sh` clean; full suite 937 pass / 0 fail / 2 pre-existing skips (baseline 917 + 20 auth-regression tests); `bun run canary:auth` detects all 3 mutations; `bun run check:auth-gate` pass/fail/opt-out paths verified locally.
-- [x] 6.2 Verify gate + canary end-to-end in CI on a deliberately-injected local regression (screencap or log captured in PR)
-  - Completed by fix-5 (2026-08-18): the blocking gate and the mutation canary run green on the fix-5 PR's CI (`openspec/changes/fix-5-audit-remediations` task 4.2).
+- [ ] 6.2 Verify gate + canary end-to-end in CI on a deliberately-injected local regression (screencap or log captured in PR)
+  - Pending completion by fix-5 (`openspec/changes/fix-5-audit-remediations` task 4.2): the blocking gate flip landed (see 3.4) and the mutation canary is green locally, but the CI end-to-end run rides the fix-5 PR and has not yet executed.
 - [ ] 6.3 `openspec validate fix-4-auth-regression-guards --strict`; sync specs (`auth-regression-gate` new, `testing`/`domain-model` deltas) and archive the change
-  - Closure note (fix-5, 2026-08-18): this task was archived while unchecked. The archive-before-validate self-contradiction is recorded here by the 2026-08-17 audit's reconciliation — validation/sync/archive were effectively performed post-archive (the change is committed under `openspec/changes/archive/`); the remaining unchecked 3.4/6.2 ledger items were completed by fix-5 above.
+  - Closure note (fix-5, 2026-08-18): this task was archived while unchecked. The archive-before-validate self-contradiction is recorded here by the 2026-08-17 audit's reconciliation — validation/sync/archive were effectively performed post-archive (the change is committed under `openspec/changes/archive/`). 3.4 (gate flip) was completed by fix-5 above; 6.2 (CI verification) remains pending the fix-5 PR's CI run.
