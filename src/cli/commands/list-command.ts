@@ -8,6 +8,7 @@ import { GemitermError } from "../../core/errors.ts";
 import { browser, confirm, select, text, CancellationError, NonInteractiveError, type BrowserAction } from "../utils/prompts.ts";
 import type { SessionProbeResult } from "../../auth/cookie-session.ts";
 import { invokeCommand } from "../utils/command-invoker.ts";
+import { awaitRotationsWithNotice } from "../utils/rotation-await.ts";
 import { render, sortChats, filterChatsByDate } from "../utils/chat-output.ts";
 
 interface ListCommandOptions {
@@ -142,22 +143,11 @@ export class ListCommand implements CliCommand {
     );
     if (stale.length === 0) return outcomes;
 
-    console.error(chalk.dim("Session refresh in progress — waiting for it to finish…"));
-    const landed = await Promise.all(
-      stale.map((outcome) => context.cookieSession.waitForRotation(outcome.profile).catch(() => null)),
+    const refreshedProfiles = await awaitRotationsWithNotice(
+      context.cookieSession,
+      stale.map((outcome) => outcome.profile),
+      "'gemiterm list'",
     );
-    const refreshedProfiles = stale
-      .filter((_, i) => landed[i] !== null)
-      .map((outcome) => outcome.profile);
-    const stillInFlight = stale
-      .filter((_, i) => landed[i] === null)
-      .map((outcome) => outcome.profile)
-      .filter((p) => context.cookieSession.rotationInFlight(p));
-    if (stillInFlight.length > 0) {
-      console.error(chalk.yellow(
-        `Session refresh still in progress for ${stillInFlight.length === 1 ? "profile" : "profiles"} '${stillInFlight.join("', '")}' — wait a few seconds and re-run 'gemiterm list'.`,
-      ));
-    }
     if (refreshedProfiles.length === 0) return outcomes;
 
     // Re-query only the profiles whose rotation landed (design D2: live

@@ -1,6 +1,6 @@
-import chalk from "chalk";
 import type { CliCommandContext } from "../command-registry.ts";
 import { AuthenticationError } from "../../core/errors.ts";
+import { awaitRotationsWithNotice } from "./rotation-await.ts";
 
 // Explicit-profile path (fix-8): an explicit `-p <name>` is no longer
 // required to classify `live` up front. We arm the profile (spawning a
@@ -29,17 +29,13 @@ export async function resolveProfile(
       );
     }
     await context.cookieSession.ensureSession(explicitProfile);
+    // Wait-timeout contract (fix-8 commands spec): the helper's hint is only
+    // true while the rotation is STILL in flight — a landed rotation must
+    // stay silent and fall through to the probe/reclassify below unchanged.
+    // The gate preserves the notice timing: it is printed only when the arm
+    // actually reported a rotation in flight.
     if (context.cookieSession.rotationInFlight(explicitProfile)) {
-      console.error(chalk.dim("Session refresh in progress — waiting for it to finish…"));
-      const landed = await context.cookieSession.waitForRotation(explicitProfile).catch(() => null);
-      // Wait-timeout contract (fix-8 commands spec): the hint is only true
-      // while the rotation is STILL in flight — a landed rotation must stay
-      // silent and fall through to the probe/reclassify below unchanged.
-      if (landed === null && context.cookieSession.rotationInFlight(explicitProfile)) {
-        console.error(chalk.yellow(
-          `Session refresh still in progress for profile '${explicitProfile}' — wait a few seconds and re-run the command.`,
-        ));
-      }
+      await awaitRotationsWithNotice(context.cookieSession, [explicitProfile]);
     }
     const state = await context.cookieSession.probe(explicitProfile).catch(() => "dead" as const);
     if (state !== "live") {
