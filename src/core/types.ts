@@ -27,6 +27,8 @@ export interface Conversation {
   messages: Message[];
 }
 
+export type SessionState = "live" | "phantom" | "dead";
+
 export interface AuthResult {
   cookies: Cookie[];
   expiresAt: Date | null;

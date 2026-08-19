@@ -1143,3 +1143,12 @@ do not re-litigate them.
   observes zero added cost; broken-jar profile skipped without aborting)
   (openspec/changes/fix-8-stale-profile-reachability).
 
+- **2026-08-18** — fix-8 review: session-state vocabulary consolidated.
+  `SessionState` (`"live" | "phantom" | "dead"`) now has a single source of
+  truth in `src/core/types.ts`; `AuthenticationError.sessionState`
+  (`src/core/errors.ts`) and `SessionProbeResult.state`
+  (`src/auth/session-classifier.ts`) share the core type instead of
+  re-declaring the union. Type-only change — capture, persistence, and
+  rotation paths untouched. Drift-guarded by
+  `tests/auth-regression/invariant-session-state-vocabulary.test.ts`.
+

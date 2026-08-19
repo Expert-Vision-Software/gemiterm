@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import type { AuthResult, Cookie } from "../core/types.ts";
+import type { AuthResult, Cookie, SessionState } from "../core/types.ts";
 import { Logger } from "../infrastructure/logger.ts";
 import { AuthenticationError, LoginCancelledError, LoginTimeoutError, LoginUnroutableError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
@@ -224,7 +224,7 @@ export class CookieSession {
     }
   }
 
-  async probe(profile: string): Promise<"live" | "phantom" | "dead"> {
+  async probe(profile: string): Promise<SessionState> {
     return await this.deps.classifier.classify(profile);
   }
 

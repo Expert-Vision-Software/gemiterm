@@ -1,4 +1,4 @@
-import type { Cookie } from "../core/types.ts";
+import type { Cookie, SessionState } from "../core/types.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { isRoutableTo } from "./cookie-validation.ts";
 import { GEMINI_APP_URL, hasAnyExtractedInitToken } from "./auth-constants.ts";
@@ -6,7 +6,7 @@ import { GEMINI_APP_URL, hasAnyExtractedInitToken } from "./auth-constants.ts";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-export type SessionState = "live" | "phantom" | "dead";
+export type { SessionState };
 
 export interface SessionProbeResult {
   state: SessionState;
