@@ -1,4 +1,4 @@
-## [3.0.0] - 2026-08-16
+## [3.0.0] - 2026-08-19
 
 The auth release. GemiTerm's authentication has been rewritten to fix the root cause of the **phantom-session bug** present since v2.4.0: sessions left idle for an hour or two would silently decay — sign-in looked fine, but `list` came back empty and commands eventually failed — because Google supersedes the `__Secure-1PSIDTS` session cookie server-side and GemiTerm never rotated it. In v3.0.0, sessions stay alive via **automatic browser-backed cookie rotation**: when a session starts to decay, GemiTerm loads the profile's persistent browser in the background, lets Google's own page JavaScript rotate the cookie, and saves the refreshed cookie jar — no re-login required.
 
@@ -32,9 +32,11 @@ The auth release. GemiTerm's authentication has been rewritten to fix the root c
 - Closing the browser during `gemiterm auth` now cancels the login immediately instead of polling for five minutes.
 - Backspace not working in text prompts on Windows/Bun.
 - Session validation failures now name the offending cookie scope (e.g. a stale `__Secure-1PSIDTS`), and profile deletion confirmation is clear even in non-interactive terminals.
+- Session classification no longer mistakes a signed-out page for a healthy one: verdicts now require actual session-token values, so a broken cookie jar reports dead in `status --verbose` instead of a false live.
 - Cookie session errors now properly mapped to `AuthenticationError`.
 - Lock-file creation now creates the parent directory first.
 - Background refresh and browser processes no longer flash a console window on Windows.
+- Completed background rotations are no longer silently lost on Windows when another command reads the cookie jar during the save; the atomic write now retries through the contention.
 
 ### Removed
 
