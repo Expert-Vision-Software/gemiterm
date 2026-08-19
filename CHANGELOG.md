@@ -1,38 +1,50 @@
 ## [3.0.0] - 2026-08-16
 
+The auth release. GemiTerm's authentication has been rewritten to fix the root cause of the **phantom-session bug** present since v2.4.0: sessions left idle for an hour or two would silently decay — sign-in looked fine, but `list` came back empty and commands eventually failed — because Google supersedes the `__Secure-1PSIDTS` session cookie server-side and GemiTerm never rotated it. In v3.0.0, sessions stay alive via **automatic browser-backed cookie rotation**: when a session starts to decay, GemiTerm loads the profile's persistent browser in the background, lets Google's own page JavaScript rotate the cookie, and saves the refreshed cookie jar — no re-login required.
+
+### Upgrading from v2.x
+
+- **No profile migration needed.** Profile storage and the on-disk cookie format (`profiles/<name>/storage_state.json`) are unchanged; existing profiles are picked up as-is.
+- **Expect a one-time re-login if your sessions sat idle.** Sessions captured under v2.x may already be expired server-side — if a command reports a dead session, run `gemiterm auth` (or `gemiterm login`) once. After that, automatic rotation keeps the session alive.
+- `gemiterm list` now aggregates conversations across **all configured profiles by default** (a `PROFILE` column appears in multi-profile setups). Scope to one profile with `-p/--profile`.
+- `gemiterm status --verbose` now probes each profile's session over the network and reports live/stale/expired details per profile.
+- Interactive REPL sessions (`gemiterm new`, `gemiterm continue`) run a **session keepalive** that refreshes cookies while you type, so long conversations no longer die mid-session.
+- When a profile's session looks dead, `gemiterm list` offers an interactive **"Attempt session recovery now?"** prompt instead of silently returning an empty list; declining produces a typed error with the `gemiterm auth` hint rather than a stale result.
+- `gemiterm auth --renew` and the `login` alias work as before.
+
 ### Added
 
-- Auth-regression test suite at `tests/auth-regression/` pinning historical phantom-auth bug invariants against on-disk truth using driver/wire fakes and PSIDTS validation
-- Auth-regression CI gate (`bun run check:auth-gate`) enforcing that changes touching auth-sensitive paths must also update the regression test suite
-- Mutation canary (`bun run canary:auth`) applying historical bug patches to verify the regression suite would catch them
-- Session-keepalive loop for REPL sessions that refreshes cookies during active use
-- `CookieSession` facade with `refresh-and-retry` recovery rung and detached refresh-runner that survives script-tree teardown
-- Two-tier `CookieValidator` and read-only `SessionClassifier` for probing session liveness
-- `CookieStore` with CAS (compare-and-swap) saves and cross-process lock for safe concurrent cookie updates
-- `--verbose` column in `gemiterm status` showing session probe details per profile
-- Reactive phantom detection that emits warnings when `list` returns empty results on a single configured profile
+- Automatic session rotation (the core of this release): background browser-backed refresh whenever the session cookie decays, with conflict-safe cookie storage and a cross-process lock so concurrent gemiterm commands refresh safely instead of corrupting each other's saves.
+- Session keepalive for interactive REPL sessions, refreshing cookies during active use.
+- `--verbose` flag for `gemiterm status` showing per-profile session probe results.
+- Reactive phantom detection: `list` warns when a single configured profile returns zero conversations, since that pattern indicates a decayed (phantom) session rather than an empty account.
 
 ### Changed
 
-- **BREAKING**: Replaced mediator layer with direct CLI command handlers registered in `CommandRegistry` for simpler routing and reduced abstraction overhead
-- Replaced hand-rolled terminal input with `@inquirer/input` for better cross-platform behavior
-- Consolidated chat output logic into `ChatOutput` module with shared sorting/filtering helpers
-- Extracted `ProfileLifecycle` module behind `manageProfiles` action dispatch
-- Extracted `ExportStrategy` seam behind `export`/`export-all` commands
-- Converted IO-bound code to async-first using `node:fs/promises`
-- `gemiterm list` now defaults to aggregating conversations across all configured profiles (adds `PROFILE` column in multi-profile setups)
-- Auth flow now selects `gemini.google.com`-routable SDK cookies over same-name siblings
+- **BREAKING**: authentication stack replaced end-to-end. Sessions are now validated against what actually reaches `gemini.google.com` (capture only succeeds once the saved cookies genuinely route to Gemini), classified as live / stale-but-recoverable / expired, and recovered automatically where possible. Read commands (`fetch`, `export`, `continue`, `list`) can reach and recover stale profiles instead of failing with the default profile's session.
+- If two commands need a refresh at once, only one background refresh runs; the other waits for it (and says so) instead of racing or reporting a spurious auth failure. Rotation timeouts now produce an honest error with a "wait a few seconds and re-run" hint when a refresh is still in flight.
+- `gemiterm list` defaults to aggregating conversations across all configured profiles (adds `PROFILE` column in multi-profile setups).
+- Replaced hand-rolled terminal input with `@inquirer/input` for better cross-platform behavior.
 
 ### Fixed
 
-- Backspace not working in text prompts on Windows/Bun
-- `writeFileExclusive` now creates parent directory before creating lock file
-- Cookie session errors now properly mapped to `AuthenticationError`
-- Refresh-runner and playwright-cli spawns now hide Windows console flashes on spawn
+- **The phantom-session bug**: sessions no longer die after an hour or two of idle use. Root cause (server-side `__Secure-1PSIDTS` supersession under zero rotation) is fixed by the browser-backed rotation engine; even a long-dead session can be resurrected without a fresh sign-in when the rest of the jar is intact.
+- Closing the browser during `gemiterm auth` now cancels the login immediately instead of polling for five minutes.
+- Backspace not working in text prompts on Windows/Bun.
+- Session validation failures now name the offending cookie scope (e.g. a stale `__Secure-1PSIDTS`), and profile deletion confirmation is clear even in non-interactive terminals.
+- Cookie session errors now properly mapped to `AuthenticationError`.
+- Lock-file creation now creates the parent directory first.
+- Background refresh and browser processes no longer flash a console window on Windows.
+
+### Removed
+
+- Nothing user-facing — no commands, flags, or config paths were removed relative to v2.4.x. The previous auth internals (cookie monitor and auth-service stack) were deleted in favor of the new auth subsystem.
 
 ### Internal
 
-- Archived auth documentation (`docs/phantom-bug-synthesis.md`, `auth-replacement-plan.md`) to `docs/archive/` with superseding banners
+- Auth-regression test suite at `tests/auth-regression/` pinning the historical phantom-auth bug invariants, enforced by a blocking CI gate (`bun run check:auth-gate`: auth-sensitive changes must update the suite) and a mutation canary (`bun run canary:auth`) that re-applies the historical bugs to prove the suite catches them.
+- Internal refactors from the v3 modernization pass: direct command dispatch (mediator layer removed), consolidated chat output, extracted profile-management and export seams, async-first file IO.
+- Archived auth documentation (`docs/phantom-bug-synthesis.md`, `auth-replacement-plan.md`) to `docs/archive/` with superseding banners.
 - Established documentation authority order in `docs/README.md`: `auth-cookie-lifecycle.md` (canonical) > `cookie-ablation-findings.md` (empirical) > `docs/archive/**` (historical)
 
 ---
