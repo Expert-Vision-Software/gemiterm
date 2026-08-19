@@ -125,17 +125,21 @@ describe("auth-regression: recovery de-race", () => {
 
 describe("auth-regression: recovery session name + wait ceiling", () => {
   test("RecoveryRung rotates under recover-<profile>, never the runner's session", async () => {
+    // One jar, generated once: the load fake serves it and the assertion reads
+    // it, so the Date.now()-derived psidts suffix cannot tick between
+    // recover()-time and assert-time (CI flake, run 32223428823).
+    const jar = freshFullJar();
     const rotatePsidts = mock(async () => ({ rotated: true }));
     const rung = new RecoveryRung({
       refresher: { rotatePsidts },
-      cookieStore: { load: mock(async () => ({ cookies: freshFullJar() })) },
+      cookieStore: { load: mock(async () => ({ cookies: jar })) },
       rearm: mock(async () => ({ secure_1psid: "psid", secure_1psidts: "ts", cookies: freshFullJar() })),
       logger: makeLogger() as never,
     });
 
     await rung.recover("p");
 
-    expect(rotatePsidts).toHaveBeenCalledWith("p", psidtsValue(freshFullJar()) ?? null, undefined, "recover-p");
+    expect(rotatePsidts).toHaveBeenCalledWith("p", psidtsValue(jar) ?? null, undefined, "recover-p");
     expect(JSON.stringify(rotatePsidts.mock.calls[0])).not.toContain("refresh-p");
   });
 

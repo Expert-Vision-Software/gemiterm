@@ -1164,3 +1164,14 @@ do not re-litigate them.
   green again — all three mutations detected (suite RED). No production
   code changed; only the mutation patch and this entry.
 
+- **2026-08-19** — CI flake in the rotation single-flight invariant
+  (run 32223428823, ubuntu): the RecoveryRung session-name test generated
+  a fresh jar via `freshFullJar()` both inside the `cookieStore.load` fake
+  and again at assert-time, so a millisecond boundary between
+  `recover()`-time and assertion-time shifted the `psidts-fresh-<epoch-ms>`
+  suffix by 1. The test now hoists a single jar instance served by the
+  load fake and read by the assertion, making the time-derived comparison
+  deterministic (30/30 loop runs green; full suite 1055 pass / 2 skip /
+  0 fail). No production change; the invariant still asserts the
+  `recover-<profile>` session name, null propagation, and argument order.
+
