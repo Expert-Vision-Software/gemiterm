@@ -660,6 +660,78 @@ describe("list command integration", () => {
       }
     });
 
+    test("live profile with chats is never awaited or re-queried even while its rotation is in flight", async () => {
+      const profiles = ["live", "fresh"];
+      context.listProfiles = () => profiles;
+      const callsPerProfile: Record<string, number> = {};
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => {
+          callsPerProfile[name] = (callsPerProfile[name] ?? 0) + 1;
+          return [{ id: `${name}-1`, title: `${name} chat`, isPinned: false, timestamp: 1717100000000, profile: name }];
+        }),
+      }));
+      cookieSession.rotationInFlight = mock((p: string) => p === "live");
+      cookieSession.waitForRotation = mock(async () => ({ cookies: [] }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--format", "json"], context);
+
+        expect(cookieSession.waitForRotation).not.toHaveBeenCalled();
+        expect(callsPerProfile["live"]).toBe(1);
+        expect(callsPerProfile["fresh"]).toBe(1);
+        const parsed = JSON.parse(logSpy.mock.calls.map((c) => c[0]).join("\n"));
+        expect(parsed.chats).toHaveLength(2);
+        expect(parsed.chats.filter((c: ChatInfo) => c.id === "live-1")).toHaveLength(1);
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).not.toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("live returns 14 chats while stale's in-flight rotation lands: stale re-queried, both merged, live untouched", async () => {
+      const profiles = ["live", "stale"];
+      context.listProfiles = () => profiles;
+      const liveChats: ChatInfo[] = Array.from({ length: 14 }, (_, i) => ({
+        id: `live-${i + 1}`,
+        title: `Live chat ${i + 1}`,
+        isPinned: false,
+        timestamp: 1717100000000 - i,
+        profile: "live",
+      }));
+      const callsPerProfile: Record<string, number> = {};
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => {
+          callsPerProfile[name] = (callsPerProfile[name] ?? 0) + 1;
+          if (name === "live") return liveChats;
+          return callsPerProfile[name] > 1
+            ? [{ id: "stale-1", title: "Recovered chat", isPinned: false, timestamp: 1717000000000, profile: "stale" }]
+            : [];
+        }),
+      }));
+      cookieSession.rotationInFlight = mock((p: string) => p === "stale");
+      cookieSession.waitForRotation = mock(async (p: string) =>
+        p === "stale" ? ({ cookies: [] }) : null,
+      );
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--format", "json"], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(1);
+        expect(cookieSession.waitForRotation).toHaveBeenCalledWith("stale");
+        expect(callsPerProfile["live"]).toBe(1);
+        expect(callsPerProfile["stale"]).toBe(2);
+        const parsed = JSON.parse(logSpy.mock.calls.map((c) => c[0]).join("\n"));
+        expect(parsed.chats).toHaveLength(15);
+        expect(parsed.chats.filter((c: ChatInfo) => c.profile === "live")).toHaveLength(14);
+        expect(parsed.chats.filter((c: ChatInfo) => c.id === "stale-1")).toHaveLength(1);
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
     test("all-fresh fan-out is byte-identical: no wait, no re-query", async () => {
       const profiles = ["live1", "live2"];
       context.listProfiles = () => profiles;

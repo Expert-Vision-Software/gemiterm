@@ -83,23 +83,22 @@ export class ListCommand implements CliCommand {
     };
 
     logger.debug(`Listing chats: ${JSON.stringify(request)}`);
-    let chats = await listChatsForRequest(context.getGeminiClient, context.listProfiles, request);
+    const outcomes = await listChatsOutcomes(context.getGeminiClient, context.listProfiles, request);
 
     if (options.interactive) {
-      await this.runInteractiveBrowser(chats, options, context);
+      await this.runInteractiveBrowser(this.mergeOutcomes(outcomes), options, context);
       return;
     }
 
     // Per-profile await stage (fix-8, design D2). The merged-empty trigger
     // was the wrong gate: a live sibling returning chats masked stale
-    // profiles whose rotations were in flight. Now any outcome with no
+    // profiles whose rotations were in flight. Any pass-1 outcome with no
     // chats (or rejected) while its rotation is in flight triggers the wait
-    // and a per-profile re-query on the refreshed profiles only. Live
-    // profiles observe zero added latency and zero re-queries.
-    const refreshedChats = await this.awaitStaleOutcomes(request, context, logger);
-    if (refreshedChats !== null) {
-      chats = [...chats, ...refreshedChats].sort((a, b) => b.timestamp - a.timestamp);
-    }
+    // and a per-profile re-query on the refreshed profiles only — the
+    // re-queried profile's pass-1 outcome is replaced, never appended.
+    // Live profiles observe zero added latency and zero re-queries.
+    const finalOutcomes = await this.awaitStaleOutcomes(outcomes, request, context, logger);
+    let chats = this.mergeOutcomes(finalOutcomes);
 
     if (chats.length === 0) {
       chats = await this.resolvePhantomEmptyResult(chats, request, context, logger);
@@ -127,43 +126,58 @@ export class ListCommand implements CliCommand {
   }
 
   private async awaitStaleOutcomes(
+    outcomes: ListChatsOutcome[],
     request: ListChatsRequest,
     context: CliCommandContext,
     logger: Logger,
-  ): Promise<ChatInfo[] | null> {
-    const rotationCandidates = request.profile
-      ? [request.profile]
-      : await context.listProfiles();
-    const inFlight = rotationCandidates.filter((p) => context.cookieSession.rotationInFlight(p));
-    if (inFlight.length === 0) return null;
+  ): Promise<ListChatsOutcome[]> {
+    const stale = outcomes.filter(
+      (outcome) =>
+        (outcome.error !== undefined || (outcome.chats?.length ?? 0) === 0) &&
+        context.cookieSession.rotationInFlight(outcome.profile),
+    );
+    if (stale.length === 0) return outcomes;
 
     console.error(chalk.dim("Session refresh in progress — waiting for it to finish…"));
     const landed = await Promise.all(
-      inFlight.map((p) => context.cookieSession.waitForRotation(p).catch(() => null)),
+      stale.map((outcome) => context.cookieSession.waitForRotation(outcome.profile).catch(() => null)),
     );
-    const refreshedProfiles = inFlight.filter((_, i) => landed[i] !== null);
-    if (refreshedProfiles.length === 0) {
-      const stillInFlight = inFlight.filter((p) => context.cookieSession.rotationInFlight(p));
-      if (stillInFlight.length > 0) {
-        console.error(chalk.yellow(
-          `Session refresh still in progress for ${stillInFlight.length === 1 ? "profile" : "profiles"} '${stillInFlight.join("', '")}' — wait a few seconds and re-run 'gemiterm list'.`,
-        ));
-      }
-      return null;
+    const refreshedProfiles = stale
+      .filter((_, i) => landed[i] !== null)
+      .map((outcome) => outcome.profile);
+    const stillInFlight = stale
+      .filter((_, i) => landed[i] === null)
+      .map((outcome) => outcome.profile)
+      .filter((p) => context.cookieSession.rotationInFlight(p));
+    if (stillInFlight.length > 0) {
+      console.error(chalk.yellow(
+        `Session refresh still in progress for ${stillInFlight.length === 1 ? "profile" : "profiles"} '${stillInFlight.join("', '")}' — wait a few seconds and re-run 'gemiterm list'.`,
+      ));
     }
+    if (refreshedProfiles.length === 0) return outcomes;
 
     // Re-query only the profiles whose rotation landed (design D2: live
     // profiles never re-queried, zero added latency for the happy path).
-    const retried = await listChatsForRequest(
+    const retried = await listChatsOutcomes(
       context.getGeminiClient,
       context.listProfiles,
       request,
       { onlyProfiles: refreshedProfiles },
     );
+    const recovered = retried.reduce((count, outcome) => count + (outcome.chats?.length ?? 0), 0);
     logger.debug(
-      `List re-queried after rotation: ${refreshedProfiles.length} profile(s) refreshed, ${retried.length} chat(s) recovered`,
+      `List re-queried after rotation: ${refreshedProfiles.length} profile(s) refreshed, ${recovered} chat(s) recovered`,
     );
-    return retried;
+    const retriedByProfile = new Map(retried.map((outcome) => [outcome.profile, outcome]));
+    return outcomes.map((outcome) => retriedByProfile.get(outcome.profile) ?? outcome);
+  }
+
+  private mergeOutcomes(outcomes: ListChatsOutcome[]): ChatInfo[] {
+    const chats: ChatInfo[] = [];
+    for (const outcome of outcomes) {
+      if (outcome.chats) chats.push(...outcome.chats);
+    }
+    return chats.sort((a, b) => b.timestamp - a.timestamp);
   }
 
   private async resolvePhantomEmptyResult(
