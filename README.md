@@ -38,7 +38,7 @@ GemiTerm is built with **[Bun](https://bun.sh)** and TypeScript, ships as a sing
 - **Searchable archive.** Bulk-export to Markdown or JSON and run `grep`, `rg`, or your favorite search tool over months of AI conversations.
 - **Multi-profile, multi-account.** Keep work, personal, and side-project identities separate. One CLI, many Gemini accounts.
 - **Single binary, every OS.** Native builds for Windows, Linux, and macOS. No Node, no Python, no runtime to install.
-- **Local-first, private.** Cookies never leave your machine. 7-day freshness window. You own your data.
+- **Local-first, private.** Cookies never leave your machine. Sessions stay alive automatically — GemiTerm rotates them in the background so idle sessions no longer expire. You own your data.
 
 ## Features
 
@@ -50,7 +50,7 @@ GemiTerm is built with **[Bun](https://bun.sh)** and TypeScript, ships as a sing
 - 🤖 **AI-agent skills** — plug into OpenCode, Claude Code, GitHub Copilot, and any agent that reads skills
 - 🗣️ **Cross-agent debates** — your agent argues both sides with Gemini, surfaces real agreements and disagreements
 - 📦 **Single binary** — Bun-compiled, no runtime required; works on Windows, Linux, macOS
-- 🔐 **Local cookies** — never uploaded; 7-day freshness window
+- 🔐 **Local cookies** — never uploaded; sessions kept alive by automatic background rotation
 
 ## Cross-Agent Debates with Gemini
 
