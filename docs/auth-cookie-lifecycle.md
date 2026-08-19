@@ -1152,3 +1152,15 @@ do not re-litigate them.
   rotation paths untouched. Drift-guarded by
   `tests/auth-regression/invariant-session-state-vocabulary.test.ts`.
 
+- **2026-08-19** — mutation-canary D4 rebase: `capture-name-filter` rot.
+  The fix-7 rework of `captureLogin` (`52895c5`) inserted the pre-save
+  validation backstop between `filterToGeminiDomains` and `saveFullJar`
+  (`src/auth/cookie-session.ts`), so the mutation patch's context lines no
+  longer applied — the canary flagged it as ROT per design D4. The mutation
+  was rebased onto the current capture path with the same historical bug
+  shape (capture payload name-filtered to PSID/PSIDTS, violating the
+  domain-only policy; detector:
+  `tests/auth-regression/invariant-capture-integrity.test.ts`). Canary
+  green again — all three mutations detected (suite RED). No production
+  code changed; only the mutation patch and this entry.
+
