@@ -20,7 +20,7 @@ import {
 beforeEach(setupIsolation);
 afterEach(teardownIsolation);
 
-const TOKEN_HTML = '<html><body><script data-initial-state="SNIPET">SNlM0e</script></body></html>';
+const TOKEN_HTML = '<html><body>{"SNlM0e":"tok","cfb2h":"x","FdrFJe":"y"}</body></html>';
 const SIGNED_OUT_HTML = "<html><body><p>Sign in to continue</p></body></html>";
 
 function classifierFor(html: string, chats: unknown[]) {

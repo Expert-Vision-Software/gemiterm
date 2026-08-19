@@ -1,9 +1,7 @@
 ## Purpose
 
 The cookie and profile persistence layer. It reads and writes the per-profile `storage_state.json` cookie file, manages the lifecycle of profile directories (create, delete, rename, set-default), and computes profile freshness from cookie expiry. Two classes are exposed: `CookieStorage` (raw cookie I/O) and `ProfileManager` (high-level profile lifecycle and status).
-
 ## Requirements
-
 ### Requirement: CookieStorage.save
 The `CookieStorage` class MUST expose an async `save(profileName, cookies)` method returning `Promise<void>` that writes the given cookie array into the profile's `storage_state.json` file as a JSON object with shape `{ cookies: Cookie[] }`. The method MUST create the profile directory (and any parents) before writing.
 
@@ -124,7 +122,8 @@ The `ProfileManager` class MUST expose an async `list()` method returning `Promi
 - **THEN** `await list()` resolves their names
 
 ### Requirement: ProfileManager.getStatus
-The `ProfileManager` class MUST expose an async `getStatus(name)` method returning `Promise<ProfileStatus>`. The method MUST resolve `exists: false` and `isActive: false` (with `expiresAt: null`) when the profile's storage file does not exist. When the file exists, the method MUST attempt to load the cookies and compute `isActive` from cookie validity and freshness (see Requirement: Freshness and Validity). If loading rejects, the method MUST resolve `exists: true`, `isActive: false`, and `expiresAt: null`. The `isDefault` field MUST reflect whether `name` equals the current default profile name.
+
+The `ProfileManager` class MUST expose an async `getStatus(name)` method returning `Promise<ProfileStatus>`. The method MUST resolve `exists: false` and `isActive: false` (with `expiresAt: null`) when the profile's storage file does not exist. When the file exists, the method MUST attempt to load the cookies and compute `isActive` from cookie validity and freshness (see Requirement: Freshness and Validity). If loading rejects, the method MUST resolve `exists: true`, `isActive: false`, and `expiresAt: null`. The `isDefault` field MUST reflect whether `name` equals the current default profile name. The resolved `isActive` and `expiresAt` are local display metadata for the status table; the server-side session state is reported separately by the auth capability's probe (`status --verbose` PROBE column).
 
 #### Scenario: Status for a valid active profile
 - **WHEN** a profile has fresh `__Secure-1PSID` and `__Secure-1PSIDTS` cookies
@@ -141,6 +140,10 @@ The `ProfileManager` class MUST expose an async `getStatus(name)` method returni
 #### Scenario: Status reports isDefault
 - **WHEN** the profile is the current default
 - **THEN** `(await getStatus(name)).isDefault` is `true`
+
+#### Scenario: Status is display metadata, not a validity verdict
+- **WHEN** `getStatus` reports `isActive: true` for a profile whose session is server-side dead
+- **THEN** no recovery, re-auth, or error path may be triggered from `isActive` alone; those decisions belong to the probe classification
 
 ### Requirement: ProfileManager.getAllStatuses
 The `ProfileManager` class MUST expose an async `getAllStatuses()` method returning `Promise<ProfileStatus[]>` that resolves an array covering every known profile. The method MUST call `ensureConfigDir()` first (so the profiles directory exists) and MUST populate `isDefault` on every entry based on the current default profile name.
@@ -180,7 +183,8 @@ The `ProfileManager` class MUST expose an async `loadCookiesForApi(profileName)`
 - **THEN** `await loadCookiesForApi(name)` rejects with an error whose message contains `No storage state found`
 
 ### Requirement: Freshness and Validity
-A profile's cookies are considered valid and fresh when ALL of the following are true: (a) the cookie set includes both `__Secure-1PSID` and `__Secure-1PSIDTS`, (b) the `__Secure-1PSIDTS` cookie has an `expires` value greater than 0, and (c) the resulting expiry timestamp (cookie `expires` in milliseconds) is later than `now + 7 days` (the freshness threshold). The system MUST use these rules consistently in `hasValidCookies`, `getStatus`, and `loadCookiesForApi`.
+
+A profile's cookies are considered locally fresh when ALL of the following are true: (a) the cookie set includes both `__Secure-1PSID` and `__Secure-1PSIDTS`, (b) the `__Secure-1PSIDTS` cookie has an `expires` value greater than 0, and (c) the resulting expiry timestamp (cookie `expires` in milliseconds) is later than `now + 7 days` (the freshness threshold). The system MUST use these rules consistently in `hasValidCookies`, `getStatus`, and `loadCookiesForApi`. These rules are LOCAL, DISPLAY-ONLY metadata: they populate the status table's ACTIVE and EXPIRES columns and gate legacy load paths. They MUST NOT be treated as a session-validity oracle - the cookie `expires` attribute carries no information about server-side `__Secure-1PSIDTS` supersession, so a locally-fresh profile can still be phantom or dead. The validity oracle is the auth capability's read-only `CookieSession.probe` classification.
 
 #### Scenario: Freshness window uses 7-day threshold
 - **WHEN** a profile's `__Secure-1PSIDTS` cookie expires more than 7 days from now
@@ -190,9 +194,14 @@ A profile's cookies are considered valid and fresh when ALL of the following are
 - **WHEN** a profile's `__Secure-1PSIDTS` cookie expires within 7 days from now (or has already passed)
 - **THEN** `hasValidCookies` returns `false` and `getStatus` reports `isActive: false`
 
+#### Scenario: Locally-fresh is not server-side-valid
+- **WHEN** a profile's stored jar satisfies every local freshness rule but the session has been server-side superseded
+- **THEN** `hasValidCookies` still returns `true` (display metadata is unchanged) while `CookieSession.probe` classifies the profile as `phantom` or `dead` - only the probe's verdict may drive recovery or re-auth decisions
+
 ### Requirement: Cookie JSON On-Disk Layout
 Cookies MUST be persisted to `<profilesDir>/<name>/storage_state.json` as a JSON object of the form `{ "cookies": <Cookie[]> }`. The file MUST be UTF-8 encoded. The `expires` field on each cookie is a Unix-seconds numeric timestamp.
 
 #### Scenario: Storage file is parseable JSON with cookies array
 - **WHEN** `CookieStorage.save(name, cookies)` completes
 - **THEN** the file at `<profilesDir>/<name>/storage_state.json` is valid JSON whose top-level `cookies` field is the saved array
+

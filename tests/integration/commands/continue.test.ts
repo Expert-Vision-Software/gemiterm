@@ -4,6 +4,7 @@ import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
 import { AuthenticationError } from "../../../src/core/errors.ts";
+import { setStdinTty, restoreStdinTty } from "../../cli/utils/tty-harness.ts";
 
 function makeClient() {
   const client: any = {
@@ -33,9 +34,11 @@ describe("continue command integration", () => {
         activeProfiles: mock(() => ["work", "personal"]),
         findProfileForConversation: mock(() => "work"),
         ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+        rotationInFlight: mock(() => false),
+        waitForRotation: mock(async () => null),
       } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
-      listProfiles: () => [],
+      listProfiles: () => ["work", "personal"],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
@@ -78,6 +81,7 @@ describe("continue command integration", () => {
 
   describe("profile lookup", () => {
     test("resolves the profile that owns the conversation", async () => {
+      context.listProfiles = () => ["work", "personal"];
       await command.execute(["conv-123", "hello"], context);
 
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
@@ -86,6 +90,7 @@ describe("continue command integration", () => {
     });
 
     test("throws AuthenticationError when no profile owns the conversation", async () => {
+      context.listProfiles = () => ["work", "personal"];
       findProfileSpy = mock(() => null);
       context.cookieSession.findProfileForConversation = findProfileSpy;
 
@@ -102,7 +107,8 @@ describe("continue command integration", () => {
       expect(errorMessage).toContain("gemiterm list --all-profiles");
     });
 
-    test("uses default profile when only one profile is active", async () => {
+    test("uses default profile when only one profile is configured", async () => {
+      context.listProfiles = () => ["default"];
       activeProfilesSpy = mock(() => ["default"]);
       context.cookieSession.activeProfiles = activeProfilesSpy;
 
@@ -128,6 +134,121 @@ describe("continue command integration", () => {
       const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
       expect(output).toContain("Model:");
       expect(output).toContain("Hello!");
+    });
+  });
+
+  describe("rotation-await stage", () => {
+    test("in-flight rotation is awaited and the send retries once", async () => {
+      let sendCalls = 0;
+      client.sendMessage = mock(async () => {
+        sendCalls += 1;
+        if (sendCalls === 1) throw new Error("Session expired or invalid.");
+        return "Recovered response!";
+      });
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => ({ cookies: [] }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["conv-123", "hello"], context);
+
+        expect((context.cookieSession as any).waitForRotation).toHaveBeenCalledTimes(1);
+        expect((context.cookieSession as any).waitForRotation).toHaveBeenCalledWith("work");
+        expect(client.sendMessage).toHaveBeenCalledTimes(2);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Recovered response!");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("rotation wait timeout rethrows the original send error", async () => {
+      client.sendMessage = mock(async () => {
+        throw new Error("Session expired or invalid.");
+      });
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => null);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await expect(command.execute(["conv-123", "hello"], context)).rejects.toThrow(
+          "Session expired or invalid.",
+        );
+        expect(client.sendMessage).toHaveBeenCalledTimes(1);
+        const stderr = errSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(stderr).toContain("still in progress");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("happy path never consults the rotation state", async () => {
+      await command.execute(["conv-123", "hello"], context);
+
+      expect((context.cookieSession as any).rotationInFlight).not.toHaveBeenCalled();
+      expect((context.cookieSession as any).waitForRotation).not.toHaveBeenCalled();
+      expect(client.sendMessage).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("explicit-profile recovery ladder (fix-8)", () => {
+    test("non-interactive: stale explicit profile fails typed; never silently falls back to default", async () => {
+      context.listProfiles = () => ["stale"];
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["stale"]);
+      (context.cookieSession as any).ensureSession = mock(async () => ({
+        secure_1psid: "psid",
+        secure_1psidts: "ts",
+      }));
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => null);
+      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+
+      try {
+        setStdinTty(false);
+        await expect(
+          command.execute(["conv-123", "hi", "--profile", "stale"], context),
+        ).rejects.toThrow(/Profile 'stale' session is phantom after the rotation wait/);
+        await expect(
+          command.execute(["conv-123", "hi", "--profile", "stale"], context),
+        ).rejects.toThrow(/gemiterm auth --renew stale/);
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("interactive: stale explicit profile offers recovery; on accept, the send proceeds", async () => {
+      context.listProfiles = () => ["stale"];
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["stale"]);
+      (context.cookieSession as any).ensureSession = mock(async () => ({
+        secure_1psid: "psid",
+        secure_1psidts: "ts",
+      }));
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => ({ cookies: [] }));
+      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+      (context.cookieSession as any).recover = mock(async () => ({ secure_1psid: "psid2", secure_1psidts: "ts2" }));
+
+      let sendCalls = 0;
+      client.sendMessage = mock(async () => {
+        sendCalls += 1;
+        return "Recovered response!";
+      });
+
+      const promptsModule = await import("../../../src/cli/utils/prompts.ts");
+      const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(true);
+
+      try {
+        setStdinTty(true);
+        await command.execute(["conv-123", "hi", "--profile", "stale"], context);
+
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect((context.cookieSession as any).recover).toHaveBeenCalledWith("stale");
+        expect(sendCalls).toBe(1);
+      } finally {
+        confirmSpy.mockRestore();
+        restoreStdinTty();
+      }
     });
   });
 });

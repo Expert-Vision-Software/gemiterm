@@ -54,12 +54,12 @@ export function psidtsValue(jar: Cookie[]): string | undefined {
 }
 
 /** Fake capture driver offering `cookies` on every poll/state read. */
-export function makeDriver(cookies: Cookie[]) {
+export function makeDriver(cookies: Cookie[], stateCookies: Cookie[] = cookies) {
   return {
     openHeaded: mock(async () => {}),
     openHeadless: mock(async () => {}),
     cookieList: mock(async () => cookies),
-    cookieListFromState: mock(async () => cookies),
+    cookieListFromState: mock(async () => stateCookies),
     closeSession: mock(async () => {}),
   };
 }

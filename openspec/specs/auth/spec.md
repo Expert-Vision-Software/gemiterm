@@ -1,9 +1,7 @@
 ## Purpose
 
 The interactive authentication capability for `gemiterm`. It owns the end-to-end login flow (launching a headed Chromium via `playwright-cli`, polling a running browser session for Google's sign-out indicator, capturing the `__Secure-1PSID` and `__Secure-1PSIDTS` cookies, persisting them to the profile storage, and closing the browser). It also owns the multi-profile management CLI surface (`auth` command) and the `playwright-cli` driver abstraction that auto-detects the local install (direct binary or `bunx @playwright/cli`).
-
 ## Requirements
-
 ### Requirement: CookieSession facade is the single authentication surface
 The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as the only authentication surface consumed by the CLI. The facade MUST expose `ensureSession(profile)`, `captureLogin(profile)`, `probe(profile)`, `refresh(profile)`, `activeProfiles()`, `findProfileForConversation(conversationId)`, and `createKeepalive(profile)` (constructing a wired session-keepalive loop for the profile that satisfies the REPL's start/stop handle contract), and MUST accept all collaborators (`BrowserRefresher`, `CookieStore`, `CookieValidator`, recovery rung, logger) through a single `CookieSessionDeps` deps-object so the implementation is replaceable at the seam. No file outside `src/auth/` may import the collaborators directly, and the facade MUST NOT expose raw collaborator accessors (e.g. getters returning the cookie store or the refresher) — CLI files obtain keepalive instances through `createKeepalive` only. `refresh(profile)` and the keepalive loop MUST share one in-process rotation floor: a rotation recorded by either consumer suppresses the other within the floor window (60 seconds by default), per the session-keepalive requirement.
 
@@ -45,6 +43,8 @@ The `src/auth/cookie-session.ts` module MUST expose a `CookieSession` facade as 
 ### Requirement: Detached refresh-runner survives the CLI and is observable
 The detached refresh-runner spawn MUST create the child in its own process group (`detached: true`) so it survives the exiting CLI process tree - including the `bun run` script-runner teardown on Windows, which otherwise kills it mid-flight. The child's stdout and stderr MUST be redirected (append) to `<configDir>/gemiterm.log` so every run records a start line and an outcome (`rotated=true`, timeout, or failure); a failure to open the log file MUST degrade to discarded output and MUST NOT block the refresh. The child environment MUST carry `GEMITERM_CONFIG_DIR` resolved to an absolute path. Within one process, `ensureSession` MUST spawn at most one detached runner per profile regardless of how many times the same stale profile is armed.
 
+Across processes, the spawn MUST be single-flight per profile: before spawning, the parent MUST atomically create `<profiles>/<name>/refresh-runner.lock` (payload: the acquiring pid). When the lock already exists and its mtime is within the stale window (120 s), the parent MUST skip the spawn entirely - the in-flight runner owns the rotation and jar observers (`waitForRotation`) still see its result. A lock whose mtime exceeds the stale window MUST be swept (removed, then the create retried once). The runner child MUST release the lock when it finishes (any outcome); the parent MUST NOT release it. A failure of the lock write itself MUST NOT block the refresh - the spawn proceeds.
+
 #### Scenario: Runner outlives the script-runner teardown
 - **WHEN** a stale-jar `ensureSession` runs inside `bun run dev list` and the CLI process tree exits seconds later
 - **THEN** the spawned runner process is still alive and completes its own probe/open/poll cycle (rotation or logged timeout) independently of the parent
@@ -61,6 +61,46 @@ The detached refresh-runner spawn MUST create the child in its own process group
 - **WHEN** `ensureSession` arms the same stale profile multiple times in one process
 - **THEN** exactly one detached runner is spawned for that profile
 
+#### Scenario: One runner per profile across processes
+- **WHEN** two CLI invocations arm the same stale profile within seconds of each other
+- **THEN** only the first spawns a detached runner; the second skips its spawn (lock held) and observes the rotation through the jar
+
+#### Scenario: Crashed runner's lock stops blocking
+- **WHEN** a runner died without releasing its lock and its mtime exceeds 120 s
+- **THEN** the next spawn attempt sweeps the stale lock and acquires it
+
+#### Scenario: Lock failure never blocks a refresh
+- **WHEN** the lock file cannot be written at spawn time
+- **THEN** the runner is still spawned and the refresh proceeds
+
+### Requirement: CookieSession awaits an in-flight detached rotation
+The facade MUST record, at `ensureSession` arm time, per profile: the routable `__Secure-1PSIDTS` baseline value of the armed jar and whether the jar was armed stale (storage mtime past the 30-minute detached-spawn threshold). On this record the facade MUST expose two additive members:
+
+- `rotationInFlight(profile)` - synchronous, resolving whether the last arm was stale and no rotation has been observed since.
+- `waitForRotation(profile, opts?)` - when the last arm was fresh (or the profile was never armed), it MUST resolve `null` immediately without polling; otherwise it MUST poll the on-disk jar (first check immediately, then at the configured poll interval) until the routable `__Secure-1PSIDTS` value differs from the recorded baseline or a timeout elapses (90 seconds by default - at or above the rotation budget of 60 s plus browser-open margin, so the wait can always cover the runner it is awaiting; overridable via `opts.timeoutMs` and an injectable dep for tests). On an observed change it MUST mark the rotation observed, re-arm from the refreshed jar, and resolve the fresh `ArmedSession`. On timeout it MUST resolve `null` and keep the rotation marked in flight.
+
+`waitForRotation` MUST NOT spawn a browser or refresh-runner, MUST NOT write cookies, and MUST NOT reject (jar read failures during polling are swallowed and polling continues until the deadline). The arm-first semantics of `ensureSession` are unchanged: a stale arm still resolves immediately with the on-disk cookies.
+
+#### Scenario: Fresh arm short-circuits the wait
+- **WHEN** `ensureSession("p")` arms a jar whose mtime is under 30 minutes old and `waitForRotation("p")` is then called
+- **THEN** the call resolves `null` without any polling delay, `rotationInFlight("p")` is `false`, and no jar read beyond the arm occurs
+
+#### Scenario: Rotation landing resolves the re-armed session
+- **WHEN** `ensureSession("p")` arms a stale jar (spawning the detached runner) and the on-disk jar's routable `__Secure-1PSIDTS` changes to a new value while `waitForRotation("p")` polls
+- **THEN** the call resolves an `ArmedSession` whose cookies are the refreshed on-disk jar, and `rotationInFlight("p")` subsequently returns `false`
+
+#### Scenario: Timeout resolves null and keeps the rotation in flight
+- **WHEN** `waitForRotation("p")` polls a jar whose `__Secure-1PSIDTS` never changes before the timeout
+- **THEN** the call resolves `null` after at most the configured timeout and `rotationInFlight("p")` remains `true`
+
+#### Scenario: The wait is passive
+- **WHEN** `waitForRotation("p")` runs against any profile state
+- **THEN** no refresh-runner is spawned, no browser session opens, and no cookie write occurs
+
+#### Scenario: Jar read failures do not reject the wait
+- **WHEN** a poll's jar read fails mid-wait and the rotation lands on a later poll
+- **THEN** the call still resolves the refreshed `ArmedSession` rather than rejecting
+
 ### Requirement: SDK cookie selection prefers the gemini.google.com-routable scope
 The armed SDK config (`secure1psid`/`secure1psidts`) and the rotation baseline MUST be derived by selecting the cookie that is RFC-6265-routable to `gemini.google.com`, never the first cookie by name. A jar that holds `__Secure-1PSID`/`__Secure-1PSIDTS` at both `.youtube.com` and `.google.com` scopes MUST yield the `.google.com` values (the `.youtube.com` values are a different session and fail Gemini auth). When no cookie of the name is routable to `gemini.google.com`, selection MUST fall back to any name match rather than returning null for an otherwise-present cookie.
 
@@ -73,11 +113,19 @@ The armed SDK config (`secure1psid`/`secure1psidts`) and the rotation baseline M
 - **THEN** selection falls back to that cookie's value (never `undefined`/`null` for a present cookie)
 
 ### Requirement: CookieSession.captureLogin captures the full browser jar (gate is not payload)
-`captureLogin(profile)` MUST open a headed browser (`https://gemini.google.com/app`) after printing a one-shot notification (containing `Opening headed browser` and the app URL, without blocking on input), poll the session's cookie list until BOTH `__Secure-1PSID` and `__Secure-1PSIDTS` are present (5-minute timeout), and then persist the COMPLETE browser storage state captured via `state-save` as the payload - filtered by domain (`.google.com`, `.youtube.com`, `accounts.google.com`) and by nothing else. No cookie-name filtering may exist in the capture path. The browser session MUST be closed in a `finally` block on every path. On success the method MUST print a confirmation containing the captured cookie count and the expiry derived from `__Secure-1PSIDTS.expires`; on timeout it MUST reject with a typed timeout error.
+`captureLogin(profile)` MUST open a headed browser (`https://gemini.google.com/app`) after printing a one-shot notification (containing `Opening headed browser` and the app URL, without blocking on input), poll the session's cookie list until BOTH `__Secure-1PSID` and `__Secure-1PSIDTS` are present AND routable to `https://gemini.google.com` (RFC 6265 domain/path/expiry matching — cookies present only at other scopes, e.g. `.youtube.com`, MUST NOT satisfy the gate) within the 5-minute timeout, and then persist the COMPLETE browser storage state captured via `state-save` as the payload - filtered by domain (`.google.com`, `.youtube.com`, `accounts.google.com`) and by nothing else. No cookie-name filtering may exist in the capture path. Before persisting, the filtered payload MUST pass `CookieValidator.validate`; a payload that fails validation (e.g. no gemini-routable `__Secure-1PSIDTS`) MUST NOT be persisted and `captureLogin` MUST reject with a typed unroutable-capture error, leaving any pre-existing jar byte-for-byte unchanged. On gate timeout with required cookies observed but never routable, `captureLogin` MUST reject with the same typed unroutable-capture error; on timeout without the required cookies observed at all it MUST reject with the typed timeout error. The browser session MUST be closed in a `finally` block on every path. On success the method MUST print a confirmation containing the captured cookie count and the expiry derived from `__Secure-1PSIDTS.expires`.
 
 #### Scenario: Gate waits for both required cookies; payload is the full jar
-- **WHEN** the cookie list first reports both `__Secure-1PSID` and `__Secure-1PSIDTS` while the browser also holds `SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `NID`
+- **WHEN** the cookie list first reports both `__Secure-1PSID` and `__Secure-1PSIDTS` routable to `gemini.google.com` while the browser also holds `SID`, `HSID`, `SSID`, `APISID`, `SAPISID`, `NID`
 - **THEN** the persisted jar contains all of those cookies (payload is never filtered to the gate set) and the confirmation reports the full count
+
+#### Scenario: YouTube-scoped cookies never satisfy the gate
+- **WHEN** the cookie list reports `__Secure-1PSID`/`__Secure-1PSIDTS` only at a `.youtube.com` scope (a persistent profile's pre-existing sibling session) and no gemini-routable pair appears within the timeout
+- **THEN** `captureLogin` rejects with the typed unroutable-capture error, nothing is persisted, and any pre-existing jar is byte-for-byte unchanged
+
+#### Scenario: Unroutable payload is never persisted
+- **WHEN** the gate has observed a routable pair but the `state-save` payload fails `CookieValidator.validate` (no gemini-routable `__Secure-1PSIDTS`)
+- **THEN** `saveFullJar` is not invoked, `captureLogin` rejects with the typed unroutable-capture error, and any pre-existing jar is byte-for-byte unchanged
 
 #### Scenario: Notification prints and does not block
 - **WHEN** `captureLogin` begins
@@ -88,7 +136,7 @@ The armed SDK config (`secure1psid`/`secure1psidts`) and the rotation baseline M
 - **THEN** the driver's session close is still invoked and the call rejects with the typed timeout error
 
 ### Requirement: BrowserRefresher rotates PSIDTS via headless persistent-profile page load
-The `src/auth/browser-refresher.ts` collaborator MUST provide `rotatePsidts(profile, baselineValue, timeoutMs = 60000)`: open the persistent-profile browser headless (`open --browser=chromium --persistent --profile=<profileDir>` without `--headed`) at `https://gemini.google.com/app`, poll the cookie list until the `__Secure-1PSIDTS` value differs from `baselineValue` or the timeout elapses, capture the full state via `state-save`, persist through the store's full-jar writer with the domain filter, and close the session in a `finally` block. On timeout or unchanged PSIDTS it MUST resolve `{ rotated: false }` without throwing and without persisting.
+The `src/auth/browser-refresher.ts` collaborator MUST provide `rotatePsidts(profile, baselineValue, timeoutMs = 60000, session?)`: open the persistent-profile browser headless (`open --browser=chromium --persistent --profile=<profileDir>` without `--headed`) at `https://gemini.google.com/app`, poll the cookie list until the `__Secure-1PSIDTS` value differs from `baselineValue` or the timeout elapses, capture the full state via `state-save`, persist through the store's full-jar writer with the domain filter, and close the session in a `finally` block. The playwright session name MUST default to `refresh-<profile>` and MUST be caller-overridable so concurrent callers (detached runner vs. recovery) never share a session name - closing a shared name kills the other caller's browser mid-poll. On timeout or unchanged PSIDTS it MUST resolve `{ rotated: false }` without throwing and without persisting.
 
 #### Scenario: Rotation detected and persisted
 - **WHEN** the headless page's cookie list reports an `__Secure-1PSIDTS` value different from the baseline within 60 seconds
@@ -101,6 +149,10 @@ The `src/auth/browser-refresher.ts` collaborator MUST provide `rotatePsidts(prof
 #### Scenario: Refresh preserves companion cookies
 - **WHEN** a rotation is persisted
 - **THEN** the stored jar still contains cookies the refresher did not rotate (e.g. `SID`, `HSID`, `APISID`) - the full-jar writer replaces, never trims
+
+#### Scenario: Callers scope their own session name
+- **WHEN** recovery rotates while a detached runner may still be alive for the same profile
+- **THEN** recovery's `open`/`close` use a session name distinct from `refresh-<profile>` (e.g. `recover-<profile>`), so neither caller can close the other's browser
 
 ### Requirement: CookieStore performs snapshot/delta CAS saves
 The `src/auth/cookie-store.ts` collaborator MUST provide `load(profile)` returning the jar plus a snapshot keyed by `(name, domain, path) -> value`, and `save(profile, cookies, snapshot)` writing ONLY entries this process changed, and ONLY where the on-disk value still matches the snapshot (compare-and-swap). A concurrent writer's fresher value for an entry this process did not change MUST survive the save. Writes MUST be atomic (temp file + rename) through the `io.ts` surface, and the on-disk format MUST remain the Playwright storage-state JSON.
@@ -144,11 +196,15 @@ The `src/auth/cookie-validation.ts` collaborator MUST raise a typed validation e
 - **THEN** validation passes both times and the tier-2 warning is logged exactly once
 
 ### Requirement: CookieSession.probe classifies live, phantom, or dead
-The facade's `probe(profile)` MUST classify a profile read-only as `live` (init GET yields session tokens AND the probe's `listChats` call returns at least one chat), `phantom` (tokens present AND zero chats), or `dead` (init GET yields no session tokens). The probe's `listChats` call MUST be unbounded so the observed chat count is real — this is network-identical to a `limit: 1` call because the SDK fetches the full chat list and slices client-side, and the ≥-one-chat signal is identical either way. The facade MUST additionally expose `probeDetailed(profile)` returning `{ state, chatCount }` (the same single classification pass, with the observed chat count; `dead` reports `chatCount: 0` without consulting the chats probe), and MUST re-export the result type so command layers never import the classifier collaborator directly. Both probes MUST NOT write cookies, rotate, or spawn a browser, and MUST NOT use the SDK's `models()` as a signal (it is a static table). The classifier remains the only sanctioned session-state oracle.
+The facade's `probe(profile)` MUST classify a profile read-only as `live` (init GET yields session tokens AND the probe's `listChats` call returns at least one chat), `phantom` (tokens present AND zero chats), or `dead` (init GET yields no session tokens). Token presence MUST be decided by value extraction, not name presence: a required init token (`SNlM0e`, `cfb2h`, `FdrFJe`) counts as present only when its regex extraction (`/"<token>":\s*"(.*?)"/`, ablation §6.2) yields a non-empty value; token keys with empty values (e.g. `"cfb2h":""`) MUST NOT count, and such HTML MUST classify `dead`. Tokens are present when at least one required token yields a non-empty extracted value. The probe's `listChats` call MUST be unbounded so the observed chat count is real — this is network-identical to a `limit: 1` call because the SDK fetches the full chat list and slices client-side, and the ≥-one-chat signal is identical either way. The facade MUST additionally expose `probeDetailed(profile)` returning `{ state, chatCount }` (the same single classification pass, with the observed chat count; `dead` reports `chatCount: 0` without consulting the chats probe), and MUST re-export the result type so command layers never import the classifier collaborator directly. Both probes MUST NOT write cookies, rotate, or spawn a browser, and MUST NOT use the SDK's `models()` as a signal (it is a static table). The classifier remains the only sanctioned session-state oracle.
 
 #### Scenario: Phantom is distinguishable from dead
 - **WHEN** the init GET extracts tokens but the probe's `listChats` call returns none
 - **THEN** `probe` resolves `phantom` (and `probeDetailed` resolves `{ state: "phantom", chatCount: 0 }`); and when the init GET extracts no tokens, they resolve `dead` / `{ state: "dead", chatCount: 0 }`
+
+#### Scenario: Token keys with empty values classify dead
+- **WHEN** the init GET HTML contains the token keys `SNlM0e`/`cfb2h`/`FdrFJe` only with empty extracted values (signed-out page shape, e.g. `"cfb2h":""`)
+- **THEN** `probe` resolves `dead` and `probeDetailed` resolves `{ state: "dead", chatCount: 0 }` without consulting the chats probe
 
 #### Scenario: Probe is read-only
 - **WHEN** `probe` or `probeDetailed` runs against any profile state
@@ -159,15 +215,27 @@ The facade's `probe(profile)` MUST classify a profile read-only as `live` (init 
 - **THEN** `probeDetailed` resolves `{ state: "live", chatCount: N }` and `probe` resolves `live`
 
 ### Requirement: CookieSession refresh-and-retry recovery rung
-The `src/auth/recovery.ts` collaborator MUST implement a recovery operation that, given a degraded classification, runs the synchronous headless refresh (`BrowserRefresher.rotatePsidts` with the on-disk PSIDTS as baseline), persists via the full-jar writer, re-arms the session exactly once, and on failure throws the existing `AuthenticationError` type so the headed re-login prompt contract is preserved. The retry count MUST be exactly one.
+The `src/auth/recovery.ts` collaborator MUST implement a recovery operation that, given a degraded classification, runs the synchronous headless refresh (`BrowserRefresher.rotatePsidts` with the on-disk PSIDTS as baseline) under the caller-scoped session name `recover-<profile>`, persists via the full-jar writer, re-arms the session exactly once, and on failure throws the existing `AuthenticationError` type so the headed re-login prompt contract is preserved. The retry count MUST be exactly one.
+
+Before opening any browser, the facade's `recover(profile)` MUST await an in-flight detached rotation (`rotationInFlight(profile)` → bounded `waitForRotation(profile)`); when the detached rotation lands during that wait, recovery MUST resolve the re-armed session without spawning or opening anything.
+
+When the refresh reports `{ rotated: false }` (no PSIDTS change from baseline within the rotate budget), the thrown `AuthenticationError` MUST state the no-change-from-baseline condition and that the browser session appears signed out server-side, pointing at `gemiterm auth` - distinct from the transport-failure message, which wraps the underlying error.
 
 #### Scenario: Recovery retries exactly once then throws
 - **WHEN** recovery runs and the refresh reports `{ rotated: false }`
-- **THEN** exactly one refresh attempt occurred and the operation rejects with `AuthenticationError`
+- **THEN** exactly one refresh attempt occurred and the operation rejects with `AuthenticationError` naming the no-change-from-baseline / signed-out-server-side condition
 
 #### Scenario: Successful rotation restores the session
 - **WHEN** the refresh rotates PSIDTS and re-arming succeeds
 - **THEN** recovery resolves with the re-armed cookies and no error surfaces
+
+#### Scenario: In-flight rotation satisfies recovery without a browser
+- **WHEN** `recover(profile)` runs while `rotationInFlight(profile)` is true and the detached rotation lands during the bounded wait
+- **THEN** recovery resolves the re-armed session, and no recovery browser session is opened
+
+#### Scenario: Recovery never shares the runner's session name
+- **WHEN** recovery proceeds to its own rotation
+- **THEN** the refresher is driven with the session name `recover-<profile>`, never `refresh-<profile>`
 
 ### Requirement: PlaywrightCliDriver headless and storage-state surface
 `PlaywrightCliDriver` MUST expose `openHeadless(url, profile, session?)` (identical argv to the headed form minus `--headed`), `stateSave(session, outputPath)` (wrapping `state-save <file>`), and MUST retain the auto-detect strategy selection and existing headed surface unchanged.
@@ -370,3 +438,47 @@ The auth module MUST provide a session-keepalive loop for the active profile tha
 #### Scenario: Failed tick never surfaces into the session
 - **WHEN** a rotation tick fails or reports `rotated: false`
 - **THEN** no error or prompt reaches the caller, a diagnostic is logged, and the next tick is scheduled
+
+### Requirement: CookieSession.captureLogin rejects with LoginCancelledError on browser close
+
+`CookieSession.captureLogin(profile)` MUST classify any `PlaywrightCliError` whose stderr contains the markers `is not open` or `not found` (case-insensitive) as a browser-closed condition. On the first such error from `driver.cookieList`, the gate loop MUST throw `LoginCancelledError` (a new typed error in `src/core/errors.ts`) instead of retrying until the login timeout. The gate loop MUST emit exactly one info-level log line containing `Gate poll cancelled` per cancellation. The existing `LoginTimeoutError` timeout path MUST remain in effect for all other errors.
+
+The capture `finally` MUST still invoke `driver.closeSession` (which already swallows the `not found` teardown error). `driver.cookieListFromState` and `cookieStore.saveFullJar` MUST NOT be invoked after a `LoginCancelledError`.
+
+The CLI top-level handler (`src/cli/index.ts`) MUST log the `LoginCancelledError` message at info level and exit with code 0. All other errors MUST continue to follow the existing `Command '<name>' failed: <message>` + exit 1 path.
+
+#### Scenario: Headed browser closed mid-poll cancels capture with a typed error
+
+- **WHEN** `captureLogin("p")` is running and the headed browser is closed before the gate cookies appear
+- **THEN** the call rejects with `LoginCancelledError` (NOT `LoginTimeoutError`); `driver.closeSession("p")` is invoked; `driver.cookieListFromState("p")` and `cookieStore.saveFullJar("p", ...)` are NOT invoked; exactly one info-level log line containing `Gate poll cancelled` is emitted; no debug-level `Gate poll failed` lines are emitted for the closed-browser error.
+
+#### Scenario: Transient cookieList errors still poll until timeout
+
+- **WHEN** `driver.cookieList` rejects with a `PlaywrightCliError` whose stderr contains neither marker
+- **THEN** the gate loop continues polling and eventually rejects with `LoginTimeoutError` (no behavior change).
+
+#### Scenario: isBrowserClosedError matches both known markers
+
+- **WHEN** the classifier is given a `PlaywrightCliError` with stderr `Browser foo is not open` or `session not found`
+- **THEN** it returns `true`; for any other stderr text or a non-`PlaywrightCliError` value it returns `false`.
+
+#### Scenario: CLI exit semantics for cancellation
+
+- **WHEN** `AuthCommand.execute` rejects with `LoginCancelledError`
+- **THEN** the CLI logs the message at info level and exits with code 0; the generic `Command 'auth' failed` error path is not used.
+
+### Requirement: findProfileForConversation consults stale profiles after their rotation lands
+The facade's `findProfileForConversation(conversationId)` MUST run two passes. Pass 1 is unchanged: live profiles (per the classifier) are consulted in `listProfiles()` order. When pass 1 finds no owner, pass 2 MUST consult profiles that were armed stale during this invocation and whose detached rotation landed (`waitForRotation(profile)` returned a session): for each such profile, in `listProfiles()` order, `profileHasConversation` MUST be evaluated against the refreshed jar. When no profile in either pass owns the conversation, the method MUST return `null`. The method MUST NOT spawn browsers, write cookies, or block on profiles whose rotation has not landed.
+
+#### Scenario: Conversation owned by a stale profile resolves after its rotation lands
+- **WHEN** conversation `c_x` is owned by profile `stale` (jar stale at arm time), no live profile owns `c_x`, and `stale`'s detached rotation lands during `findProfileForConversation("c_x")`
+- **THEN** the method returns `"stale"`
+
+#### Scenario: Stale profile whose rotation has not landed is not consulted
+- **WHEN** no live profile owns the conversation and a stale-armed profile's rotation is still in flight at the deadline
+- **THEN** the method returns `null` without waiting beyond the existing `waitForRotation` ceiling for that profile
+
+#### Scenario: Live profiles keep priority
+- **WHEN** conversation `c_x` is owned by both a live profile `a` (earlier in list order) and a rotation-landed stale profile `b`
+- **THEN** the method returns `"a"`
+

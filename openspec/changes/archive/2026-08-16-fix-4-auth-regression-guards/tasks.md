@@ -28,8 +28,8 @@ Prerequisite: fix-1, fix-2, fix-3 implemented and archived. Baseline test counts
   - Also supports `GATE_BASE=<sha>` for CI; local fallback: merge-base with upstream, then `HEAD~1`.
 - [x] 3.3 Add the CI step to `.github/workflows/test.yml` as warn-only; verify it triggers on a synthetic auth-only diff and stays silent on a docs-only diff outside the regex
   - Step added as warn-only (`::warning`, non-blocking) with PR-base/push-before sha resolution. Synthetic-diff verification done locally: auth-only diff → exit 1, covered diff → exit 0, opt-out → exit 0 with audit note. Full CI verification rides the fix-4 PR itself.
-- [ ] 3.4 Flip the CI step to blocking after one green warn-only run; update AGENTS.md build/test section with the new command
-  - AGENTS.md hardening is tracked under 5.3; flip happens after the first green warn-only run in CI.
+- [x] 3.4 Flip the CI step to blocking after one green warn-only run; update AGENTS.md build/test section with the new command
+  - Completed by fix-5 (2026-08-18): the warn-only step was flipped to blocking in `.github/workflows/test.yml` by `openspec/changes/fix-5-audit-remediations` task 4.1, keeping `SKIP_AUTH_REGRESSION_GATE=1` as the audited escape hatch.
 
 ## 4. Mutation canary
 
@@ -54,6 +54,6 @@ Prerequisite: fix-1, fix-2, fix-3 implemented and archived. Baseline test counts
 - [x] 6.1 Full gates: `bun run typecheck`, `bun run lint:mediation` (bash form), `bun test` — baseline intact plus net additions recorded
   - typecheck clean; `bash scripts/lint-path-mediation.sh` clean; full suite 937 pass / 0 fail / 2 pre-existing skips (baseline 917 + 20 auth-regression tests); `bun run canary:auth` detects all 3 mutations; `bun run check:auth-gate` pass/fail/opt-out paths verified locally.
 - [ ] 6.2 Verify gate + canary end-to-end in CI on a deliberately-injected local regression (screencap or log captured in PR)
-  - Requires the fix-4 PR's CI runs (warn-only gate on its own diff) plus one nightly canary run; cannot be completed from a dev machine.
+  - Pending completion by fix-5 (`openspec/changes/fix-5-audit-remediations` task 4.2): the blocking gate flip landed (see 3.4) and the mutation canary is green locally, but the CI end-to-end run rides the fix-5 PR and has not yet executed.
 - [ ] 6.3 `openspec validate fix-4-auth-regression-guards --strict`; sync specs (`auth-regression-gate` new, `testing`/`domain-model` deltas) and archive the change
-  - Blocked on 3.4 + 6.2 (CI-gated); archive after the first blocking-green run.
+  - Closure note (fix-5, 2026-08-18): this task was archived while unchecked. The archive-before-validate self-contradiction is recorded here by the 2026-08-17 audit's reconciliation — validation/sync/archive were effectively performed post-archive (the change is committed under `openspec/changes/archive/`). 3.4 (gate flip) was completed by fix-5 above; 6.2 (CI verification) remains pending the fix-5 PR's CI run.

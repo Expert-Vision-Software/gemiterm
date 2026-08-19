@@ -44,15 +44,20 @@ export class BrowserRefresher {
     profile: string,
     baselineValue: string | null,
     timeoutMs: number = DEFAULT_TIMEOUT_MS,
+    session?: string,
   ): Promise<RotationResult> {
-    const session = `refresh-${profile}`;
+    // Caller-scoped session name (openspec/changes/fix-rotation-dead-end):
+    // closing a session closes it by name, so concurrent callers (detached
+    // runner vs. recovery) must never share one - the winner's finally-close
+    // would kill the other's browser mid-poll.
+    const sessionName = session ?? `refresh-${profile}`;
     try {
-      await this.driver.openHeadless(GEMINI_APP_URL, profile, session);
+      await this.driver.openHeadless(GEMINI_APP_URL, profile, sessionName);
       const deadline = Date.now() + timeoutMs;
       for (;;) {
-        const observed = await this.pollPsidts(session);
+        const observed = await this.pollPsidts(sessionName);
         if (observed !== null && observed !== baselineValue) {
-          const jar = await this.driver.cookieListFromState(session);
+          const jar = await this.driver.cookieListFromState(sessionName);
           const filtered = filterToGeminiDomains(jar);
           await this.cookieStore.saveFullJar(profile, filtered);
           this.logger.info(
@@ -70,7 +75,7 @@ export class BrowserRefresher {
       }
     } finally {
       try {
-        await this.driver.closeSession(session);
+        await this.driver.closeSession(sessionName);
       } catch (err) {
         this.logger.debug(`Failed to close refresh session: ${err}`);
       }

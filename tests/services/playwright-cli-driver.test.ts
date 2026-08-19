@@ -5,6 +5,7 @@ import {
   PlaywrightCliDriver,
   PlaywrightCliError,
   PlaywrightCliUnavailableError,
+  isBrowserClosedError,
   type PlaywrightRunner,
   type PlaywrightRunnerResult,
   type PlaywrightStrategy,
@@ -498,7 +499,7 @@ describe("PlaywrightCliDriver", () => {
       await expect(d.closeSession("sess1")).resolves.toBeUndefined();
     });
 
-    test("propagates other PlaywrightCliError failures", async () => {
+test("propagates other PlaywrightCliError failures", async () => {
       const runner = createMockRunner();
       runner._run.mockResolvedValueOnce({
         exitCode: 1,
@@ -508,6 +509,38 @@ describe("PlaywrightCliDriver", () => {
       const d = new PlaywrightCliDriver({ runner });
 
       await expect(d.closeSession("sess1")).rejects.toBeInstanceOf(PlaywrightCliError);
+    });
+
+    test("swallows 'is not open' errors (browser closed mid-flight)", async () => {
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: "",
+        stderr: "Browser sess1 is not open. Run ...",
+      });
+      const d = new PlaywrightCliDriver({ runner });
+
+      await expect(d.closeSession("sess1")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("isBrowserClosedError", () => {
+    test("detects 'is not open' stderr", () => {
+      expect(isBrowserClosedError(new PlaywrightCliError("cookie-list", 1, "Browser p is not open"))).toBe(true);
+    });
+
+    test("detects 'not found' stderr", () => {
+      expect(isBrowserClosedError(new PlaywrightCliError("close", 1, "session not found"))).toBe(true);
+    });
+
+    test("rejects unrelated PlaywrightCliError stderr", () => {
+      expect(isBrowserClosedError(new PlaywrightCliError("cookie-list", 1, "network blip"))).toBe(false);
+    });
+
+    test("rejects non-PlaywrightCliError values", () => {
+      expect(isBrowserClosedError(new Error("Browser p is not open"))).toBe(false);
+      expect(isBrowserClosedError("Browser p is not open")).toBe(false);
+      expect(isBrowserClosedError(null)).toBe(false);
     });
   });
 

@@ -2,39 +2,39 @@
 
 ### Requirement: DeleteCommand
 
-The system MUST provide a `delete` command implemented by `DeleteCommand` in `src/cli/commands/delete-command.ts`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids (e.g. `id1,id2,id3`); the command MUST split comma-separated tokens into individual ids. The command MUST deduplicate ids after splitting. The command MUST support `--force/-f` and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. When ids are provided, the command MUST validate each id via `validateConversationId`; the first invalid id MUST cause the command to print an error and exit with code 1. When `--force` is not set, the command MUST prompt the user once with `Delete N conversations?` via the prompts-facade `confirm` helper, after printing a numbered list of `• <id> — "<title>"` (one per id); on confirmation it MUST iterate over the ids and, for each id, look up the owning profile via `ProfileAuthManager.findProfileForConversation(conversationId)` and send a `DeleteConversationCommand` to the mediator with payload `{ conversationId, profileName? }`; when the lookup returns a profile name, `profileName` MUST be set on the payload so the handler routes to that profile's `GeminiClientService`. When no profile owns the conversation, the id MUST be skipped with a warning `Skipped '<id>': no owning profile found. Use 'gemiterm list --all-profiles' to see which profile it belongs to.` printed in red to stderr, and the loop MUST continue. The command MUST print `Conversation '<id>' deleted.` for each successful id. The command MUST print `Failed to delete conversation '<id>': <message>` in red for each id whose mediator call fails or returns `{ success: false }`. After the iteration, when any id failed, the process MUST exit with code 1; otherwise the process MUST exit with code 0. In a single-profile setup the behavior MUST be unchanged: the default profile is used without a per-id lookup.
+The system MUST provide a `delete` command implemented by `DeleteCommand` in `src/cli/commands/delete-command.ts`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids (e.g. `id1,id2,id3`); the command MUST split comma-separated tokens into individual ids. The command MUST deduplicate ids after splitting. The command MUST support `--force/-f` and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. When ids are provided, the command MUST validate each id via `validateConversationId`; the first invalid id MUST cause the command to print an error and exit with code 1. When `--force` is not set, the command MUST prompt the user once with `Delete N conversations?` via the prompts-facade `confirm` helper, after printing a numbered list of `• <id> — "<title>"` (one per id); on confirmation it MUST iterate over the ids and, for each id, resolve the owning profile via the shared `resolveProfile` helper (`src/cli/utils/profile-resolution.ts`, which consults `context.cookieSession.activeProfiles()` / `context.cookieSession.findProfileForConversation(conversationId)`), then call `client.deleteChat(conversationId)` on the resolved profile's `GeminiClientService` (via `(await context.getGeminiClient()).forProfile(profileName)` when a profile name is resolved, or the default client otherwise). When no profile owns the conversation, the id MUST be skipped with a warning `Skipped '<id>': no owning profile found. Use 'gemiterm list --all-profiles' to see which profile it belongs to.` printed in red to stderr, and the loop MUST continue. The command MUST print `Conversation '<id>' deleted.` for each successful id. The command MUST print `Failed to delete conversation '<id>': <message>` in red for each id whose `deleteChat` call throws. After the iteration, when any id failed, the process MUST exit with code 1; otherwise the process MUST exit with code 0. In a single-profile setup the behavior MUST be unchanged: the default profile is used without a per-id lookup.
 
-#### Scenario: Delete with a single id sends a DeleteConversationCommand
+#### Scenario: Delete with a single id calls deleteChat once
 
 - **WHEN** the user runs `gemiterm delete conv-abc123 --force`
 - **THEN** the command resolves to a single-element list `[conv-abc123]`
-- **AND** the mediator receives a `DeleteConversationCommand` with `payload.conversationId === "conv-abc123"`
+- **AND** `client.deleteChat("conv-abc123")` is called once
 - **AND** no readline prompt is shown
-- **AND** on `result.success === true` the output contains `deleted.`
+- **AND** the output contains `deleted.`
 
-#### Scenario: Delete with comma-separated ids prompts once and sends N DeleteConversationCommands
+#### Scenario: Delete with comma-separated ids prompts once and calls deleteChat N times
 
 - **WHEN** the user runs `gemiterm delete id1,id2,id3` and answers `yes` to the prompt
 - **THEN** the command prints a numbered list of three `• <id> — "<title>"` lines before the prompt
 - **AND** a single `Delete N conversations?` confirm is shown (one prompt for the batch)
-- **AND** three `DeleteConversationCommand`s are sent in order, one per id
+- **AND** `client.deleteChat(...)` is called three times in order, one per id
 
 #### Scenario: Delete with comma-separated ids and --force skips the prompt
 
 - **WHEN** the user runs `gemiterm delete id1,id2,id3 --force`
 - **THEN** no prompt is shown
-- **AND** the iteration proceeds and three `DeleteConversationCommand`s are sent
+- **AND** the iteration proceeds and `client.deleteChat(...)` is called three times
 
 #### Scenario: Delete without --force and no confirmation aborts the batch
 
 - **WHEN** the user runs `gemiterm delete id1,id2,id3` and answers `no` to the prompt
-- **THEN** no `DeleteConversationCommand` is sent and the output contains `Cancelled.`
+- **THEN** no `client.deleteChat(...)` call is made and the output contains `Cancelled.`
 
 #### Scenario: Delete with whitespace around comma-separated ids trims and splits
 
 - **WHEN** the user runs `gemiterm delete "id1, id2 , id3" --force`
 - **THEN** the three ids are parsed as `id1`, `id2`, `id3` (whitespace trimmed)
-- **AND** three `DeleteConversationCommand`s are sent
+- **AND** `client.deleteChat(...)` is called three times
 
 #### Scenario: Delete with no ids errors and exits 1
 
@@ -46,24 +46,24 @@ The system MUST provide a `delete` command implemented by `DeleteCommand` in `sr
 - **WHEN** the user runs `gemiterm delete valid-id,BAD/ID --force` and `validateConversationId` rejects `BAD/ID`
 - **THEN** the output contains the validator's error message
 - **AND** the process exits with code 1
-- **AND** no `DeleteConversationCommand` is sent for `valid-id`
+- **AND** no `client.deleteChat(...)` call is made for `valid-id`
 
 #### Scenario: Delete with one failed id exits 1 but reports the success
 
-- **WHEN** the user runs `gemiterm delete id1,id2 --force` and the mediator returns `{ success: false }` for `id1` and `{ success: true }` for `id2`
+- **WHEN** the user runs `gemiterm delete id1,id2 --force` and `client.deleteChat` throws for `id1` but succeeds for `id2`
 - **THEN** the output contains `Failed to delete conversation 'id1'` and `Conversation 'id2' deleted.`
 - **AND** the process exits with code 1
 
 #### Scenario: Delete with one skipped id (no owning profile) continues with the rest
 
-- **WHEN** the user runs `gemiterm delete id1,id2 --force` and `findProfileForConversation("id1")` returns `null`
+- **WHEN** the user runs `gemiterm delete id1,id2 --force` and `resolveProfile` reports no owning profile for `id1`
 - **THEN** the output contains `Skipped 'id1': no owning profile found.`
-- **AND** a `DeleteConversationCommand` is still sent for `id2`
+- **AND** `client.deleteChat(...)` is still called for `id2`
 
 #### Scenario: Delete with -f short flag
 
 - **WHEN** the user runs `gemiterm delete id1,id2,id3 -f`
-- **THEN** the command is equivalent to `--force` (no prompt, mediator calls proceed)
+- **THEN** the command is equivalent to `--force` (no prompt, deletion calls proceed)
 
 #### Scenario: Delete --help shows usage
 
@@ -72,7 +72,7 @@ The system MUST provide a `delete` command implemented by `DeleteCommand` in `sr
 
 ### Requirement: ExportCommand
 
-The system MUST provide an `export` command implemented by `ExportCommand` in `src/cli/commands/export-command.ts`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids (e.g. `id1,id2,id3`); the command MUST split comma-separated tokens into individual ids. The command MUST deduplicate ids after splitting. The command MUST support `--out/-o <path>`, `--out-dir/-d <dir>`, `--format/-f <markdown|json>` (default `markdown`), `--include-metadata`, and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. The command MUST reject combining `--out` with more than one id by printing `Error: cannot use --out together with comma-separated ids. Specify --out-dir instead.` and exiting with code 1. When `--out-dir` is supplied, the command MUST create the directory (and any parents) via `infrastructure/io.ts:ensureDir`. The command MUST iterate the ids in order and, for each id, send a `FetchChatQuery` to the mediator with `payload.conversationId` and write the formatted output to `<out-dir>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` (where `ext` is `md` for markdown and `json` for json) when `--out-dir` is set, or to `<cwd>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` when `--out-dir` is not set. The legacy single-id `--out` flow MUST be preserved: when exactly one id is provided and `--out` is supplied, the command writes to that path (and not to the default filename). The command MUST reject combining `--out` with more than one id by printing `Error: cannot use --out together with comma-separated ids. Specify --out-dir instead.` and exiting with code 1. Markdown output MUST be produced by `formatChatAsMarkdown` and JSON output MUST be produced by `formatChatAsJson`. The command MUST print `Exported conversation '<id>' to: <path>` for each success. On any per-id failure, the command MUST print `Failed to export conversation '<id>': <message>` in red and continue with the next id. After the iteration, the command MUST print a summary line `Exported: <n>` (and `Failed: <m>` when m > 0) and `Output: <dir>`. When the mediator's `FetchChatQuery` handler throws for one of the ids, the failing id is counted as a failure and the summary line includes `Failed: <m>`. When all ids fail, the process MUST exit with code 1; when all succeed, the process MUST exit with code 0.
+The system MUST provide an `export` command implemented by `ExportCommand` in `src/cli/commands/export-command.ts`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids (e.g. `id1,id2,id3`); the command MUST split comma-separated tokens into individual ids. The command MUST deduplicate ids after splitting. The command MUST support `--out/-o <path>`, `--out-dir/-d <dir>`, `--format/-f <markdown|json>` (default `markdown`), `--include-metadata`, and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. The command MUST reject combining `--out` with more than one id by printing `Error: cannot use --out together with comma-separated ids. Specify --out-dir instead.` and exiting with code 1. When `--out-dir` is supplied, the command MUST create the directory (and any parents) via `infrastructure/io.ts:ensureDir`. The command MUST iterate the ids in order and, for each id, fetch the conversation via the `GeminiClientService` obtained from `context.getGeminiClient()` (using `fetchChatForRequest` from `src/cli/utils/gemini-queries.ts` to resolve the per-profile client), and write the formatted output to `<out-dir>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` (where `ext` is `md` for markdown and `json` for json) when `--out-dir` is set, or to `<cwd>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` when `--out-dir` is not set. The legacy single-id `--out` flow MUST be preserved: when exactly one id is provided and `--out` is supplied, the command writes to that path (and not to the default filename). The command MUST reject combining `--out` with more than one id by printing `Error: cannot use --out together with comma-separated ids. Specify --out-dir instead.` and exiting with code 1. Markdown output MUST be produced by `formatChatAsMarkdown` and JSON output MUST be produced by `formatChatAsJson`. The command MUST print `Exported conversation '<id>' to: <path>` for each success. On any per-id failure, the command MUST print `Failed to export conversation '<id>': <message>` in red and continue with the next id. After the iteration, the command MUST print a summary line `Exported: <n>` (and `Failed: <m>` when m > 0) and `Output: <dir>`. When the per-id fetch throws for one of the ids, the failing id is counted as a failure and the summary line includes `Failed: <m>`. When all ids fail, the process MUST exit with code 1; when all succeed, the process MUST exit with code 0.
 
 #### Scenario: Export with a single id writes the default-named file in CWD
 
@@ -118,7 +118,7 @@ The system MUST provide an `export` command implemented by `ExportCommand` in `s
 
 #### Scenario: Export with one failed id continues with the rest and reports a summary
 
-- **WHEN** the user runs `gemiterm export id1,id2` and the mediator's `FetchChatQuery` handler throws for `id1` but resolves for `id2`
+- **WHEN** the user runs `gemiterm export id1,id2` and the per-id fetch throws for `id1` but resolves for `id2`
 - **THEN** the output contains `Failed to export conversation 'id1': <message>` in red
 - **AND** the output contains `Exported conversation 'id2' to: <path>`
 - **AND** the summary line `Exported: 1` and `Failed:  1` is printed
@@ -131,7 +131,7 @@ The system MUST provide an `export` command implemented by `ExportCommand` in `s
 
 ### Requirement: CommandRegistry
 
-The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all 12 commands by name: `auth`, `profile`, `status`, `list`, `fetch`, `continue`, `new`, `delete`, `export`, `export-all`, `install-browser`, and `summarize`. The `CliCommandContext` interface MUST carry `{ verbose: boolean, mediator: Mediator, profileAuthManager: ProfileAuthManager }`. The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
+The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.ts` that stores `CliCommand` instances keyed by command name. The `register(name, handler)` method MUST throw `Command already registered: <name>` when the same name is registered twice. The `getHandler(name)` method MUST return the handler for the name or `undefined` if not present. The `has(name)` method MUST return a boolean. The `getRegisteredNames()` method MUST return an array of all registered names. The `registerAllCommands()` method MUST register all 13 command classes by name: `auth` (with `login` registered as an alias of the same `AuthCommand` instance), `status`, `list`, `fetch`, `continue`, `new`, `delete`, `export`, `export-all`, `install-browser`, `install-skills`, `models`, and `summarize` (added by this change) — 14 registered names / 13 command classes. There is no `profile` command. The `CliCommandContext` interface MUST carry `{ verbose: boolean; cookieSession: CookieSession; profileLifecycle: ProfileLifecycle; exportStrategies: { single: ExportStrategy; batch: ExportStrategy }; getGeminiClient: () => Promise<GeminiClientService>; listProfiles: () => Promise<string[]> }`. The `CliCommand` interface MUST require `name: string`, `description: string`, and `execute(args, context): Promise<void>`.
 
 #### Scenario: Registering the same name twice throws
 
@@ -148,16 +148,16 @@ The system MUST provide a `CommandRegistry` class in `src/cli/command-registry.t
 - **WHEN** no handler is registered for `nope`
 - **THEN** `getHandler("nope")` returns `undefined` and `has("nope")` returns `false`
 
-#### Scenario: registerAllCommands registers all 12 commands
+#### Scenario: registerAllCommands registers all commands
 
 - **WHEN** `registerAllCommands()` is called
-- **THEN** `getRegisteredNames()` returns an array that includes `auth`, `profile`, `status`, `list`, `fetch`, `continue`, `new`, `delete`, `export`, `export-all`, `install-browser`, and `summarize` (12 entries total)
+- **THEN** `getRegisteredNames()` returns an array that includes `auth`, `login`, `status`, `list`, `fetch`, `continue`, `new`, `delete`, `export`, `export-all`, `install-browser`, `install-skills`, `models`, and `summarize` (14 entries total)
 
 ## ADDED Requirements
 
 ### Requirement: SummarizeCommand
 
-The system MUST provide a `summarize` command implemented by `SummarizeCommand` in `src/cli/commands/summarize-command.ts`. The command MUST be registered under the name `summarize`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids; the command MUST split comma-separated tokens into individual ids. The command MUST support `--out/-o <path>` and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. When ids are provided, the command MUST send a `ListChatsQuery` to the mediator to obtain the chat metadata for the summary header (the per-id content is fetched via a `FetchChatQuery` per id). For each id whose `FetchChatQuery` fails, the command MUST log a warning `Skipped '<id>': <message>` to stderr and continue with the rest. The command MUST call `summarizeChatsLocally` from `src/services/local-summarizer.ts` to compute the summary structure, MUST call `formatBulkSummary` to render markdown, and MUST write the rendered content via `infrastructure/io.ts:writeTextFile` to the path supplied by `--out` or, when `--out` is not set, to a default file in the current working directory named `gemiterm-bulk-summary-<YYYY-MM-DD-HHMMSS>.md`. The command MUST print `Bulk summary written to: <path>`. When `process.stdin.isTTY === true`, the command MUST additionally call the prompts-facade `confirm` helper with message `Open a new chat with this file as context?`; on a yes answer, the command MUST look up the active profile via `ProfileAuthManager.getActiveProfiles()` (or the single default profile), MUST invoke `CommandRegistry.getHandler("new")` with argv `["--prompt-file", outputPath, "--profile", profileName]` (omitting `--profile` when no active profile is resolvable), and MUST return after the new command completes. When `process.stdin.isTTY` is not `true`, the command MUST skip the prompt and MUST NOT spawn the new command. The command MUST NOT call Gemini or any other LLM; the summary is computed entirely from the local chat content via the `local-summarizer` service.
+The system MUST provide a `summarize` command implemented by `SummarizeCommand` in `src/cli/commands/summarize-command.ts`. The command MUST be registered under the name `summarize`. The command MUST accept one or more positional `<conversation_id>` arguments, each of which MAY be a single id or a comma-separated list of ids; the command MUST split comma-separated tokens into individual ids. The command MUST support `--out/-o <path>` and `--help/-h`. When no ids are provided, the command MUST print `Error: at least one conversation ID is required.` and exit with code 1. When ids are provided, the command MUST call `client.listChats()` (via the `GeminiClientService` obtained from `context.getGeminiClient()`) to obtain the chat metadata for the summary header, and MUST fetch each conversation via `fetchChatForRequest` from `src/cli/utils/gemini-queries.ts`. For each id whose fetch fails, the command MUST log a warning `Skipped '<id>': <message>` to stderr and continue with the rest. The command MUST call `summarizeChatsLocally` from `src/services/local-summarizer.ts` to compute the summary structure, MUST call `formatBulkSummary` to render markdown, and MUST write the rendered content via `infrastructure/io.ts:writeTextFile` to the path supplied by `--out` or, when `--out` is not set, to a default file in the current working directory named `gemiterm-bulk-summary-<YYYY-MM-DD-HHMMSS>.md`. The command MUST print `Bulk summary written to: <path>`. When `process.stdin.isTTY === true`, the command MUST additionally call the prompts-facade `confirm` helper with message `Open a new chat with this file as context?`; on a yes answer, the command MUST look up the active profile via `context.cookieSession.activeProfiles()` (falling back to the default profile via `getDefaultProfileName()` / `context.listProfiles()`), MUST invoke `CommandRegistry.getHandler("new")` with argv `["--prompt-file", outputPath, "--profile", profileName]` (omitting `--profile` when no active profile is resolvable), and MUST return after the new command completes. When `process.stdin.isTTY` is not `true`, the command MUST skip the prompt and MUST NOT spawn the new command. The command MUST NOT call Gemini or any other LLM; the summary is computed entirely from the local chat content via the `local-summarizer` service.
 
 #### Scenario: Summarize with comma-separated ids writes the summary file
 
@@ -175,9 +175,9 @@ The system MUST provide a `summarize` command implemented by `SummarizeCommand` 
 - **WHEN** the user runs `gemiterm summarize`
 - **THEN** the output contains `Error: at least one conversation ID is required.` and the process exits with code 1
 
-#### Scenario: Summarize with one failed FetchChatQuery continues with the rest
+#### Scenario: Summarize with one failed fetch continues with the rest
 
-- **WHEN** the user runs `gemiterm summarize id1,id2,id3` and the mediator's `FetchChatQuery` handler throws for `id2`
+- **WHEN** the user runs `gemiterm summarize id1,id2,id3` and the per-id fetch throws for `id2`
 - **THEN** the output contains `Skipped 'id2': <message>` in red
 - **AND** the summary file is written and contains per-note extracts for `id1` and `id3`
 
@@ -204,8 +204,8 @@ The system MUST provide a `summarize` command implemented by `SummarizeCommand` 
 #### Scenario: Summarize does not call any LLM
 
 - **WHEN** the user runs `gemiterm summarize id1,id2,id3`
-- **THEN** the only mediator calls are one `ListChatsQuery` and N `FetchChatQuery` calls
-- **AND** no `StartNewChatCommand` and no `SendMessageCommand` is sent during the summarize execution (the `StartNewChatCommand` may be sent later by the spawned `new` command, but not by `summarize` itself)
+- **THEN** the only Gemini-client calls are one `client.listChats()` and N per-id fetches
+- **AND** no `sendMessage` / `startNewChat` call is made during the summarize execution (the spawned `new` command may make such a call later, but not `summarize` itself)
 
 #### Scenario: Summarize --help shows usage
 

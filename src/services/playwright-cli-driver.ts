@@ -6,7 +6,15 @@ const CLI_BIN_DIRECT = "playwright-cli";
 const CLI_BIN_FALLBACK = "bunx";
 const CLI_PACKAGE = "@playwright/cli";
 const PROBE_TIMEOUT_MS = 5_000;
-const BROWSER_CLOSED_MESSAGE = "not found";
+const BROWSER_CLOSED_MARKERS = ["is not open", "not found"] as const;
+
+export function isBrowserClosedError(err: unknown): boolean {
+  if (!(err instanceof PlaywrightCliError)) {
+    return false;
+  }
+  const haystack = err.message.toLowerCase();
+  return BROWSER_CLOSED_MARKERS.some((marker) => haystack.includes(marker));
+}
 
 export class PlaywrightCliError extends Error {
   constructor(command: string, exitCode: number, stderr: string) {
@@ -213,7 +221,7 @@ export class PlaywrightCliDriver {
     try {
       await this.runCli(this.withSession(session, ["close"]));
     } catch (err) {
-      if (err instanceof PlaywrightCliError && err.message.toLowerCase().includes(BROWSER_CLOSED_MESSAGE)) {
+      if (isBrowserClosedError(err)) {
         return;
       }
       throw err;

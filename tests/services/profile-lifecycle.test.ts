@@ -234,6 +234,17 @@ describe("ProfileLifecycle", () => {
   });
 
   describe("delete action", () => {
+    let originalTty: boolean | undefined;
+
+    beforeEach(() => {
+      originalTty = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(process.stdin, "isTTY", { value: originalTty, configurable: true });
+    });
+
     test("prints Cancelled. and skips deletion when declined", async () => {
       const profileManager = makeProfileManager();
       const { lifecycle, logSpy } = makeLifecycle({ profileManager });
@@ -245,6 +256,20 @@ describe("ProfileLifecycle", () => {
 
       expect(profileManager.delete).not.toHaveBeenCalled();
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Cancelled."));
+    });
+
+    test("non-TTY without --yes throws a clear error and does NOT delete", async () => {
+      Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+
+      const profileManager = makeProfileManager();
+      const { lifecycle } = makeLifecycle({ profileManager });
+
+      spyOn(configModule, "listProfiles").mockReturnValue(["work"]);
+
+      await expect(
+        lifecycle.manageProfiles("delete", { name: "work" }),
+      ).rejects.toThrow(/--yes to delete in non-interactive mode/);
+      expect(profileManager.delete).not.toHaveBeenCalled();
     });
 
     test("deletes the profile when confirmed", async () => {

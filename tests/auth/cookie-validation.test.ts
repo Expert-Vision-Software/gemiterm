@@ -128,7 +128,25 @@ describe("CookieValidator tier 1", () => {
       cookie({ name: "__Secure-1PSID" }),
       cookie({ name: "__Secure-1PSIDTS", domain: ".youtube.com" }),
     ];
-    expect(() => validator.validate(jar)).toThrow(SessionValidationError);
+    expect(() => validator.validate(jar)).toThrow(
+      new SessionValidationError(
+        `Cookie __Secure-1PSIDTS is expired or not routable to https://gemini.google.com/app — present scopes: [.youtube.com]. Run 'gemiterm auth' to authenticate.`,
+      ),
+    );
+  });
+
+  test("names every present scope when multiple unroutable PSIDTS siblings exist", () => {
+    const validator = new CookieValidator({ logger: makeLogger() });
+    const jar = [
+      cookie({ name: "__Secure-1PSID" }),
+      cookie({ name: "__Secure-1PSIDTS", domain: ".youtube.com" }),
+      cookie({ name: "__Secure-1PSIDTS", domain: ".accounts.google.com" }),
+    ];
+    expect(() => validator.validate(jar)).toThrow(
+      new SessionValidationError(
+        `Cookie __Secure-1PSIDTS is expired or not routable to https://gemini.google.com/app — present scopes: [.youtube.com, .accounts.google.com]. Run 'gemiterm auth' to authenticate.`,
+      ),
+    );
   });
 
   test("raises on present-but-unroutable PSIDTS (wrong path scope)", () => {

@@ -216,6 +216,37 @@ export async function confirm(opts: ConfirmOptions): Promise<boolean> {
   }
 }
 
+// TTY-gate idiom (fix-8): wrap a `confirm` call with the three-state
+// fallback the facade already enforces. The handler map:
+//   - accepted === true  → invoke `onAccept`
+//   - accepted === false → invoke `onDecline` (user cancel is mapped to a
+//                          decline by the facade; CancellationError is treated
+//                          the same way here for symmetry with `list`).
+//   - NonInteractiveError → invoke `onNonInteractive` (stderr diagnostic +
+//                          typed error throw is the canonical form — the
+//                          caller is responsible for the message and the
+//                          rethrow shape).
+// `onNonInteractive` MAY throw; the helper does not catch it.
+// `onAccept` / `onDecline` MUST NOT throw (they return T).
+// Re-thrown non-TTY errors propagate.
+export async function runInteractiveConfirm<T>(opts: {
+  message: string;
+  defaultValue?: boolean;
+  onAccept: () => T | Promise<T>;
+  onDecline: () => T | Promise<T>;
+  onNonInteractive: () => never;
+}): Promise<T> {
+  let accepted: boolean;
+  try {
+    accepted = await confirm({ message: opts.message, default: opts.defaultValue });
+  } catch (error) {
+    if (error instanceof NonInteractiveError) return opts.onNonInteractive();
+    if (error instanceof CancellationError) return await opts.onDecline();
+    throw error;
+  }
+  return accepted ? await opts.onAccept() : await opts.onDecline();
+}
+
 export interface SelectChoice<T> {
   value: T;
   label: string;

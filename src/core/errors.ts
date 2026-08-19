@@ -1,3 +1,5 @@
+import type { SessionState } from "./types.ts";
+
 export class GemitermError extends Error {
   constructor(message: string) {
     super(message);
@@ -6,9 +8,13 @@ export class GemitermError extends Error {
 }
 
 export class AuthenticationError extends GemitermError {
-  constructor(message = "Not authenticated. Please run 'gemiterm login' first.") {
+  readonly profileName?: string;
+  readonly sessionState?: SessionState;
+  constructor(message = "Not authenticated. Please run 'gemiterm login' first.", opts: { profileName?: string; sessionState?: SessionState } = {}) {
     super(message);
     this.name = "AuthenticationError";
+    this.profileName = opts.profileName;
+    this.sessionState = opts.sessionState;
   }
 }
 
@@ -58,5 +64,21 @@ export class LoginTimeoutError extends GemitermError {
   constructor(timeoutMs: number) {
     super(`Authentication timed out after ${timeoutMs}ms. No auth cookies detected.`);
     this.name = "LoginTimeoutError";
+  }
+}
+
+export class LoginCancelledError extends GemitermError {
+  constructor(message = "Authentication cancelled: the headed browser was closed before login completed.") {
+    super(message);
+    this.name = "LoginCancelledError";
+  }
+}
+
+export class LoginUnroutableError extends GemitermError {
+  constructor(
+    message = "Authentication did not produce gemini-routable cookies (no __Secure-1PSID/TS routable to https://gemini.google.com). Re-run 'gemiterm auth' and complete sign-in on the gemini.google.com page.",
+  ) {
+    super(message);
+    this.name = "LoginUnroutableError";
   }
 }

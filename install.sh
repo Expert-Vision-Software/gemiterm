@@ -251,30 +251,27 @@ if [[ "$PACKAGE_MANAGER_X" = "bunx" ]] && ! command -v bun >/dev/null 2>&1; then
     fi
 fi
 
-# --- Install Chromium (task 3.7) ---
+# --- Install Chrome for Testing (task 3.7) ---
 if $WHAT_IF; then
-    echo "[WhatIf] Would run: $PACKAGE_MANAGER_X @playwright/cli install chromium"
+    echo "[WhatIf] Would run: $PACKAGE_MANAGER_X @playwright/cli install-browser chrome-for-testing"
 else
-    echo "Installing Chromium browser for Playwright..."
-    if ! $PACKAGE_MANAGER_X @playwright/cli install chromium; then
-        echo "Chromium installation failed. Re-run the installer after fixing the issue, or run '${PACKAGE_MANAGER_X} @playwright/cli install chromium' manually."
+    echo "Installing Chrome for Testing browser for Playwright..."
+    if ! $PACKAGE_MANAGER_X @playwright/cli install-browser chrome-for-testing; then
+        echo "Chrome for Testing installation failed. Re-run the installer after fixing the issue, or run '${PACKAGE_MANAGER_X} @playwright/cli install-browser chrome-for-testing' manually."
         exit 1
     fi
 fi
 
-# --- Verify Chromium (task 3.8) ---
+# --- Verify Chrome for Testing (task 3.8) ---
 if $WHAT_IF; then
-    echo "[WhatIf] Would verify Chromium installation in $HOME/.cache/ms-playwright"
+    echo "[WhatIf] Would verify Chrome for Testing installation in $HOME/.cache/ms-playwright"
 else
-    CHROME_PATH=$(find "$HOME/.cache/ms-playwright" -path '*/chromium-*/chrome-linux/chrome' -type f -executable 2>/dev/null | head -n 1)
-    if [[ -z "$CHROME_PATH" ]]; then
-        CHROME_PATH=$(find "$HOME/.cache/ms-playwright" -path '*/chromium-*' -name chrome -type f -executable 2>/dev/null | head -n 1)
-    fi
+    CHROME_PATH=$(find "$HOME/.cache/ms-playwright" -path '*/chromium-*' -name chrome -type f -executable 2>/dev/null | head -n 1)
 
     if [[ -n "$CHROME_PATH" ]]; then
-        echo "Chromium verified at $CHROME_PATH"
+        echo "Chrome for Testing verified at $CHROME_PATH"
     else
-        echo "Chromium installation verification failed. Re-run the installer after fixing the network, or run '${PACKAGE_MANAGER_X} @playwright/cli install chromium' manually."
+        echo "Chrome for Testing installation verification failed. Re-run the installer after fixing the network, or run '${PACKAGE_MANAGER_X} @playwright/cli install-browser chrome-for-testing' manually."
         exit 1
     fi
 fi

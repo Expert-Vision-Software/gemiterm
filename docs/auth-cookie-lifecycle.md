@@ -1,6 +1,6 @@
 # Auth & cookie lifecycle — design notes and field findings
 
-**Last Updated:** 2026-08-17
+**Last Updated:** 2026-08-18
 
 > **Status:** design notes and field findings for GemiTerm's auth stack, and the
 > design target for the planned `CookieSession` deep-module replacement (see
@@ -872,10 +872,283 @@ do not re-litigate them.
   `waitForRotation(profile)` (bounded 30 s poll of the on-disk jar for a
   PSIDTS change; passive — spawns/writes nothing; never rejects) and
   `rotationInFlight(profile)`. `list`'s empty-result path awaits an in-flight
-  rotation and retries the query once before classifying; on timeout it hints
-  on stderr that a refresh is still running (stdout bytes unchanged).
+  rotation and retries the query once before classifying — for BOTH the
+  single-profile form and the aggregate default listing (field round 1 showed
+  the user's plain `list` is the multi-profile fan-out, which the initial
+  single-profile-only placement silently skipped); on timeout it hints on
+  stderr naming the still-in-flight profiles (stdout bytes unchanged).
   Arm-first D2 is untouched — fresh jars add zero latency; the wait engages
   only after a listing already failed. Invariant coverage:
   `tests/auth-regression/invariant-await-rotation.test.ts`
   (openspec/changes/await-detached-rotation-on-empty-list).
+
+- **2026-08-18** — cancel-auth-on-browser-close. Closing the headed browser
+  during `gemiterm auth --add <profile>` previously produced a five-minute
+  stream of `Gate poll failed` debug lines before the existing
+  `LoginTimeoutError` finally fired — masking the user's actual action
+  (cancel). `CookieSession.waitForGate` now classifies `PlaywrightCliError`
+  stderr text via a new shared helper `isBrowserClosedError`
+  (`src/services/playwright-cli-driver.ts`, matches `is not open` and the
+  existing `not found` teardown marker, both case-insensitive, only on
+  `PlaywrightCliError` instances). On a classified error the gate loop emits
+  one info-level `Gate poll cancelled` log and throws a new typed
+  `LoginCancelledError` (`src/core/errors.ts`); the capture `finally` still
+  runs `closeSession` (now pointing at the same helper, so `is not open`
+  during teardown is also swallowed). `cookieListFromState` and
+  `saveFullJar` are unreachable after cancellation, so a pre-existing jar is
+  preserved byte-for-byte. The CLI top-level handler renders the typed error
+  as a friendly info message and exits 0; the generic `Command 'auth' failed`
+  path is unchanged for every other error. `closeSession` reuses the same
+  helper to swallow `is not open` during teardown (no behavior change on the
+  happy path). Invariant coverage:
+  `tests/auth-regression/invariant-capture-integrity.test.ts` (new
+  `capture cancellation on browser close` block) + unit + integration tests
+  on the gate loop, the classifier, and the `AuthCommand` propagation path
+  (openspec/changes/cancel-auth-on-browser-close).
+
+- **2026-08-18** - fix-rotation-dead-end. Field repro on two machines (3
+  profiles) showed the detached rotation pipeline losing to its own
+  concurrency, not to decay: `gemiterm.log` recorded concurrent runner sets
+  for the same profile (each CLI invocation spawned its own detached runner -
+  the old guard was per-process memory only), their playwright `open` /
+  `state-save` calls failing with exit 1 as they collided on the shared
+  `refresh-<profile>` session name and persistent profile dir, and both
+  runners reporting `rotated=true` while the persisted jar ended up one
+  rotation behind the live browser - instantly superseded server-side
+  (phantom). Recovery compounded it: its own rotation reused `refresh-<profile>`
+  (its `finally` close could kill a live runner's browser mid-poll), and its
+  30 s wait ceiling was structurally shorter than the runner's 60 s rotate
+  budget, so `list -p <profile>` could give up, trigger recovery, and race
+  the very runner it was waiting for. Changes: (1) cross-process single-flight
+  - `spawnDetachedRefreshRunner` acquires `<profiles>/<name>/refresh-runner.lock`
+  (atomic create, pid payload, 120 s stale sweep; `src/auth/refresh-runner-lock.ts`)
+  and skips the spawn while a fresh lock holds; the runner child releases on
+  exit; lock-write failures degrade to an unguarded spawn (never block a
+  refresh). (2) recovery de-race - `CookieSession.recover` awaits an in-flight
+  rotation first (passive) and resolves the landed arm without opening a
+  browser; when it must rotate, `RecoveryRung` drives the refresher under the
+  distinct session name `recover-<profile>` (`rotatePsidts` gained an optional
+  trailing session parameter, default `refresh-<profile>` unchanged). (3) the
+  `waitForRotation` default ceiling rose 30 s -> 90 s (>= rotate budget + open
+  margin). (4) `writeTextFileAtomic` (`src/infrastructure/io.ts`) retries the
+  rename briefly on Windows EPERM/EACCES - the detached runner persisting a
+  rotated jar races jar pollers, and a lost rename lost a completed rotation.
+  (5) the recovery `rotated: false` terminal error now names the
+  no-change-from-baseline condition and the server-side-signed-out diagnosis
+  ("browser session appears signed out server-side. Run 'gemiterm auth'").
+  Control field result: an unraced rotation took profile dhb-zeek from phantom
+  (listChats = 0) to live (3 chats) in ~6 s - the mechanism is sound; these
+  fixes remove the contention around it. Invariant coverage:
+  `tests/auth-regression/invariant-rotation-single-flight.test.ts`
+  (openspec/changes/fix-rotation-dead-end).
+
+- **2026-08-18** — fix-5 keepalive fast-path baseline. The session-keepalive
+  loop's no-op fast path was dead code: `tick()` (`src/auth/session-keepalive.ts`)
+  recorded the *pre*-rotation disk PSIDTS as `lastObservedBaseline`, so after
+  the loop's first successful rotation every 10-minute tick re-read a different
+  on-disk value and spawned the headless browser forever (the skip scenario
+  the `auth` spec describes was unreachable after rotation #1). The fix records
+  the *post*-rotation PSIDTS as the baseline — read from the rotated jar
+  (`findRoutableCookieValue(result.cookies, PSIDTS_COOKIE_NAME)`) with a
+  post-rotation store re-read fallback when the refresher returns no jar —
+  so an unchanged-and-fresh jar now skips the browser. No auth-behavior change
+  beyond the keepalive tick's skip eligibility. Invariant coverage:
+  `tests/auth-regression/invariant-keepalive-baseline.test.ts` + the RED/green
+  cases in `tests/auth/session-keepalive.test.ts`
+  (openspec/changes/fix-5-audit-remediations).
+
+- **2026-08-18** — fix-6 classifier init-token value extraction. The session
+  classifier used a substring scan on the init-token *names*
+  (`INIT_TOKENS.some((t) => html.includes(t))`, `src/auth/session-classifier.ts:67`)
+  to decide token presence. Gemini's signed-out init HTML still embeds the
+  keys with empty values (e.g. `"cfb2h":""`), so a fully signed-out GET passed
+  the substring check, advanced to the chats probe, and could come back `live`
+  via the SDK's any-name cookie fallback. Field repro (DHBGAMING2,
+  2026-08-18): profile `evs-diegohb` — whose persisted jar's `__Secure-1PSIDTS`
+  existed only at the `.youtube.com` scope — reported `✓ live (23)` in
+  `status --verbose` while `fetch` on the same jar was rejected by the
+  validator. The classifier now extracts each required token's value with the
+  ablation §6.2 regex (`/"<token>":\s*"(.*?)"/` for `SNlM0e`, `cfb2h`,
+  `FdrFJe`) and requires **at least one** non-empty capture; an all-empty
+  init GET classifies `dead` without consulting the chats probe (the previous
+  SDK-fallback path is closed). `INIT_TOKENS` is removed; the constants
+  module now exports `INIT_TOKEN_EXTRACTION` as a `{ token, pattern }[]`
+  table, usable by future init-HTML consumers. **Visible `status` behavior
+  change**: profiles previously misread as `live` (token-key present but
+  value-extracted as empty — typically signed-out pages with leftover
+  identity family, or jars whose routable PSIDTS scope no longer covers
+  `gemini.google.com`) will now report `phantom` (if the chats probe returns
+  0) or `dead` (if the init GET has no non-empty extracted value); this is
+  the honest verdict, not a regression. Invariant coverage:
+  `tests/auth-regression/invariant-classifier-token-values.test.ts` (new
+  RED/green: signed-out-key fixture, one-non-empty fixture,
+  whitespace-tolerated fixture) + updated fixtures in
+  `tests/auth-regression/invariant-classifier-truth-table.test.ts` and
+  `tests/auth/session-classifier.test.ts` (key-name fixtures → double-quoted
+  value fixtures matching the regex shape)
+  (openspec/changes/fix-6-classifier-token-extraction).
+
+- **2026-08-18** — fix-7 capture gate routability. The capture gate
+  (`CookieSession.waitForGate`, `src/auth/cookie-session.ts`) matched cookies
+  by name only — `names.has(PSID) && names.has(PSIDTS)` — so a persistent
+  Chromium profile that already carried a `.youtube.com`-scoped
+  `__Secure-1PSIDTS` (a normal jar shape; see §2.1) satisfied the gate the
+  instant the page loaded, before Gemini's page JS minted the
+  `.google.com`-scoped sibling. `state-save` then snapshotted a youtube-only
+  jar and `captureLogin` persisted it. Field repro (DHBGAMING2,
+  2026-08-18, profile `evs-diegohb`): `auth --renew` printed "Session
+  renewed… (36 cookies captured)" while the next `fetch -p evs-diegohb`
+  was rejected by `CookieValidator.validate` with
+  `Cookie __Secure-1PSIDTS … not routable … present scopes: [.youtube.com]`,
+  and a renew/fetch loop persisted across renew attempts — the renew
+  reported success while persisting a jar the CLI's own validator rejects,
+  a self-inflicted A2.2 anti-pattern. (1) **Routable gate** —
+  `waitForGate` now requires BOTH `__Secure-1PSID` and `__Secure-1PSIDTS`
+  routable to `https://gemini.google.com` (RFC 6265
+  domain/path/expiry via the existing `isRoutableTo` helper that
+  `findRoutableCookieValue` and `CookieValidator.validate` already use);
+  name-matching rows at other scopes no longer satisfy the gate. The loop
+  also tracks whether the names were ever observed (regardless of
+  routability) to select the typed error at the deadline: timeout with
+  names observed but never routable → `LoginUnroutableError` (naming the
+  observed scopes); timeout with names never observed →
+  `LoginTimeoutError` (unchanged). (2) **Pre-save backstop** — the gate
+  observing a routable pair does not guarantee the `state-save` snapshot
+  is good (the gate reads `cookie-list`, the payload reads `state-save`:
+  TOCTOU). Immediately before `saveFullJar`, `captureLogin` runs
+  `CookieValidator.validate` on the filtered payload; on throw, `saveFullJar`
+  is skipped and `captureLogin` rejects with `LoginUnroutableError` wrapping
+  the validator's message. The pre-existing jar is preserved byte-for-byte
+  on every path. (3) **CLI rendering** — the top-level handler in
+  `src/cli/index.ts` recognizes `LoginUnroutableError` alongside
+  `LoginCancelledError`: friendly info message, non-zero exit (vs. exit 0
+  for the intentional-cancel path). The capture payload policy is
+  unchanged: full jar, `filterToGeminiDomains`, never name-filtered; the
+  gate gets stricter, the payload does not get narrower. **Accepted
+  risk** (per user decision 2026-08-18): an account that legitimately sets
+  PSID/PSIDTS only at the `.youtube.com` scope (not observed in any field
+  jar or ablation, per §2.1) would become unrenewable — i.e. the gate's
+  stricter scope requires Gemini to mint a `.google.com` row, which it
+  does for every signed-in browser session we've observed. Invariant
+  coverage: `tests/auth-regression/invariant-capture-integrity.test.ts`
+  (new `capture gate routability (fix-7)` block: youtube-only PSID/PSIDTS
+  never satisfies the gate; backstop rejects unroutable state-save with
+  no persist; name-absent timeout still resolves as `LoginTimeoutError`)
+  + gate-loop unit tests in `tests/auth/cookie-session.test.ts` +
+  `AuthCommand` propagation test in `tests/integration/commands/auth.test.ts`
+  (openspec/changes/fix-7-capture-gate-routability).
+
+- **2026-08-18** — fix-8 stale-profile reachability. The rotation-await
+  machinery (changes `await-detached-rotation-on-empty-list`,
+  `extend-rotation-wait-to-read-commands`, `fix-rotation-dead-end`) was
+  unreachable in exactly the situations it was built for — three live-only
+  gates sat in front of it. Field repro (DHBGAMING2, 2026-08-18, three
+  profiles, two stale): `fetch c_3a6ae1b615519a7f -p evs-diegohb` failed
+  instantly at 05:55:48 while the profile's rotation was one arm away; the
+  same user's plain `list` reported "3 of 3 profiles active" yet two stayed
+  phantom all day; `continue c_3a6ae1b615519a7f` (owned by stale
+  `evs-diegohb`) silently fell through to the default profile via the
+  `activeProfiles.length <= 1` short-circuit that misfired because the
+  gate's live-only membership shrank the candidate set; `fetch
+  c_3c69396e3d6127a4` (default-client path, no `-p`) waited, the rotation
+  observed at 12:37:30, the retry printed `No messages found.`, and the
+  identical command 10s later (fresh process, fresh arm) rendered the full
+  conversation. The facade was sound but the read paths bounced off
+  live-only gates. Four changes close the gap: (1)
+  `src/cli/utils/profile-resolution.ts` `resolveProfile` explicit-profile
+  path arms the named profile (`ensureSession` — spawns a detached runner
+  when the jar is stale), awaits an in-flight rotation (`waitForRotation`,
+  bounded 90 s, stderr notice only), reclassifies once, and returns the
+  profile when live; the unknown-profile check (name not in the configured
+  set) still fails fast; non-live-after-wait surfaces a typed
+  `AuthenticationError` carrying `{ profileName, sessionState }` so the
+  calling commands can branch. `activeProfiles()` is unchanged — its
+  health-only semantic is preserved everywhere else. (2) `findProfileForConversation`
+  (`src/auth/cookie-session.ts`) now runs two passes: pass 1 unchanged
+  (live profiles in `listProfiles()` order); pass 2 consults profiles that
+  armed stale this invocation and whose detached rotation has landed, in
+  `listProfiles()` order; live profiles keep priority. The method does not
+  spawn, write, or block on profiles whose rotation has not landed —
+  passive by contract. (3) `src/cli/utils/gemini-queries.ts` gains
+  `listChatsOutcomes` (per-profile `{ profile, chats | error }[]`); the
+  existing `listChatsForRequest` becomes a thin merge over it
+  (byte-equivalent for unchanged scenarios). `list`'s await stage
+  (`src/cli/commands/list-command.ts:new `awaitStaleOutcomes`) moves from
+  the merged-empty trigger to a per-profile outcome check: any outcome
+  with zero chats (or rejected) while its rotation is in flight triggers
+  the wait and a re-query of just those profiles — live profiles are
+  never re-queried, zero added latency. Stdout bytes for unchanged
+  scenarios stay pinned (`tests/integration/commands/list.test.ts`).
+  (4) `src/cli/index.ts` `getGeminiClient` now re-arms cheaply on every
+  call (`ensureSession(defaultProfile)` — an in-process jar read, the same
+  cost `forProfile` already pays per call) and reconstructs the
+  `GeminiClientService` via `createDefaultClientCache`
+  (`src/cli/utils/default-client-cache.ts`) when the armed
+  `__Secure-1PSIDTS` differs from the value the cached instance was built
+  with — so post-rotation retries (and any later default-path read in the
+  same process) execute on refreshed credentials. Unchanged PSIDTS
+  short-circuits to the cached instance (zero added latency, zero added
+  init — design D2). One SDK init GET pays per rotation landing — exactly
+  what the retry needs anyway. The explicit-profile recovery ladder
+  (`src/cli/utils/recovery-offer.ts`) is wired into `fetch` and
+  `continue`: on non-live after the wait, the command catches the typed
+  `AuthenticationError`, calls the recovery confirm — interactive TTY
+  accepts/rejects via the prompts facade (mirrors `list`'s
+  NonInteractiveError / CancellationError handling); non-interactive
+  rethrows the typed error so the CLI exits non-zero with the
+  profile + state + `gemiterm auth --renew <name>` remediation — no
+  silent default-profile fallback. `export`, `export-all`, and `delete`
+  inherit the arm-and-await through `resolveProfile` without the new
+  prompts (destructive commands stay lean); `delete`'s explicit-profile
+  path also inherits the typed error. `export-all`'s fan-out remains
+  construct-per-call via `forProfile`, so it was unaffected by gap 4.
+  Invariant coverage:
+  `tests/auth-regression/invariant-explicit-profile-arm-and-await.test.ts`,
+  `tests/auth-regression/invariant-stale-owned-conversation.test.ts`,
+  `tests/auth-regression/invariant-default-client-revalidation.test.ts`,
+  mixed-liveness scenarios in
+  `tests/integration/commands/list.test.ts`, recovery-ladder scenarios in
+  `tests/integration/commands/fetch.test.ts` and
+  `tests/integration/commands/continue.test.ts`, plus
+  `tests/cli/utils/recovery-offer.test.ts` and the
+  `listChatsOutcomes` tests in
+  `tests/cli/utils/gemini-queries.test.ts`
+  (openspec/changes/fix-8-stale-profile-reachability).
+
+- **2026-08-18** — fix-8 review gap-3 (pass 2 cold-process unreachability).
+  The fix-8 second pass of `findProfileForConversation`
+  (`src/auth/cookie-session.ts`) consulted "profiles armed stale this
+  invocation" — but `lastArm` is written only by `ensureSession`, and in a
+  cold `fetch`/`continue` process without `-p` nothing arms the configured
+  profiles before the method runs (`activeProfiles()` and the classifier
+  load jars without arming). Every `waitForRotation` returned null, pass 2
+  consulted no one, and the field scenario the change existed for
+  (conversation owned only by a stale profile) stayed broken — the original
+  invariant passed only because it pre-armed manually. After the pass-1
+  miss, the method now arms each configured profile that has no arm record
+  yet this invocation, in `listProfiles()` order, via `ensureSession`
+  (reactive, arm-first D2: a pass-1 live-owner hit still observes zero
+  added cost — the arming loop never runs). Arming a stale jar spawns the
+  detached runner that backs the wait (single-flight guarded); a fresh jar
+  is an in-process read; a jar that fails validation (`SessionValidationError`)
+  or loading is skipped with a warn log without aborting the routing for
+  the other profiles. Profiles are never re-armed (`!lastArm.has(name)`):
+  a post-rotation `ensureSession` would record `stale:false` and wrongly
+  exclude the profile from the wait, which must compare against the
+  ORIGINAL stale-arm baseline. No cookie writes, no in-process browsers,
+  capture/persistence untouched (domain-only policy). Invariant coverage:
+  cold-invocation block in
+  `tests/auth-regression/invariant-stale-owned-conversation.test.ts`
+  (arms un-armed profiles itself and resolves the stale owner; pass-1 hit
+  observes zero added cost; broken-jar profile skipped without aborting)
+  (openspec/changes/fix-8-stale-profile-reachability).
+
+- **2026-08-18** — fix-8 review: session-state vocabulary consolidated.
+  `SessionState` (`"live" | "phantom" | "dead"`) now has a single source of
+  truth in `src/core/types.ts`; `AuthenticationError.sessionState`
+  (`src/core/errors.ts`) and `SessionProbeResult.state`
+  (`src/auth/session-classifier.ts`) share the core type instead of
+  re-declaring the union. Type-only change — capture, persistence, and
+  rotation paths untouched. Drift-guarded by
+  `tests/auth-regression/invariant-session-state-vocabulary.test.ts`.
 

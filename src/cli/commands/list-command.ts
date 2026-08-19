@@ -1,13 +1,14 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import { listChatsForRequest, type ListChatsRequest } from "../utils/gemini-queries.ts";
+import { listChatsForRequest, listChatsOutcomes, type ListChatsRequest, type ListChatsOutcome } from "../utils/gemini-queries.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { GemitermError } from "../../core/errors.ts";
 import { browser, confirm, select, text, CancellationError, NonInteractiveError, type BrowserAction } from "../utils/prompts.ts";
 import type { SessionProbeResult } from "../../auth/cookie-session.ts";
 import { invokeCommand } from "../utils/command-invoker.ts";
+import { awaitRotationsWithNotice } from "../utils/rotation-await.ts";
 import { render, sortChats, filterChatsByDate } from "../utils/chat-output.ts";
 
 interface ListCommandOptions {
@@ -83,12 +84,26 @@ export class ListCommand implements CliCommand {
     };
 
     logger.debug(`Listing chats: ${JSON.stringify(request)}`);
-    let chats = await listChatsForRequest(context.getGeminiClient, context.listProfiles, request);
+    const outcomes = await listChatsOutcomes(context.getGeminiClient, context.listProfiles, request);
 
     if (options.interactive) {
-      await this.runInteractiveBrowser(chats, options, context);
+      await this.runInteractiveBrowser(this.mergeOutcomes(outcomes), options, context);
       return;
     }
+
+    // Per-profile await stage (fix-8, design D2). The merged-empty trigger
+    // was the wrong gate: a live sibling returning chats masked stale
+    // profiles whose rotations were in flight. Any pass-1 outcome with no
+    // chats (or rejected) while its rotation is in flight triggers the wait
+    // and a per-profile re-query on the refreshed profiles only — the
+    // re-queried profile's pass-1 outcome is replaced, never appended.
+    // Live profiles observe zero added latency and zero re-queries.
+    const finalOutcomes = await this.awaitStaleOutcomes(outcomes, request, context, logger);
+    if (request.profile) {
+      const failed = finalOutcomes.find((o) => o.profile === request.profile && o.error !== undefined);
+      if (failed) throw failed.error;
+    }
+    let chats = this.mergeOutcomes(finalOutcomes);
 
     if (chats.length === 0) {
       chats = await this.resolvePhantomEmptyResult(chats, request, context, logger);
@@ -115,35 +130,67 @@ export class ListCommand implements CliCommand {
     );
   }
 
+  private async awaitStaleOutcomes(
+    outcomes: ListChatsOutcome[],
+    request: ListChatsRequest,
+    context: CliCommandContext,
+    logger: Logger,
+  ): Promise<ListChatsOutcome[]> {
+    const stale = outcomes.filter(
+      (outcome) =>
+        (outcome.error !== undefined || (outcome.chats?.length ?? 0) === 0) &&
+        context.cookieSession.rotationInFlight(outcome.profile),
+    );
+    if (stale.length === 0) return outcomes;
+
+    const refreshedProfiles = await awaitRotationsWithNotice(
+      context.cookieSession,
+      stale.map((outcome) => outcome.profile),
+      "'gemiterm list'",
+    );
+    if (refreshedProfiles.length === 0) return outcomes;
+
+    // Re-query only the profiles whose rotation landed (design D2: live
+    // profiles never re-queried, zero added latency for the happy path).
+    const retried = await listChatsOutcomes(
+      context.getGeminiClient,
+      context.listProfiles,
+      request,
+      { onlyProfiles: refreshedProfiles },
+    );
+    const recovered = retried.reduce((count, outcome) => count + (outcome.chats?.length ?? 0), 0);
+    logger.debug(
+      `List re-queried after rotation: ${refreshedProfiles.length} profile(s) refreshed, ${recovered} chat(s) recovered`,
+    );
+    const retriedByProfile = new Map(retried.map((outcome) => [outcome.profile, outcome]));
+    return outcomes.map((outcome) => retriedByProfile.get(outcome.profile) ?? outcome);
+  }
+
+  private mergeOutcomes(outcomes: ListChatsOutcome[]): ChatInfo[] {
+    const chats: ChatInfo[] = [];
+    for (const outcome of outcomes) {
+      if (outcome.chats) chats.push(...outcome.chats);
+    }
+    return chats.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
   private async resolvePhantomEmptyResult(
     chats: ChatInfo[],
     request: ListChatsRequest,
     context: CliCommandContext,
     logger: Logger,
   ): Promise<ChatInfo[]> {
+    // Classification stage: the per-profile rotation-await (awaitStaleOutcomes,
+    // above) already waited for in-flight rotations. If the result is still
+    // empty, classify the named profile — `live` exits, anything else falls
+    // through to the interactive recovery confirm (mirrors the pre-fix-8 flow
+    // but the await has already happened by this point).
     let profileName = request.profile;
     if (!profileName && !request.allProfiles) {
       const profiles = await context.listProfiles();
       if (profiles.length === 1) profileName = profiles[0];
     }
     if (!profileName) return chats;
-
-    // Rotation-await stage (openspec/changes/await-detached-rotation-on-empty-list):
-    // an empty result on a stale-armed jar usually means the detached rotation
-    // is still in flight — await it (bounded) before reaching for the heavier
-    // probe/recovery flow. stderr-only: stdout bytes stay pinned.
-    if (context.cookieSession.rotationInFlight(profileName)) {
-      console.error(chalk.dim("Session refresh in progress — waiting for it to finish…"));
-      const refreshed = await context.cookieSession.waitForRotation(profileName).catch(() => null);
-      if (refreshed) {
-        const retried = await listChatsForRequest(context.getGeminiClient, context.listProfiles, request);
-        if (retried.length > 0) return retried;
-      } else if (context.cookieSession.rotationInFlight(profileName)) {
-        console.error(chalk.yellow(
-          `Session refresh still in progress for profile '${profileName}' — wait a few seconds and re-run 'gemiterm list'.`,
-        ));
-      }
-    }
 
     let state: SessionProbeResult["state"];
     try {

@@ -5,7 +5,7 @@ The chat-list browser (`gemiterm list -i`, defined in `openspec/specs/chat-list-
 1. **In the browser** — multi-select with `space` and a `b`-triggered bulk action menu (`Bulk delete`, `Bulk export`, `Combine & Summarize`).
 2. **On the non-interactive CLI** — comma-separated ids on `delete` and `export`, plus a new `summarize` command.
 
-Both surfaces route to the same code paths via `CommandRegistry.getHandler(...)`, mirroring the existing single-row dispatch pattern (`src/cli/commands/list-command.ts:193-205`). No new mediator handlers are introduced; the mediator stays unchanged.
+Both surfaces route to the same code paths via `CommandRegistry.getHandler(...)`, mirroring the existing single-row dispatch pattern (`invokeCommand` in `src/cli/utils/command-invoker.ts`, used by `ListCommand.executeAction`). No new command classes or dispatch layers are introduced; bulk reuses the existing direct-client commands (there is no mediator in the current architecture).
 
 The new `summarize` command produces a single markdown file that contains (a) a **cross-references** section that links notes which share date proximity or repeated keywords, and (b) a per-note **100-token** extract (title + opening message excerpt + a `Keywords:` line). The summarizer is **client-side** — no Gemini call. The user can then run `gemiterm new --prompt-file <path>` to feed the result into a follow-up chat, or accept a one-shot prompt at the end of `summarize` that spawns `new` directly.
 
@@ -14,7 +14,7 @@ The new `summarize` command produces a single markdown file that contains (a) a 
 **Goals**
 
 - Add multi-select to the chat-list browser with `space` and a bulk action menu on `b`.
-- Reuse existing single-conversation code for bulk operations — no duplicated mediator or formatting logic.
+- Reuse existing single-conversation code for bulk operations — no duplicated client-call or formatting logic.
 - Add a new `summarize` command with a deterministic, offline, client-side summary file format.
 - Accept comma-separated ids on `delete` and `export` so the non-interactive form is symmetric with the browser's bulk form.
 - Preserve byte-equivalence of every existing non-interactive command (single ids, no flags) and of `gemiterm list` (with or without `--interactive`).
@@ -24,7 +24,7 @@ The new `summarize` command produces a single markdown file that contains (a) a 
 
 - Calling Gemini or any other LLM to generate the summary. The user explicitly asked for a client-side algorithm.
 - Persisting the multi-select selection across browser re-entries. The selection is a per-session `Set<string>` and resets when the browser re-mounts.
-- Adding new mediator query/command types. The existing `FetchChatQuery` and `DeleteConversationCommand` are sufficient.
+- Adding new client-service methods or command classes. The existing `GeminiClientService.fetchChat` and `GeminiClientService.deleteChat` are sufficient.
 - Changing the byte-format of `gemiterm export`'s default file naming (`gemini-chat-<id>-<YYYY-MM-DD>.<ext>`) or the byte-format of `gemiterm list`'s text table.
 - Supporting bulk in the existing `export-all` command. `export-all` continues to export *every* chat; the new comma-separated form on `export` is the user-chosen-subset path.
 
@@ -32,7 +32,7 @@ The new `summarize` command produces a single markdown file that contains (a) a 
 
 ### D1. `BrowserResult` gains a new `{ kind: "bulk" }` variant
 
-The `BrowserResult` discriminated union in `src/cli/utils/prompts.ts:162-164` becomes:
+The `BrowserResult` discriminated union in `src/cli/utils/prompts.ts` becomes:
 
 ```ts
 export type BrowserResult =
@@ -62,7 +62,7 @@ The `useState` setter takes a new `Set` instance (using the functional form `set
 
 ### D3. `space` and `b` keypresses
 
-`@inquirer/core`'s `useKeypress` exposes `key.name` (verified by the existing `key.name === "s"` / `"p"` / `"f"` handlers at `src/cli/utils/prompts.ts:221-243`). The new handlers:
+`@inquirer/core`'s `useKeypress` exposes `key.name` (verified by the existing `key.name === "s"` / `"p"` / `"f"` handlers in `browserPrompt`). The new handlers:
 
 ```ts
 if (key.name === "space") {
@@ -90,11 +90,11 @@ if (key.name === "b") {
 }
 ```
 
-**Empty-selection hint:** Per the user's choice, `b` with zero selected rows prints a dim hint (`No conversations selected — press space to select rows first.`) and stays in the browser. Implementation: a one-shot `console.log(chalk.dim("..."))` from inside the `useKeypress` callback. This is consistent with how the existing `enter` handler does not resolve on an empty list (`src/cli/utils/prompts.ts:247-252`).
+**Empty-selection hint:** Per the user's choice, `b` with zero selected rows prints a dim hint (`No conversations selected — press space to select rows first.`) and stays in the browser. Implementation: a one-shot `console.log(chalk.dim("..."))` from inside the `useKeypress` callback. This is consistent with how the existing `enter` handler does not resolve on an empty list in `browserPrompt`.
 
 ### D4. Row rendering: `[x] / [ ]` checkbox prefix
 
-Each row gains a 4-character checkbox prefix in the `renderRow` helper (`src/cli/utils/prompts.ts:285-292`):
+Each row gains a 4-character checkbox prefix in the `renderRow` helper in `browserPrompt`:
 
 ```ts
 const checked = selected.has(item.id) ? "[x]" : "[ ]";
@@ -104,9 +104,9 @@ return `${cursor} ${checked} ${chalk.dim(item.id)}  ${chalk.cyan(formatDate(item
 
 Total prefix width is 8 characters (cursor 2 + space 1 + checkbox 3 + space 1 + space 1 = 8). The title bar gains `Selected: N` next to the existing fields. The hint line becomes `↑↓ navigate · s sort · p profile · f favorites · space select · b bulk · enter pick · q quit`.
 
-### D5. Browser dispatches bulk actions via `CommandRegistry.getHandler` (no new mediator calls)
+### D5. Browser dispatches bulk actions via `CommandRegistry.getHandler` (reuses command classes; no direct client calls)
 
-The existing single-row `executeAction` in `src/cli/commands/list-command.ts:184-206` is extended with a `bulk` case that uses the same `CommandRegistry.getHandler` pattern. The browser does NOT call mediator handlers directly; the bulk commands are real CLI commands invoked with constructed argv. The new `runInteractiveBrowser` flow:
+The existing single-row `executeAction` in `src/cli/commands/list-command.ts` is extended with a `bulk` case that uses the same `invokeCommand` / `CommandRegistry.getHandler` pattern. The browser does NOT call Gemini-client methods directly; the bulk commands are real CLI commands invoked with constructed argv (and resolve profiles via `resolveProfile`). The new `runInteractiveBrowser` flow:
 
 ```ts
 if (result.kind === "bulk") {
@@ -140,9 +140,9 @@ The three commands (`delete`, `export`, `summarize`) each call this helper, then
 
 1. Parse ids via `extractConversationIds`. If empty, error and exit 1.
 2. Validate each id. On any invalid id, error and exit 1.
-3. Resolve owning profile per id (calls `ProfileAuthManager.findProfileForConversation` for each; this is the existing per-id lookup in `src/cli/commands/delete-command.ts:87-99`).
-4. If `--force` is not set: build a list `• <id> — "<title>"` (title from a mediator `ListChatsQuery` cache) and call `confirm("Delete N conversations?")` once. On `no`, print `Cancelled.` and return.
-5. Iterate ids. For each, send `DeleteConversationCommand` with the resolved `profileName`. On `{ success: true }` print `Conversation '<id>' deleted.`. On `{ success: false }` or thrown error, print `Failed to delete conversation '<id>': <message>` in red and continue.
+3. Resolve owning profile per id via the shared `resolveProfile` helper (`src/cli/utils/profile-resolution.ts`), which calls `cookieSession.findProfileForConversation`; this is the same per-id lookup `DeleteCommand` already uses.
+4. If `--force` is not set: build a list `• <id> — "<title>"` (title from the `client.listChats()` results) and call `confirm("Delete N conversations?")` once. On `no`, print `Cancelled.` and return.
+5. Iterate ids. For each, call `client.deleteChat(conversationId)` on the resolved profile's client (via `(await context.getGeminiClient()).forProfile(profileName)` or the default client). On success print `Conversation '<id>' deleted.`. On a thrown error, print `Failed to delete conversation '<id>': <message>` in red and continue.
 6. After the loop, if any id failed, exit 1; otherwise exit 0.
 
 In multi-profile setups, ids whose owning profile cannot be resolved are skipped with a warning `Skipped '<id>': no owning profile found. Use 'gemiterm list --all-profiles' to see which profile it belongs to.` and the rest of the batch proceeds.
@@ -154,25 +154,25 @@ In multi-profile setups, ids whose owning profile cannot be resolved are skipped
 1. Parse ids. If empty, error and exit 1.
 2. If `--out` is supplied, it is rejected with `Error: cannot use --out together with comma-separated ids. Specify --out-dir instead.` (a single `--out` makes no sense for N files).
 3. If `--out-dir` is supplied, ensure it exists (use the existing `infrastructure/io.ts:ensureDir`). Default is the current working directory.
-4. Iterate ids. For each, send `FetchChatQuery`, build the formatted content (existing `formatChatAsMarkdown` / `formatChatAsJson`), and write to `<out-dir>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` (the existing default filename pattern, just inside `--out-dir`).
+4. Iterate ids. For each, call `fetchChatForRequest(context.getGeminiClient, id, profileName)`, build the formatted content (existing `formatChatAsMarkdown` / `formatChatAsJson`), and write to `<out-dir>/gemini-chat-<id>-<YYYY-MM-DD>.<ext>` (the existing default filename pattern, just inside `--out-dir`).
 5. Print `Exported conversation '<id>' to: <path>` per success. On any failure, print the error and continue.
-6. After the loop, print a summary `Exported: <n>` / `Failed: <m>` / `Output: <dir>` (matches the existing `export-all` summary style at `src/cli/commands/export-all-command.ts:139-145`).
+6. After the loop, print a summary `Exported: <n>` / `Failed: <m>` / `Output: <dir>` (matches the existing `export-all` summary style).
 
 ### D9. New `SummarizeCommand` and `local-summarizer` service
 
 Two new files:
 
-- `src/cli/commands/summarize-command.ts` — the `SummarizeCommand` class, registered as `summarize`. Handles argv parsing, mediator dispatch for the per-id `FetchChatQuery`s, the file write, the post-action `confirm`, and the conditional `new` spawn.
+- `src/cli/commands/summarize-command.ts` — the `SummarizeCommand` class, registered as `summarize`. Handles argv parsing, per-id `fetchChatForRequest` calls, the file write, the post-action `confirm`, and the conditional `new` spawn.
 - `src/services/local-summarizer.ts` — a pure-function module: `summarizeChatsLocally(chats: ChatInfo[], messagesById: Map<string, Message[]>): BulkSummary`. Returns a structured object with `crossReferences: CrossRefGroup[]` and `perNote: PerNoteExtract[]`. The formatter (in `src/infrastructure/formatters.ts`) turns it into markdown.
 
 `SummarizeCommand` flow:
 
 1. Parse ids. If empty, error and exit 1.
-2. Send a `ListChatsQuery` (no filter) and a `FetchChatQuery` per id. On any per-id failure, log a warning and continue with the rest.
+2. Call `client.listChats()` (no filter) and `fetchChatForRequest(...)` per id. On any per-id failure, log a warning and continue with the rest.
 3. Call `summarizeChatsLocally(chats, messagesById)` and `formatBulkSummary(summary)` to get the file content.
 4. Resolve the default output path: `gemiterm-bulk-summary-<YYYY-MM-DD-HHMMSS>.md` in CWD, or the path supplied by `--out/-o`.
 5. Write the file and print the path: `Bulk summary written to: <path>`.
-6. If `process.stdin.isTTY === true`, call `confirm("Open a new chat with this file as context?")`. On yes, look up the active profile via `ProfileAuthManager.getActiveProfiles()` (or the single default profile) and invoke `CommandRegistry.getHandler("new").execute(["--prompt-file", path, "--profile", profileName], context)`. On no, return normally.
+6. If `process.stdin.isTTY === true`, call `confirm("Open a new chat with this file as context?")`. On yes, look up the active profile via `context.cookieSession.activeProfiles()` (or the single default profile via `context.listProfiles()` + `getDefaultProfileName`) and invoke `CommandRegistry.getHandler("new").execute(["--prompt-file", path, "--profile", profileName], context)`. On no, return normally.
 7. If non-TTY, skip the prompt and return (the user can run `gemiterm new --prompt-file <path>` themselves).
 
 ### D10. Local-summarizer algorithm (deterministic, offline)
@@ -279,7 +279,7 @@ The `new` command (which is a real `CliCommand` already, not a new code path) ha
 
 - **[Risk]** Dispatching `summarize` and `new` via `CommandRegistry.getHandler` from within `summarize`'s `execute` could create a re-entrancy loop if `new` ever spawned `summarize` again. → **Mitigation:** `summarize` is a leaf operation — it does not look for a positional chat id argument that could trigger another `summarize` invocation. `new` only takes a message / `--prompt-file` / `--profile`; it never parses `summarize`'s argv shape. Static analysis: a depth-2 walk of the command tree shows no cycle.
 
-- **[Risk]** A bulk delete batch with N>50 ids could take a long time (N mediator round-trips) and the user has no way to abort. → **Mitigation:** the mediator calls are sequential and the user's `Ctrl+C` kills the process. We add a progress line `[i/N] Deleting <id>... OK|FAILED` for N>1 (consistent with `export-all`'s progress line at `src/cli/commands/export-all-command.ts:127-129`).
+- **[Risk]** A bulk delete batch with N>50 ids could take a long time (N client round-trips) and the user has no way to abort. → **Mitigation:** the client calls are sequential and the user's `Ctrl+C` kills the process. We add a progress line `[i/N] Deleting <id>... OK|FAILED` for N>1 (consistent with `export-all`'s progress style).
 
 - **[Risk]** `--out-dir` could shadow the parent directory of a user's existing files. → **Mitigation:** `export` only writes files *into* the directory (it doesn't delete or overwrite anything outside it). If a file with the default name already exists in the dir, `writeTextFile` overwrites it — same behavior as the single-id `export` for the CWD case.
 
@@ -290,7 +290,7 @@ The `new` command (which is a real `CliCommand` already, not a new code path) ha
 This is an additive change. There is no migration step for users.
 
 - **Backward compatibility** — every existing CLI invocation that takes a single id (`gemiterm delete <id>`, `gemiterm export <id>`) continues to work. The single-id path is a strict subset of the new multi-id path: a one-element list is parsed by `extractConversationIds` and iterated once.
-- **Rollout** — the change ships in a single release. No flags are deprecated, no commands are renamed, no mediator contracts change.
+- **Rollout** — the change ships in a single release. No flags are deprecated, no commands are renamed, no command/registry contracts change.
 - **Rollback** — revert the commit. No data migrations, no schema changes.
 
 ## Open Questions

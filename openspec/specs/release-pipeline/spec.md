@@ -86,16 +86,16 @@ The system MUST provide `scripts/clean-build.sh` (POSIX shell) and `scripts/clea
 - **THEN** the `dist/` directory is removed (or stays removed if already absent) and the script exits 0
 
 ### Requirement: User-Facing Browser Install Scripts
-The system MUST provide `scripts/install-browser.sh` (POSIX shell) and `scripts/install-browser.ps1` (PowerShell) that run `bunx @playwright/cli install chromium` and verify the installation succeeded. Each script MUST exit 0 on success and non-zero on error. If Chromium is already installed, the script MUST exit 0 without re-downloading.
+The system MUST provide `scripts/install-browser.sh` (POSIX shell) and `scripts/install-browser.ps1` (PowerShell) that run `bunx @playwright/cli install-browser chrome-for-testing` and verify the installation succeeded. Each script MUST exit 0 on success and non-zero on error. If Chrome for Testing is already installed, the script MUST exit 0 without re-downloading.
 
 #### Scenario: POSIX install-browser runs the install command
 - **WHEN** a developer runs `bash scripts/install-browser.sh` on a POSIX system with Bun installed
-- **THEN** the script invokes `bunx @playwright/cli install chromium`, reports success to stdout, and exits 0
+- **THEN** the script invokes `bunx @playwright/cli install-browser chrome-for-testing`, reports success to stdout, and exits 0
 
 #### Scenario: PowerShell install-browser runs the install command
 - **WHEN** a developer runs `pwsh scripts/install-browser.ps1` on a system with Bun and PowerShell Core installed
-- **THEN** the script invokes `bunx @playwright/cli install chromium`, reports success to stdout, and exits 0
+- **THEN** the script invokes `bunx @playwright/cli install-browser chrome-for-testing`, reports success to stdout, and exits 0
 
 #### Scenario: Browser already installed is a no-op
-- **WHEN** a developer runs either install-browser script and Chromium is already installed
-- **THEN** the script exits 0 without re-downloading Chromium and without printing an error
+- **WHEN** a developer runs either install-browser script and Chrome for Testing is already installed
+- **THEN** the script exits 0 without re-downloading and without printing an error

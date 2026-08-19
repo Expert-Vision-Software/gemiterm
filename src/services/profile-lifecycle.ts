@@ -198,6 +198,12 @@ export class ProfileLifecycle {
     this.logger.debug("Deleting profile:", params.name);
 
     if (!params.skipConfirm) {
+      if (process.stdin.isTTY !== true) {
+        throw new GemitermError(
+          `Deleting profile '${params.name}' requires explicit confirmation. ` +
+            `Re-run with --yes to delete in non-interactive mode.`,
+        );
+      }
       const confirmAnswer = await this.promptInput(`Delete profile '${params.name}'? [y/N]`);
       if (!confirmAnswer.toLowerCase().startsWith("y")) {
         console.log(chalk.dim("Cancelled."));
@@ -335,17 +341,7 @@ export class ProfileLifecycle {
       }
       case "D": {
         const name = await this.promptInput("Enter profile name to delete");
-        const trimmed = name.trim();
-        if (!profiles.includes(trimmed)) {
-          throw new GemitermError(`Profile '${trimmed}' does not exist.`);
-        }
-        const confirmAnswer = await this.promptInput(`Delete profile '${trimmed}'? [y/N]`);
-        if (confirmAnswer.toLowerCase().startsWith("y")) {
-          await this.profileManager.delete(trimmed);
-          console.log(chalk.green(`Profile '${trimmed}' deleted.`));
-        } else {
-          console.log(chalk.dim("Cancelled."));
-        }
+        await this.delete({ name: name.trim(), skipConfirm: false });
         return null;
       }
       case "S": {

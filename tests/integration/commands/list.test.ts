@@ -7,6 +7,7 @@ import { AuthenticationError } from "../../../src/core/errors.ts";
 import { setupTestConfig, teardownTestConfig } from "../../setup.ts";
 import { createMockChatList } from "../../fixtures/chat-fixtures.ts";
 import * as configModule from "../../../src/infrastructure/config.ts";
+import { setStdinTty, restoreStdinTty } from "../../cli/utils/tty-harness.ts";
 
 function makeClient() {
   const client: any = {
@@ -414,10 +415,37 @@ describe("list command integration", () => {
   });
 
   describe("error handling", () => {
-    test("propagates client errors when a single profile is explicitly targeted", async () => {
+    test("explicit dead profile rejects with the underlying error instead of an empty table", async () => {
       client.listChats.mockRejectedValue(new Error("Network error"));
 
       await expect(command.execute(["--profile", "work"], context)).rejects.toThrow("Network error");
+      const stdout = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(stdout).not.toContain("No conversations found");
+      expect(stdout).not.toContain("ID");
+    });
+
+    test("explicit profile whose rejection coincides with a landed rotation renders after the re-query", async () => {
+      let listCalls = 0;
+      client.listChats = mock(async () => {
+        listCalls += 1;
+        if (listCalls === 1) throw new Error("phantom jar");
+        return [{ id: "conv-42", title: "Post-rotation chat", isPinned: false, timestamp: 1717100000000, profile: "work" }];
+      });
+      cookieSession.rotationInFlight = mock(() => true);
+      cookieSession.waitForRotation = mock(async () => ({ cookies: [] }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(1);
+        expect(client.listChats).toHaveBeenCalledTimes(2);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Post-rotation chat");
+        expect(output).not.toContain("No conversations found");
+      } finally {
+        errSpy.mockRestore();
+      }
     });
   });
 
@@ -479,8 +507,12 @@ describe("list command integration", () => {
 
     test("refreshed session with a still-empty retry falls through to classification", async () => {
       client.listChats = mock(async () => []);
-      cookieSession.rotationInFlight = mock(() => true);
-      cookieSession.waitForRotation = mock(async () => ({ cookies: [] }));
+      let inFlight = true;
+      cookieSession.rotationInFlight = mock(() => inFlight);
+      cookieSession.waitForRotation = mock(async () => {
+        inFlight = false;
+        return { cookies: [] };
+      });
       const errSpy = spyOn(console, "error").mockImplementation(() => {});
 
       try {
@@ -506,35 +538,277 @@ describe("list command integration", () => {
       expect(cookieSession.probe).toHaveBeenCalledTimes(1);
     });
 
-    test("multi-profile empty result never awaits a rotation", async () => {
+    test("multi-profile empty result awaits in-flight rotations and the retry renders", async () => {
+      const profiles = ["work", "personal"];
+      context.listProfiles = () => profiles;
+      cookieSession.rotationInFlight = mock((p: string) => p === "work");
+      cookieSession.waitForRotation = mock(async (p: string) =>
+        p === "work" ? ({ cookies: [] }) : null,
+      );
+      const callsPerProfile: Record<string, number> = {};
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => {
+          callsPerProfile[name] = (callsPerProfile[name] ?? 0) + 1;
+          return name === "work" && callsPerProfile[name] > 1
+            ? [{ id: "w1", title: "Rotated chat", isPinned: false, timestamp: Date.now(), profile: "work" }]
+            : [];
+        }),
+      }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute([], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(1);
+        expect(cookieSession.waitForRotation).toHaveBeenCalledWith("work");
+        expect(cookieSession.probe).not.toHaveBeenCalled();
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Rotated chat");
+        expect(output).not.toContain("No conversations found");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("multi-profile rotation timeout prints the hint and never classifies", async () => {
+      const profiles = ["work", "personal"];
+      context.listProfiles = () => profiles;
+      client.forProfile = mock((_name: string) => ({
+        listChats: mock(async () => []),
+      }));
+      cookieSession.rotationInFlight = mock(() => true);
+      cookieSession.waitForRotation = mock(async () => null);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute([], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(2);
+        expect(cookieSession.probe).not.toHaveBeenCalled();
+        const stderr = errSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(stderr).toContain("still in progress");
+        expect(stderr).toContain("profiles");
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("multi-profile empty result with no rotation in flight skips the wait", async () => {
       client.forProfile = mock((_name: string) => ({
         listChats: mock(async () => []),
       }));
       context.listProfiles = () => ["a", "b"];
-      cookieSession.rotationInFlight = mock(() => true);
 
       await command.execute([], context);
 
       expect(cookieSession.waitForRotation).not.toHaveBeenCalled();
       expect(cookieSession.probe).not.toHaveBeenCalled();
     });
+
+    test("live sibling masks no longer: stale profile with rotation in flight is awaited and re-queried", async () => {
+      const profiles = ["live", "stale"];
+      context.listProfiles = () => profiles;
+      const callsPerProfile: Record<string, number> = {};
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => {
+          callsPerProfile[name] = (callsPerProfile[name] ?? 0) + 1;
+          if (name === "live") return [
+            { id: "live-1", title: "Live chat", isPinned: false, timestamp: 1717100000000, profile: "live" },
+          ];
+          return callsPerProfile[name] > 1
+            ? [{ id: "stale-1", title: "Recovered chat", isPinned: false, timestamp: 1717000000000, profile: "stale" }]
+            : [];
+        }),
+      }));
+      cookieSession.rotationInFlight = mock((p: string) => p === "stale");
+      cookieSession.waitForRotation = mock(async (p: string) =>
+        p === "stale" ? ({ cookies: [] }) : null,
+      );
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute([], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(1);
+        expect(cookieSession.waitForRotation).toHaveBeenCalledWith("stale");
+        expect(callsPerProfile["live"]).toBe(1);
+        expect(callsPerProfile["stale"]).toBe(2);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Live chat");
+        expect(output).toContain("Recovered chat");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("live sibling masks no longer: stale profile rejection still triggers wait+re-query", async () => {
+      const profiles = ["live", "stale"];
+      context.listProfiles = () => profiles;
+      const callsPerProfile: Record<string, number> = {};
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => {
+          callsPerProfile[name] = (callsPerProfile[name] ?? 0) + 1;
+          if (name === "live") return [
+            { id: "live-1", title: "Live chat", isPinned: false, timestamp: 1717100000000, profile: "live" },
+          ];
+          if (callsPerProfile[name] === 1) throw new Error("phantom jar");
+          return [{ id: "stale-1", title: "Recovered chat", isPinned: false, timestamp: 1717000000000, profile: "stale" }];
+        }),
+      }));
+      cookieSession.rotationInFlight = mock((p: string) => p === "stale");
+      cookieSession.waitForRotation = mock(async () => ({ cookies: [] }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute([], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(1);
+        expect(cookieSession.waitForRotation).toHaveBeenCalledWith("stale");
+        expect(callsPerProfile["stale"]).toBe(2);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Live chat");
+        expect(output).toContain("Recovered chat");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("live profile with chats is never awaited or re-queried even while its rotation is in flight", async () => {
+      const profiles = ["live", "fresh"];
+      context.listProfiles = () => profiles;
+      const callsPerProfile: Record<string, number> = {};
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => {
+          callsPerProfile[name] = (callsPerProfile[name] ?? 0) + 1;
+          return [{ id: `${name}-1`, title: `${name} chat`, isPinned: false, timestamp: 1717100000000, profile: name }];
+        }),
+      }));
+      cookieSession.rotationInFlight = mock((p: string) => p === "live");
+      cookieSession.waitForRotation = mock(async () => ({ cookies: [] }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--format", "json"], context);
+
+        expect(cookieSession.waitForRotation).not.toHaveBeenCalled();
+        expect(callsPerProfile["live"]).toBe(1);
+        expect(callsPerProfile["fresh"]).toBe(1);
+        const parsed = JSON.parse(logSpy.mock.calls.map((c) => c[0]).join("\n"));
+        expect(parsed.chats).toHaveLength(2);
+        expect(parsed.chats.filter((c: ChatInfo) => c.id === "live-1")).toHaveLength(1);
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).not.toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("live returns 14 chats while stale's in-flight rotation lands: stale re-queried, both merged, live untouched", async () => {
+      const profiles = ["live", "stale"];
+      context.listProfiles = () => profiles;
+      const liveChats: ChatInfo[] = Array.from({ length: 14 }, (_, i) => ({
+        id: `live-${i + 1}`,
+        title: `Live chat ${i + 1}`,
+        isPinned: false,
+        timestamp: 1717100000000 - i,
+        profile: "live",
+      }));
+      const callsPerProfile: Record<string, number> = {};
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => {
+          callsPerProfile[name] = (callsPerProfile[name] ?? 0) + 1;
+          if (name === "live") return liveChats;
+          return callsPerProfile[name] > 1
+            ? [{ id: "stale-1", title: "Recovered chat", isPinned: false, timestamp: 1717000000000, profile: "stale" }]
+            : [];
+        }),
+      }));
+      cookieSession.rotationInFlight = mock((p: string) => p === "stale");
+      cookieSession.waitForRotation = mock(async (p: string) =>
+        p === "stale" ? ({ cookies: [] }) : null,
+      );
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--format", "json"], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(1);
+        expect(cookieSession.waitForRotation).toHaveBeenCalledWith("stale");
+        expect(callsPerProfile["live"]).toBe(1);
+        expect(callsPerProfile["stale"]).toBe(2);
+        const parsed = JSON.parse(logSpy.mock.calls.map((c) => c[0]).join("\n"));
+        expect(parsed.chats).toHaveLength(15);
+        expect(parsed.chats.filter((c: ChatInfo) => c.profile === "live")).toHaveLength(14);
+        expect(parsed.chats.filter((c: ChatInfo) => c.id === "stale-1")).toHaveLength(1);
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("all-fresh fan-out is byte-identical: no wait, no re-query", async () => {
+      const profiles = ["live1", "live2"];
+      context.listProfiles = () => profiles;
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => [
+          { id: `${name}-1`, title: `${name} chat`, isPinned: false, timestamp: 1717100000000, profile: name },
+        ]),
+      }));
+      cookieSession.rotationInFlight = mock(() => false);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute([], context);
+
+        expect(cookieSession.waitForRotation).not.toHaveBeenCalled();
+        for (const name of profiles) {
+          expect(client.forProfile).toHaveBeenCalledWith(name);
+        }
+        const stderr = errSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(stderr).not.toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
+
+    test("all-stale fan-out still works: every in-flight profile gets awaited and re-queried", async () => {
+      const profiles = ["a", "b"];
+      context.listProfiles = () => profiles;
+      const callsPerProfile: Record<string, number> = {};
+      client.forProfile = mock((name: string) => ({
+        listChats: mock(async () => {
+          callsPerProfile[name] = (callsPerProfile[name] ?? 0) + 1;
+          return callsPerProfile[name] > 1
+            ? [{ id: `${name}-1`, title: `${name} recovered`, isPinned: false, timestamp: 1717100000000, profile: name }]
+            : [];
+        }),
+      }));
+      cookieSession.rotationInFlight = mock(() => true);
+      cookieSession.waitForRotation = mock(async () => ({ cookies: [] }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute([], context);
+
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(2);
+        for (const name of profiles) {
+          expect(callsPerProfile[name]).toBe(2);
+        }
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("a recovered");
+        expect(output).toContain("b recovered");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).toContain("waiting");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
   });
 
   describe("reactive phantom detection", () => {
     let promptsModule: typeof import("../../../src/cli/utils/prompts.ts");
-
-    const setStdinTty = (value: boolean): void => {
-      Object.defineProperty(process.stdin, "isTTY", {
-        value,
-        configurable: true,
-        writable: true,
-      });
-    };
-    const restoreStdinTty = (): void => {
-      const desc = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
-      if (desc) Object.defineProperty(process.stdin, "isTTY", desc);
-      else Reflect.deleteProperty(process.stdin, "isTTY");
-    };
 
     beforeEach(async () => {
       promptsModule = await import("../../../src/cli/utils/prompts.ts");

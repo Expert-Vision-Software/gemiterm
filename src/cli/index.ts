@@ -6,11 +6,13 @@ import { GeminiClientService } from "../services/gemini-client-wrapper.ts";
 import { ProfileLifecycle } from "../services/profile-lifecycle.ts";
 import { SingleExport, BatchExport } from "../services/export-strategy.ts";
 import { fetchChatForRequest } from "./utils/gemini-queries.ts";
+import { runWithRotationRetry } from "./utils/rotation-await.ts";
+import { createDefaultClientCache } from "./utils/default-client-cache.ts";
 import { ProfileManager, CookieStorage } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts";
 import { getPackageJson } from "../infrastructure/path-utils.ts";
 import { parseGlobalArgs, printVersion, printHelp } from "../infrastructure/cli-parser.ts";
-import { AuthenticationError } from "../core/errors.ts";
+import { AuthenticationError, LoginCancelledError, LoginUnroutableError } from "../core/errors.ts";
 import { createCookieSession } from "../auth/cookie-session.ts";
 import type { CookieSession } from "../auth/cookie-session.ts";
 
@@ -51,27 +53,31 @@ async function setupServices(): Promise<CliServices> {
     return { secure1psid: armed.secure_1psid, secure1psidts: armed.secure_1psidts };
   };
 
-  let geminiClient: GeminiClientService | null = null;
-
-  async function getGeminiClient(): Promise<GeminiClientService> {
-    if (geminiClient) return geminiClient;
-    const profiles = await listProfiles();
-    if (profiles.length === 0) {
-      throw new AuthenticationError();
-    }
-    const profileName = await getDefaultProfileName();
-    try {
-      const { secure1psid, secure1psidts } = await profileCookieLoader(profileName);
-      geminiClient = new GeminiClientService(
-        { secure1psid, secure1psidts },
+  // Default-client cache revalidation (fix-8, gap 4): the SDK client bakes
+  // cookies at construction, so a process-cached instance built on a stale
+  // PSIDTS cannot read with a refreshed jar. The cache re-arms cheaply on
+  // every call (an in-process jar read — same cost `forProfile` already pays
+  // per call) and reconstructs the `GeminiClientService` when the armed
+  // PSIDTS changes; unchanged PSIDTS short-circuits to the cached instance
+  // (zero added latency, zero added init — design D2).
+  const clientCache = createDefaultClientCache<GeminiClientService>({
+    loadArmed: async (profileName) => await cookieSession.ensureSession(profileName),
+    construct: (armed, profileName) =>
+      new GeminiClientService(
+        { secure1psid: armed.secure_1psid, secure1psidts: armed.secure_1psidts },
         logger,
         profileCookieLoader,
         profileName,
-      );
-      return geminiClient;
-    } catch {
-      throw new AuthenticationError();
-    }
+      ),
+    resolveProfile: async () => {
+      const profiles = await listProfiles();
+      if (profiles.length === 0) throw new AuthenticationError();
+      return await getDefaultProfileName();
+    },
+  });
+
+  async function getGeminiClient(): Promise<GeminiClientService> {
+    return await clientCache.get();
   }
 
   const exportStrategies = {
@@ -80,7 +86,13 @@ async function setupServices(): Promise<CliServices> {
       logger: new Logger("export-command"),
     }),
     batch: new BatchExport({
-      fetchChat: (id, profile) => fetchChatForRequest(getGeminiClient, id, profile),
+      fetchChat: async (id, profile) =>
+        await runWithRotationRetry(
+          cookieSession,
+          profile ?? await getDefaultProfileName(),
+          () => fetchChatForRequest(getGeminiClient, id, profile),
+          () => false,
+        ),
       listChatsForProfile: async (name, options) => await (await (await getGeminiClient()).forProfile(name)).listChats(options),
       listProfiles,
       logger: new Logger("export-all-command"),
@@ -149,6 +161,14 @@ async function main(): Promise<void> {
       listProfiles: services.listProfiles,
     });
   } catch (error) {
+    if (error instanceof LoginCancelledError) {
+      logger.info(error.message);
+      process.exit(0);
+    }
+    if (error instanceof LoginUnroutableError) {
+      logger.info(error.message);
+      process.exit(1);
+    }
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`Command '${subcommand}' failed: ${message}`);
     process.exit(1);

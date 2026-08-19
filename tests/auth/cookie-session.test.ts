@@ -8,8 +8,9 @@ import { CookieStore } from "../../src/auth/cookie-store.ts";
 import { RotationCooldown } from "../../src/auth/rotation-cooldown.ts";
 import { SessionKeepalive } from "../../src/auth/session-keepalive.ts";
 import { GEMINI_APP_URL } from "../../src/auth/auth-constants.ts";
-import { SessionValidationError, LoginTimeoutError } from "../../src/core/errors.ts";
+import { SessionValidationError, LoginCancelledError, LoginTimeoutError, LoginUnroutableError } from "../../src/core/errors.ts";
 import { CookieValidator } from "../../src/auth/cookie-validation.ts";
+import { PlaywrightCliError } from "../../src/services/playwright-cli-driver.ts";
 
 const TEST_DIR = join(tmpdir(), "gemiterm-test-facade");
 
@@ -44,6 +45,14 @@ const FULL_JAR = [
   cookie("THIRD", "x", ".example.com"),
 ];
 
+// PSID/PSIDTS at .youtube.com only — the persistent-profile sibling shape
+// the new routable gate must reject (fix-7). Distinct value prefixes so
+// backstop tests can spot if the wrong jar is passed to state-save.
+const YOUTUBE_ONLY = [
+  cookie("__Secure-1PSID", "yt-psid", ".youtube.com"),
+  cookie("__Secure-1PSIDTS", "yt-psidts", ".youtube.com"),
+];
+
 function makeLogger() {
   return {
     debug: mock(() => {}),
@@ -61,11 +70,14 @@ function makeStore(jar: Cookie[], mtime: Date | null = new Date()) {
   };
 }
 
-function makeDriver(cookiesByPoll: Cookie[] = FULL_JAR, stateJar: Cookie[] = FULL_JAR) {
+function makeDriver(cookiesByPoll: Cookie[] = FULL_JAR, stateJar: Cookie[] = FULL_JAR, cookieListImpl?: () => Promise<Cookie[]>) {
+  const cookieList = cookieListImpl
+    ? mock(cookieListImpl)
+    : mock(async () => cookiesByPoll);
   return {
     openHeaded: mock(async () => {}),
     openHeadless: mock(async () => {}),
-    cookieList: mock(async () => cookiesByPoll),
+    cookieList,
     cookieListFromState: mock(async () => stateJar),
     closeSession: mock(async () => {}),
   };
@@ -227,6 +239,37 @@ describe("CookieSession.captureLogin", () => {
     expect(deps.cookieStore.saveFullJar).not.toHaveBeenCalled();
   });
 
+  test("youtube-only PSID/PSIDTS times out as LoginUnroutableError, never persists", async () => {
+    // PSID/PSIDTS exist by name but only at .youtube.com — a persistent profile's
+    // pre-existing sibling shape. Name-only gates let this through; the
+    // routable gate must not.
+    const driver = makeDriver(YOUTUBE_ONLY);
+    const deps = makeDeps({ driver, pollIntervalMs: 1 });
+    const session = makeSession(deps);
+
+    const promise = session.captureLogin("p", { timeoutMs: 30 });
+    await expect(promise).rejects.toBeInstanceOf(LoginUnroutableError);
+
+    expect(driver.cookieListFromState).not.toHaveBeenCalled();
+    expect(deps.cookieStore.saveFullJar).not.toHaveBeenCalled();
+    expect(driver.closeSession).toHaveBeenCalledWith("p");
+  });
+
+  test("routable gate passes; backstop rejects unroutable state-save as LoginUnroutableError, never persists", async () => {
+    // Gate observes a .google.com-routable pair. state-save returns a jar
+    // where the PSID/PSIDTS sit only at .youtube.com — the validator catches
+    // it, the backstop rejects, the pre-existing jar is not overwritten.
+    const driver = makeDriver(FULL_JAR, YOUTUBE_ONLY);
+    const deps = makeDeps({ driver });
+    const session = makeSession(deps);
+
+    await expect(session.captureLogin("p")).rejects.toBeInstanceOf(LoginUnroutableError);
+
+    expect(driver.cookieListFromState).toHaveBeenCalledTimes(1);
+    expect(deps.cookieStore.saveFullJar).not.toHaveBeenCalled();
+    expect(driver.closeSession).toHaveBeenCalledWith("p");
+  });
+
   test("renew mode prints renewal text", async () => {
     const deps = makeDeps();
     const session = makeSession(deps);
@@ -234,6 +277,46 @@ describe("CookieSession.captureLogin", () => {
     const out = logs.join("\n");
     expect(out).toContain("Renewal successful");
     expect(out).not.toContain("Authentication successful");
+  });
+
+  test("browser closed mid-poll rejects with LoginCancelledError, closes once, persists nothing, and logs once", async () => {
+    const closedErr = new PlaywrightCliError("cookie-list", 1, "Browser p is not open");
+    const cookieListImpl = mock(async () => {
+      throw closedErr;
+    });
+    const logger = makeLogger();
+    const driver = makeDriver(FULL_JAR, FULL_JAR, cookieListImpl);
+    const deps = makeDeps({ driver, logger, pollIntervalMs: 1 });
+    const session = makeSession(deps);
+
+    await expect(session.captureLogin("p", { timeoutMs: 5_000 })).rejects.toBeInstanceOf(LoginCancelledError);
+
+    expect(driver.closeSession).toHaveBeenCalledTimes(1);
+    expect(driver.closeSession).toHaveBeenCalledWith("p");
+    expect(driver.cookieListFromState).not.toHaveBeenCalled();
+    expect(deps.cookieStore.saveFullJar).not.toHaveBeenCalled();
+
+    const infoMessages = logger.info.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(infoMessages).toContain("Gate poll cancelled");
+
+    const debugMessages = logger.debug.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(debugMessages).not.toContain("Gate poll failed");
+  });
+
+  test("transient cookieList errors still poll until timeout", async () => {
+    const transientErr = new PlaywrightCliError("cookie-list", 1, "network blip");
+    const driver = makeDriver([cookie("SID", "s")], FULL_JAR, mock(async () => {
+      throw transientErr;
+    }));
+    const logger = makeLogger();
+    const deps = makeDeps({ driver, logger, pollIntervalMs: 1 });
+    const session = makeSession(deps);
+
+    await expect(session.captureLogin("p", { timeoutMs: 30 })).rejects.toBeInstanceOf(LoginTimeoutError);
+
+    const debugMessages = logger.debug.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(debugMessages).toContain("Gate poll failed");
+    expect(driver.closeSession).toHaveBeenCalledWith("p");
   });
 });
 

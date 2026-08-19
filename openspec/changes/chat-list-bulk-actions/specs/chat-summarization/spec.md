@@ -65,7 +65,7 @@ The `formatBulkSummary` function in `src/services/local-summarizer.ts` MUST prod
 3. A `## Cross-references` section containing, in order, a `### By date` subsection (omitted when there are no `date` groups), a `### Shared keywords` subsection (omitted when there are no `shared-keywords` groups), and a `### No related notes` subsection (omitted when there are no `no-related` groups).
 4. A `## Notes` section containing, for each `PerNoteExtract` in `summary.perNote`, a `### <title> ('<id>', <YYYY-MM-DD>)` heading, a `**Keywords:** <kw1>, <kw2>, <kw3>` line (omitted when `keywords` is empty), and the `excerpt` block (each entry separated by a blank line).
 
-The function MUST be deterministic: two calls with the same `BulkSummary` produce byte-identical output. The function MUST NOT consult the file system or call any mediator. The function MUST be exported as a named function so it can be unit-tested in isolation.
+The function MUST be deterministic: two calls with the same `BulkSummary` produce byte-identical output. The function MUST NOT consult the file system or call the Gemini client (the function is pure). The function MUST be exported as a named function so it can be unit-tested in isolation.
 
 #### Scenario: formatter produces the expected structure for a 2-chat input
 
@@ -85,10 +85,10 @@ The function MUST be deterministic: two calls with the same `BulkSummary` produc
 - **WHEN** `formatBulkSummary` is called twice with the same `BulkSummary`
 - **THEN** the two returned strings are byte-identical
 
-#### Scenario: formatter does not call the mediator
+#### Scenario: formatter does not call the Gemini client
 
 - **WHEN** `formatBulkSummary` is called
-- **THEN** no `mediator.send` is invoked during the call (the function is pure)
+- **THEN** no Gemini-client method is invoked during the call (the function is pure)
 
 ### Requirement: Per-note block fits within a follow-up chat prompt
 

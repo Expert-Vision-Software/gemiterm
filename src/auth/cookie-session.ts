@@ -1,11 +1,11 @@
 import chalk from "chalk";
-import type { AuthResult, Cookie } from "../core/types.ts";
+import type { AuthResult, Cookie, SessionState } from "../core/types.ts";
 import { Logger } from "../infrastructure/logger.ts";
-import { AuthenticationError, LoginTimeoutError } from "../core/errors.ts";
+import { AuthenticationError, LoginCancelledError, LoginTimeoutError, LoginUnroutableError } from "../core/errors.ts";
 import { getDefaultProfileName } from "../infrastructure/config.ts";
 import { validateProfileName } from "../infrastructure/validators.ts";
 import { isRunningElevated, ElevationError } from "../infrastructure/elevation.ts";
-import { CookieValidator, findRoutableCookieValue } from "./cookie-validation.ts";
+import { CookieValidator, findRoutableCookieValue, isRoutableTo } from "./cookie-validation.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { RotationCooldown, type RotationCooldownSeam } from "./rotation-cooldown.ts";
 import { SessionKeepalive, type SessionKeepaliveOptions } from "./session-keepalive.ts";
@@ -15,7 +15,7 @@ import { SessionClassifier, type SessionProbeResult } from "./session-classifier
 export type { SessionProbeResult } from "./session-classifier.ts";
 import { BrowserRefresher, type RefresherDriver, type RotationResult } from "./browser-refresher.ts";
 import { RecoveryRung } from "./recovery.ts";
-import { PlaywrightCliDriver } from "../services/playwright-cli-driver.ts";
+import { PlaywrightCliDriver, isBrowserClosedError } from "../services/playwright-cli-driver.ts";
 import {
   GEMINI_APP_URL,
   PSIDTS_COOKIE_NAME,
@@ -28,7 +28,11 @@ import { spawnDetachedRefreshRunner } from "./refresh-runner.ts";
 const STALE_JAR_MS = 30 * 60 * 1000;
 const DEFAULT_LOGIN_TIMEOUT_MS = 300_000;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_ROTATION_WAIT_MS = 30_000;
+// Wait ceiling >= the runner's rotation budget (60 s) plus browser-open
+// margin (openspec/changes/fix-rotation-dead-end): the await must be able to
+// cover the full rotation it is awaiting. Unraced field rotations land in
+// ~6-10 s, so the common case still returns on the first or second poll.
+const DEFAULT_ROTATION_WAIT_MS = 90_000;
 
 interface ArmRecord {
   psidts: string | null;
@@ -56,7 +60,7 @@ export interface CookieSessionDeps {
   classifier: Pick<SessionClassifier, "classify" | "classifyDetailed">;
   recovery: Pick<RecoveryRung, "recover">;
   logger: Logger;
-  spawnRefreshRunner: (profile: string) => void;
+  spawnRefreshRunner: (profile: string) => void | Promise<void>;
   listProfiles: () => Promise<string[]>;
   conversationLookup: { profileHasConversation(profileName: string, conversationId: string): Promise<boolean> };
   driver: CaptureDriver;
@@ -122,7 +126,9 @@ export class CookieSession {
     const stale = mtime === null || Date.now() - mtime.getTime() > STALE_JAR_MS;
     if (stale && !this.spawnedRunnerProfiles.has(name)) {
       this.spawnedRunnerProfiles.add(name);
-      this.deps.spawnRefreshRunner(name);
+      // Fire-and-forget: the spawn guard may skip (single-flight lock held by
+      // another process's runner) and never rejects.
+      void Promise.resolve(this.deps.spawnRefreshRunner(name)).catch(() => {});
     }
     this.lastArm.set(name, {
       psidts: findRoutableCookieValue(cookies, PSIDTS_COOKIE_NAME),
@@ -196,6 +202,14 @@ export class CookieSession {
 
       const jar = await this.deps.driver.cookieListFromState(name);
       const payload = filterToGeminiDomains(jar);
+      try {
+        this.deps.validator.validate(payload);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new LoginUnroutableError(
+          `Captured jar failed validation: ${detail}. The pre-existing jar has been preserved byte-for-byte.`,
+        );
+      }
       await this.deps.cookieStore.saveFullJar(name, payload);
 
       const expiresAt = psidtsExpiry(payload);
@@ -210,7 +224,7 @@ export class CookieSession {
     }
   }
 
-  async probe(profile: string): Promise<"live" | "phantom" | "dead"> {
+  async probe(profile: string): Promise<SessionState> {
     return await this.deps.classifier.classify(profile);
   }
 
@@ -235,6 +249,19 @@ export class CookieSession {
   }
 
   async recover(profile: string): Promise<ArmedSession> {
+    // De-race (openspec/changes/fix-rotation-dead-end): a detached rotation
+    // may still be in flight for this profile; awaiting it is passive and,
+    // when it lands, recovery re-arms without opening a browser - and without
+    // colliding with the runner's shared playwright session/persistent dir.
+    if (this.rotationInFlight(profile)) {
+      const landed = await this.waitForRotation(profile);
+      if (landed !== null) {
+        this.deps.logger.info(
+          `recover(${profile}): detached rotation landed during the wait - re-arming instead of opening a recovery browser`,
+        );
+        return landed;
+      }
+    }
     return await this.deps.recovery.recover(profile);
   }
 
@@ -251,6 +278,9 @@ export class CookieSession {
   }
 
   async findProfileForConversation(conversationId: string): Promise<string | null> {
+    // Pass 1 (unchanged): live profiles only, list order. This is the
+    // historical path — it preserves the "live-first" routing contract that
+    // the multi-profile read commands rely on.
     const profiles = await this.activeProfiles();
     for (const name of profiles) {
       try {
@@ -261,22 +291,99 @@ export class CookieSession {
         continue;
       }
     }
+
+    // Cold-invocation arming (fix-8 review gap-3): in a fresh `fetch`/
+    // `continue` without `-p`, nothing arms the configured profiles before
+    // this method runs (activeProfiles/classifier load jars without arming),
+    // so every waitForRotation below would return null and pass 2 would
+    // consult no one — the exact field scenario this change exists for.
+    // Arm each configured profile that has no arm record yet this invocation,
+    // in listProfiles() order. Arming a stale jar spawns the detached runner
+    // that backs the wait (single-flight guarded); a fresh jar is an
+    // in-process read. A jar that fails validation or loading skips the
+    // profile without aborting the routing for the others. Never re-arm:
+    // an ensureSession after a landed rotation records stale:false and would
+    // wrongly exclude that profile from the wait, which must compare against
+    // the ORIGINAL stale-arm baseline.
+    const toArm = await this.deps.listProfiles();
+    for (const name of toArm) {
+      if (this.lastArm.has(name)) continue;
+      try {
+        await this.ensureSession(name);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        this.deps.logger.warn(
+          `findProfileForConversation: arming skipped for profile '${name}': ${detail}`,
+        );
+      }
+    }
+
+    // Pass 2 (fix-8): conversations owned only by a stale-but-recoverable
+    // profile would otherwise be unresolvable. `waitForRotation` resolves
+    // non-null only when the profile was armed stale THIS invocation AND its
+    // detached rotation has landed (it returns null for fresh arms and on
+    // timeout). The waits run in parallel — the ceiling is per-profile, not
+    // aggregate. We do NOT spawn a second runner, do NOT write cookies, and
+    // preserve listProfiles() order. Live profiles retain priority in pass
+    // 1 even when pass 2 would also match.
+    const configuredProfiles = await this.deps.listProfiles();
+    const settled = await Promise.all(
+      configuredProfiles.map(async (name) => {
+        const landed = await this.waitForRotation(name).catch(() => null);
+        return { name, landed };
+      }),
+    );
+    for (const { name, landed } of settled) {
+      if (landed === null) continue;
+      try {
+        if (await this.deps.conversationLookup.profileHasConversation(name, conversationId)) {
+          return name;
+        }
+      } catch {
+        continue;
+      }
+    }
+
     return null;
   }
 
-  private async waitForGate(session: string, timeoutMs: number): Promise<void> {
+private async waitForGate(session: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
+    let sawBothNamed = false;
+    const observedScopes = new Set<string>();
     for (;;) {
       try {
         const cookies = await this.deps.driver.cookieList(session);
-        const names = new Set(cookies.map((c) => c.name));
-        if (names.has(PSID_COOKIE_NAME) && names.has(PSIDTS_COOKIE_NAME)) {
+        const hasRoutablePair =
+          cookies.some((c) => c.name === PSID_COOKIE_NAME && isRoutableTo(c, GEMINI_APP_URL)) &&
+          cookies.some((c) => c.name === PSIDTS_COOKIE_NAME && isRoutableTo(c, GEMINI_APP_URL));
+        if (hasRoutablePair) {
           return;
         }
+        const hasPsid = cookies.some((c) => c.name === PSID_COOKIE_NAME);
+        const hasPsidts = cookies.some((c) => c.name === PSIDTS_COOKIE_NAME);
+        if (hasPsid && hasPsidts) {
+          sawBothNamed = true;
+          for (const c of cookies) {
+            if (c.name === PSID_COOKIE_NAME || c.name === PSIDTS_COOKIE_NAME) {
+              observedScopes.add(c.domain);
+            }
+          }
+        }
       } catch (err) {
+        if (isBrowserClosedError(err)) {
+          this.deps.logger.info(`Gate poll cancelled: browser session '${session}' is no longer open`);
+          throw new LoginCancelledError();
+        }
         this.deps.logger.debug(`Gate poll failed: ${err}`);
       }
       if (Date.now() >= deadline) {
+        if (sawBothNamed) {
+          const scopes = [...observedScopes].join(", ") || "(none)";
+          throw new LoginUnroutableError(
+            `Authentication timed out without a gemini-routable __Secure-1PSID/TS — observed scopes: [${scopes}]. Re-run 'gemiterm auth' and complete sign-in on the gemini.google.com page.`,
+          );
+        }
         throw new LoginTimeoutError(timeoutMs);
       }
       await sleep(this.pollIntervalMs);
@@ -322,7 +429,7 @@ export interface CreateCookieSessionDeps {
   driver?: CaptureDriver & RefresherDriver;
   cookieStore?: CookieStore;
   listProfiles: () => Promise<string[]>;
-  spawnRefreshRunner?: (profile: string) => void;
+  spawnRefreshRunner?: (profile: string) => void | Promise<void>;
   createProbeClient: (
     config: { secure1psid: string; secure1psidts: string | null },
     profile: string,

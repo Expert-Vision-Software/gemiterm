@@ -52,7 +52,7 @@ describe("RecoveryRung", () => {
 
     expect(result.secure_1psid).toBe("psid");
     expect(deps.refresher.rotatePsidts).toHaveBeenCalledTimes(1);
-    expect(deps.refresher.rotatePsidts).toHaveBeenCalledWith("p", "on-disk-ts");
+    expect(deps.refresher.rotatePsidts).toHaveBeenCalledWith("p", "on-disk-ts", undefined, "recover-p");
     expect(deps.rearm).toHaveBeenCalledTimes(1);
     expect(deps.rearm).toHaveBeenCalledWith("p");
   });
@@ -64,7 +64,8 @@ describe("RecoveryRung", () => {
     const rung = new RecoveryRung(deps as never);
 
     await expect(rung.recover("p")).rejects.toBeInstanceOf(AuthenticationError);
-    expect(deps.refresher.rotatePsidts).toHaveBeenCalledTimes(1);
+    await expect(rung.recover("p")).rejects.toThrow(/no change from baseline.*signed out server-side/s);
+    expect(deps.refresher.rotatePsidts).toHaveBeenCalledTimes(2);
     expect(deps.rearm).not.toHaveBeenCalled();
   });
 

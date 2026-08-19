@@ -4,8 +4,9 @@ import { Logger } from "../../infrastructure/logger.ts";
 import { getDefaultProfileName } from "../../infrastructure/config.ts";
 import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
 import { fetchChatForRequest } from "../utils/gemini-queries.ts";
+import { runWithRotationRetry } from "../utils/rotation-await.ts";
+import { resolveProfileWithRecovery } from "../utils/recovery-offer.ts";
 import { loadEffectivePrompt } from "../utils/prompt-file.ts";
-import { resolveProfile } from "../utils/profile-resolution.ts";
 import { invokeCommand } from "../utils/command-invoker.ts";
 import { startChatSession } from "../utils/chat-session.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
@@ -89,7 +90,8 @@ export class ContinueCommand implements CliCommand {
       return;
     }
 
-    const profileName = await resolveProfile(context, conversationId, options.profile ?? undefined);
+    const profileName = await resolveProfileWithRecovery(context, conversationId, options.profile);
+    const rotationProfile = profileName ?? await getDefaultProfileName();
 
     message = await loadEffectivePrompt(message, options.promptFile);
 
@@ -104,8 +106,10 @@ export class ContinueCommand implements CliCommand {
       getGeminiClient: context.getGeminiClient,
       logger,
       keepalive,
+      cookieSession: context.cookieSession,
+      rotationProfile,
       beforeInteractiveLoop: async () => {
-        await this.printLastMessage(context.getGeminiClient, conversationId, profileName);
+        await this.printLastMessage(context.getGeminiClient, conversationId, profileName, context.cookieSession, rotationProfile);
       },
     });
   }
@@ -114,8 +118,15 @@ export class ContinueCommand implements CliCommand {
     getGeminiClient: () => Promise<GeminiClientService>,
     conversationId: string,
     profileName: string | null,
+    cookieSession: CliCommandContext["cookieSession"],
+    rotationProfile: string,
   ): Promise<void> {
-    const messages = await fetchChatForRequest(getGeminiClient, conversationId, profileName ?? undefined);
+    const messages = await runWithRotationRetry(
+      cookieSession,
+      rotationProfile,
+      () => fetchChatForRequest(getGeminiClient, conversationId, profileName ?? undefined),
+      (messages) => messages.length === 0,
+    );
 
     const lastModelMessage = [...messages].reverse().find((m) => m.role === "model");
     if (lastModelMessage) {

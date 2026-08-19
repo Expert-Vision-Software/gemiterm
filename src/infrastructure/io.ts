@@ -136,7 +136,34 @@ async function writeFileExclusive(path: string, content: string): Promise<boolea
  * Atomic text write: writes to a temp file in the target's directory, then
  * renames it over the target. Readers observe either the old or the new
  * content, never a partial write. The temp file is removed on failure.
+ *
+ * On Windows the rename can transiently fail with EPERM/EACCES while another
+ * process holds the target open for reading (opens lack FILE_SHARE_DELETE) -
+ * e.g. a detached refresh-runner persisting a rotated jar while a waiting CLI
+ * polls it. The rename is retried briefly before surfacing the error.
  */
+const RENAME_RETRY_MS = 25;
+const RENAME_RETRY_MAX = 20;
+
+function isTransientRenameError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === "EPERM" || code === "EACCES" || code === "ENOTEMPTY" || code === "EISDIR";
+}
+
+async function renameWithRetry(src: string, dest: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(src, dest);
+      return;
+    } catch (err) {
+      if (!isTransientRenameError(err) || attempt >= RENAME_RETRY_MAX) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, RENAME_RETRY_MS));
+    }
+  }
+}
+
 async function writeTextFileAtomic(path: string, content: string): Promise<void> {
   const absolute = resolve(path);
   const parent = dirname(absolute);
@@ -147,7 +174,7 @@ async function writeTextFileAtomic(path: string, content: string): Promise<void>
   );
   try {
     await writeFile(tmp, content, "utf-8");
-    await rename(tmp, absolute);
+    await renameWithRetry(tmp, absolute);
   } catch (err) {
     try {
       await rm(tmp, { force: true });

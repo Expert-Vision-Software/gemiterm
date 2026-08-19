@@ -85,8 +85,15 @@ export class CookieValidator {
 
     const routable = cookies.some((c) => c.name === PSIDTS_COOKIE_NAME && isRoutableTo(c, GEMINI_APP_URL));
     if (!routable) {
+      const scopesSet = new Set<string>();
+      for (const c of cookies) {
+        if (c.name === PSIDTS_COOKIE_NAME) {
+          scopesSet.add(c.domain);
+        }
+      }
+      const scopes = [...scopesSet].join(", ") || "(none)";
       throw new SessionValidationError(
-        `Cookie ${PSIDTS_COOKIE_NAME} is expired or not routable to ${GEMINI_APP_URL}. Run 'gemiterm auth' to authenticate.`,
+        `Cookie ${PSIDTS_COOKIE_NAME} is expired or not routable to ${GEMINI_APP_URL} — present scopes: [${scopes}]. Run 'gemiterm auth' to authenticate.`,
       );
     }
 

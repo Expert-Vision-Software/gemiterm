@@ -1,6 +1,6 @@
 ## Purpose
 
-The browser installation capability. It owns the `InstallBrowserService` that locates an existing system browser (Edge or Chrome on Windows, Chrome/Chromium/Edge on Linux, and Windows-hosted Edge/Chrome from inside WSL) and, when no system browser is found, shells out to `bunx @playwright/cli install chromium` to download a managed copy. It also owns the `install-browser` CLI command that surfaces the install to the user with friendly progress and error messaging.
+The browser installation capability. It owns the `InstallBrowserService` that locates an existing system browser (Edge or Chrome on Windows, Chrome/Chromium/Edge on Linux, and Windows-hosted Edge/Chrome from inside WSL) and, when no system browser is found, shells out to `bunx @playwright/cli install-browser chrome-for-testing` to download a managed copy of Chrome for Testing (the canonical chromium channel that `@playwright/cli`'s `--browser=chromium` runtime flag resolves to). It also owns the `install-browser` CLI command that surfaces the install to the user with friendly progress and error messaging.
 
 ## Requirements
 
@@ -11,23 +11,23 @@ The `InstallBrowserService.install()` method MUST first call `findSystemBrowser(
 - **WHEN** `install()` is called and `findSystemBrowser()` returns `{ found: true, browserName: "Microsoft Edge", path: "<path>" }`
 - **THEN** the method resolves successfully, the console receives a line containing `Using existing Microsoft Edge installation.`, and no `bunx @playwright/cli install` subprocess is spawned
 
-### Requirement: InstallBrowserService.install runs bunx playwright install when needed
-When `findSystemBrowser()` returns `found === false`, `install()` MUST print the string `No suitable browser found. Installing Chromium via Playwright...` to the console, log an info message containing `bunx @playwright/cli install chromium`, and then run the install subprocess. When the subprocess exits with code 0, the method MUST log the captured stdout, print `Chromium installed successfully.` to the console, and resolve successfully.
+### Requirement: InstallBrowserService.install runs bunx playwright install-browser when needed
+When `findSystemBrowser()` returns `found === false`, `install()` MUST print the string `No suitable browser found. Installing Chrome for Testing via Playwright...` to the console, log an info message containing `bunx @playwright/cli install-browser chrome-for-testing`, and then run the install subprocess. When the subprocess exits with code 0, the method MUST log the captured stdout, print `Chrome for Testing installed successfully.` to the console, and resolve successfully.
 
 #### Scenario: install runs the bunx subprocess and succeeds
 - **WHEN** `findSystemBrowser()` returns `{ found: false, browserName: "none" }` and the subprocess exits with code 0
-- **THEN** `install()` resolves successfully, the console receives `No suitable browser found. Installing Chromium via Playwright...` and `Chromium installed successfully.`, and the logger receives an info message containing `Browser installation output:`
+- **THEN** `install()` resolves successfully, the console receives `No suitable browser found. Installing Chrome for Testing via Playwright...` and `Chrome for Testing installed successfully.`, and the logger receives an info message containing `Browser installation output:`
 
 ### Requirement: InstallBrowserService.install throws InstallBrowserError on failure
 When the install subprocess fails (non-zero exit, spawn error, or any other failure), the `install()` method MUST throw an `InstallBrowserError`. The error's `cause` field MUST be set to the underlying `PlaywrightCliError` when the failure originates from the CLI subprocess, or to the originating `Error` for any other failure. The error's `message` MUST include the underlying error's message so that the caller can surface it to the user.
 
 #### Scenario: Wraps PlaywrightCliError with cause
-- **WHEN** the spawn or the `playwright-cli install` subprocess fails and the underlying error is a `PlaywrightCliError`
+- **WHEN** the spawn or the `playwright-cli install-browser` subprocess fails and the underlying error is a `PlaywrightCliError`
 - **THEN** `install()` rejects with an `InstallBrowserError` whose `cause` is the `PlaywrightCliError` and whose `message` contains the `PlaywrightCliError.message` text
 
 #### Scenario: Wraps generic Error with cause
 - **WHEN** the subprocess fails for any other reason (e.g. spawn error with a plain `Error`)
-- **THEN** `install()` rejects with an `InstallBrowserError` whose `cause` is the originating `Error` and whose `message` contains the substring `Failed to install Chromium:`
+- **THEN** `install()` rejects with an `InstallBrowserError` whose `cause` is the originating `Error` and whose `message` contains the substring `Failed to install Chrome for Testing:`
 
 #### Scenario: InstallBrowserError exposes name and cause
 - **WHEN** an `InstallBrowserError` is constructed with a message and an optional cause
@@ -123,11 +123,11 @@ The `isWsl()` helper MUST return `true` only when `/proc/version` exists AND its
 - **THEN** `findSystemBrowser()` returns `{ found: false, browserName: "none" }`
 
 ### Requirement: InstallBrowserCommand wraps the install service for CLI invocation
-The `InstallBrowserCommand` class MUST be registered as the CLI command `"install-browser"` with a description that includes the word `Chromium`. The `execute(_args, _context)` method MUST instantiate an `InstallBrowserService` (passing a logger named `"install-browser-command"`), print the dim message `Checking browser installation...` to the console, call `service.install()`, and on success print the green message `Browser ready.` to the console.
+The `InstallBrowserCommand` class MUST be registered as the CLI command `"install-browser"` with a description that includes the words `Chrome for Testing`. The `execute(_args, _context)` method MUST instantiate an `InstallBrowserService` (passing a logger named `"install-browser-command"`), print the dim message `Checking browser installation...` to the console, call `service.install()`, and on success print the green message `Browser ready.` to the console.
 
 #### Scenario: InstallBrowserCommand metadata
 - **WHEN** an `InstallBrowserCommand` instance is constructed
-- **THEN** `command.name === "install-browser"` and `command.description` contains the substring `Chromium`
+- **THEN** `command.name === "install-browser"` and `command.description` contains the substring `Chrome for Testing`
 
 #### Scenario: Successful install prints the ready message
 - **WHEN** `execute([], { verbose: false })` is called and `service.install()` resolves
@@ -138,7 +138,7 @@ When `service.install()` rejects with an `InstallBrowserError`, the `InstallBrow
 - Log the error's message at error level via the logger.
 - When the error has a `cause`, log `Cause: <cause.message>` at error level via the logger.
 - Print the red message `Failed to install browser.` to stderr.
-- Print the dim message `You may need to run: bunx @playwright/cli install chromium` to stderr as remediation.
+- Print the dim message `You may need to run: bunx @playwright/cli install-browser chrome-for-testing` to stderr as remediation.
 - Call `process.exit(1)` to terminate the process with a non-zero exit code.
 
 #### Scenario: InstallBrowserError causes exit code 1

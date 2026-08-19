@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, afterEach, spyOn } from "bun:test";
-import { listChatsForRequest, fetchChatForRequest } from "../../../src/cli/utils/gemini-queries.ts";
+import { listChatsForRequest, listChatsOutcomes, fetchChatForRequest } from "../../../src/cli/utils/gemini-queries.ts";
 import type { ChatInfo } from "../../../src/core/types.ts";
 
 function makeChat(id: string, timestamp: number): ChatInfo {
@@ -89,6 +89,22 @@ describe("listChatsForRequest", () => {
     expect(personal.listChats).not.toHaveBeenCalled();
   });
 
+  test("explicit profile error propagates", async () => {
+    const dead = {
+      listChats: mock(async () => {
+        throw new Error("Network error");
+      }),
+    };
+    const client: any = {
+      listChats: mock(async () => []),
+      forProfile: mock((_name: string) => dead),
+    };
+
+    await expect(
+      listChatsForRequest(() => client, () => ["dead"], { profile: "dead" }),
+    ).rejects.toThrow("Network error");
+  });
+
   test("allProfiles flag maps onto the same multi-profile path", async () => {
     const work = { listChats: mock(async () => [makeChat("w1", 100)]) };
     const personal = { listChats: mock(async () => [makeChat("p1", 200)]) };
@@ -100,6 +116,55 @@ describe("listChatsForRequest", () => {
     const result = await listChatsForRequest(() => client, () => ["work", "personal"], { allProfiles: true });
 
     expect(result.map((c) => c.id)).toEqual(["p1", "w1"]);
+  });
+});
+
+describe("listChatsOutcomes", () => {
+  afterEach(() => {
+    mock.restore();
+  });
+
+  test("returns one outcome per profile, distinguishing chats from rejections", async () => {
+    const work = { listChats: mock(async () => [makeChat("w1", 100)]) };
+    const broken = {
+      listChats: mock(async () => {
+        throw new Error("unavailable");
+      }),
+    };
+    const client: any = {
+      listChats: mock(async () => []),
+      forProfile: mock((name: string) => (name === "work" ? work : broken)),
+    };
+
+    const outcomes = await listChatsOutcomes(() => client, () => ["work", "broken"], {});
+
+    expect(outcomes).toHaveLength(2);
+    const workOutcome = outcomes.find((o) => o.profile === "work");
+    const brokenOutcome = outcomes.find((o) => o.profile === "broken");
+    expect(workOutcome?.chats?.map((c) => c.id)).toEqual(["w1"]);
+    expect(workOutcome?.error).toBeUndefined();
+    expect(brokenOutcome?.error).toBeInstanceOf(Error);
+    expect(brokenOutcome?.error?.message).toBe("unavailable");
+    expect(brokenOutcome?.chats).toBeUndefined();
+  });
+
+  test("explicit profile targets exactly that profile without fan-out", async () => {
+    const work = { listChats: mock(async () => [makeChat("w1", 100)]) };
+    const personal = { listChats: mock(async () => [makeChat("p1", 200)]) };
+    const client: any = {
+      listChats: mock(async () => []),
+      forProfile: mock((name: string) => (name === "work" ? work : personal)),
+    };
+
+    const outcomes = await listChatsOutcomes(
+      () => client,
+      () => ["work", "personal"],
+      { profile: "work" },
+    );
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0].profile).toBe("work");
+    expect(outcomes[0].chats?.map((c) => c.id)).toEqual(["w1"]);
   });
 });
 

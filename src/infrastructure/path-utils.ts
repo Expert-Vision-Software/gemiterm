@@ -49,6 +49,10 @@ function getProfileLockPath(name: string): string {
   return join(getProfilesDir(), name, `${STORAGE_STATE_FILE}.lock`);
 }
 
+function getRefreshRunnerLockPath(name: string): string {
+  return join(getProfilesDir(), name, "refresh-runner.lock");
+}
+
 function getProfileChatMetadataPath(name: string): string {
   return join(getProfilesDir(), name, CHAT_METADATA_FILE);
 }
@@ -160,6 +164,7 @@ export {
   getProfilesDir,
   getProfilePath,
   getProfileLockPath,
+  getRefreshRunnerLockPath,
   getProfileChatMetadataPath,
   getProfileDir,
   getDefaultProfileMarkerPath,

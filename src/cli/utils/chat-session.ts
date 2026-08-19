@@ -1,6 +1,8 @@
 import chalk from "chalk";
 import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
 import type { Logger } from "../../infrastructure/logger.ts";
+import type { CookieSession } from "../../auth/cookie-session.ts";
+import { runWithRotationRetry } from "./rotation-await.ts";
 import { runInteractiveLoop, type MessageHandlerResult, type SessionKeepaliveHandle } from "./interactive-prompt.ts";
 import { text, CancellationError } from "./prompts.ts";
 
@@ -14,6 +16,8 @@ export interface StartChatSessionParams {
   onInteractiveTurn?: (conversationId: string, isFirst: boolean) => void;
   beforeInteractiveLoop?: () => Promise<void>;
   keepalive?: SessionKeepaliveHandle;
+  cookieSession?: CookieSession;
+  rotationProfile?: string;
 }
 
 export async function startChatSession(params: StartChatSessionParams): Promise<void> {
@@ -27,6 +31,8 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
     onInteractiveTurn,
     beforeInteractiveLoop,
     keepalive,
+    cookieSession,
+    rotationProfile,
   } = params;
 
   const resolveClient = async (): Promise<GeminiClientService> =>
@@ -35,7 +41,13 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
   if (effectiveMessage) {
     if (conversationId) {
       logger.debug(`Sending message to ${conversationId}`);
-      const response = await (await resolveClient()).sendMessage(conversationId, effectiveMessage);
+      const send = async (): Promise<string> => {
+        const client = await resolveClient();
+        return client.sendMessage(conversationId, effectiveMessage);
+      };
+      const response = cookieSession && rotationProfile
+        ? await runWithRotationRetry(cookieSession, rotationProfile, send, () => false)
+        : await send();
       console.log(chalk.blue.bold("Model:"));
       console.log(response);
     } else {
