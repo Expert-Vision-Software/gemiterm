@@ -292,6 +292,32 @@ export class CookieSession {
       }
     }
 
+    // Cold-invocation arming (fix-8 review gap-3): in a fresh `fetch`/
+    // `continue` without `-p`, nothing arms the configured profiles before
+    // this method runs (activeProfiles/classifier load jars without arming),
+    // so every waitForRotation below would return null and pass 2 would
+    // consult no one — the exact field scenario this change exists for.
+    // Arm each configured profile that has no arm record yet this invocation,
+    // in listProfiles() order. Arming a stale jar spawns the detached runner
+    // that backs the wait (single-flight guarded); a fresh jar is an
+    // in-process read. A jar that fails validation or loading skips the
+    // profile without aborting the routing for the others. Never re-arm:
+    // an ensureSession after a landed rotation records stale:false and would
+    // wrongly exclude that profile from the wait, which must compare against
+    // the ORIGINAL stale-arm baseline.
+    const toArm = await this.deps.listProfiles();
+    for (const name of toArm) {
+      if (this.lastArm.has(name)) continue;
+      try {
+        await this.ensureSession(name);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        this.deps.logger.warn(
+          `findProfileForConversation: arming skipped for profile '${name}': ${detail}`,
+        );
+      }
+    }
+
     // Pass 2 (fix-8): conversations owned only by a stale-but-recoverable
     // profile would otherwise be unresolvable. `waitForRotation` resolves
     // non-null only when the profile was armed stale THIS invocation AND its

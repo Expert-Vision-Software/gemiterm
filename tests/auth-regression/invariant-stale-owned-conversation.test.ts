@@ -6,7 +6,7 @@
 // side-write.
 import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
 import { CookieStore } from "../../src/auth/cookie-store.ts";
-import { freshFullJar } from "./fixtures.ts";
+import { deadJar, freshFullJar } from "./fixtures.ts";
 import {
   TEST_DIR,
   setupIsolation,
@@ -127,5 +127,134 @@ describe("auth-regression: findProfileForConversation stale-aware second pass", 
     const owner = await session.findProfileForConversation("c_x");
 
     expect(owner).toBeNull();
+  });
+});
+
+// Cold invocation (fix-8 review gap-3): a fresh `fetch`/`continue` process
+// reaches findProfileForConversation with NO prior arm — the arming loop
+// inside the method is the only thing that makes pass 2 reachable.
+describe("auth-regression: findProfileForConversation cold-invocation arming", () => {
+  test("arms un-armed configured profiles itself and resolves the stale owner after rotation lands", async () => {
+    const store = new CookieStore();
+    await store.saveFullJar("live", freshFullJar());
+    await store.saveFullJar("stale", freshFullJar());
+
+    let rotationLanded = false;
+    const profileHasConversation = mock(async (profile: string, _cid: string) => {
+      if (profile === "stale" && rotationLanded) return true;
+      return false;
+    });
+    const spawnRefreshRunner = mock(async () => {});
+
+    const deps = makeSessionDeps({
+      cookieStore: {
+        load: (p: string) => store.load(p),
+        saveFullJar: (p: string, c: Parameters<CookieStore["saveFullJar"]>[1]) =>
+          store.saveFullJar(p, c),
+        getJarMtime: async (p: string) => (p === "stale" ? STALE_MTIME() : new Date()),
+      },
+      conversationLookup: { profileHasConversation },
+      spawnRefreshRunner,
+      listProfiles: mock(async () => ["live", "stale"]),
+      rotationWaitMs: 5_000,
+    });
+    deps.classifier.classify = mock(async (name: string) =>
+      name === "live" ? ("live" as const) : ("phantom" as const),
+    );
+
+    const session = makeSession(deps);
+
+    const timer = setTimeout(async () => {
+      rotationLanded = true;
+      await store.saveFullJar("stale", withPsidts(freshFullJar(), `rotated-${Date.now()}`));
+    }, 20);
+
+    const owner = await session.findProfileForConversation("c_x");
+    clearTimeout(timer);
+
+    expect(owner).toBe("stale");
+    expect(spawnRefreshRunner.mock.calls).toHaveLength(1);
+    expect(spawnRefreshRunner.mock.calls[0][0]).toBe("stale");
+    expect(profileHasConversation).toHaveBeenCalledWith("stale", "c_x");
+    expect(session.rotationInFlight("stale")).toBe(false);
+  });
+
+  test("pass 1 hit on a cold invocation observes zero added cost (no arming, no spawns)", async () => {
+    const store = new CookieStore();
+    await store.saveFullJar("live", freshFullJar());
+    await store.saveFullJar("stale", freshFullJar());
+
+    const profileHasConversation = mock(async (profile: string, _cid: string) => profile === "live");
+    const spawnRefreshRunner = mock(async () => {});
+
+    const deps = makeSessionDeps({
+      cookieStore: {
+        load: (p: string) => store.load(p),
+        saveFullJar: (p: string, c: Parameters<CookieStore["saveFullJar"]>[1]) =>
+          store.saveFullJar(p, c),
+        getJarMtime: async () => STALE_MTIME(),
+      },
+      conversationLookup: { profileHasConversation },
+      spawnRefreshRunner,
+      listProfiles: mock(async () => ["live", "stale"]),
+      rotationWaitMs: 20,
+    });
+    deps.classifier.classify = mock(async (name: string) =>
+      name === "live" ? ("live" as const) : ("phantom" as const),
+    );
+
+    const session = makeSession(deps);
+
+    const owner = await session.findProfileForConversation("c_x");
+
+    expect(owner).toBe("live");
+    expect(profileHasConversation).toHaveBeenCalledTimes(1);
+    expect(profileHasConversation).toHaveBeenCalledWith("live", "c_x");
+    expect(spawnRefreshRunner).not.toHaveBeenCalled();
+  });
+
+  test("skips a profile whose jar fails validation without aborting routing for the others", async () => {
+    const store = new CookieStore();
+    await store.saveFullJar("broken", deadJar());
+    await store.saveFullJar("stale", freshFullJar());
+
+    let rotationLanded = false;
+    const profileHasConversation = mock(async (profile: string, _cid: string) => {
+      if (profile === "stale" && rotationLanded) return true;
+      return false;
+    });
+    const spawnRefreshRunner = mock(async () => {});
+
+    const deps = makeSessionDeps({
+      cookieStore: {
+        load: (p: string) => store.load(p),
+        saveFullJar: (p: string, c: Parameters<CookieStore["saveFullJar"]>[1]) =>
+          store.saveFullJar(p, c),
+        getJarMtime: async () => STALE_MTIME(),
+      },
+      conversationLookup: { profileHasConversation },
+      spawnRefreshRunner,
+      listProfiles: mock(async () => ["broken", "stale"]),
+      rotationWaitMs: 5_000,
+    });
+    deps.classifier.classify = mock(async () => "phantom" as const);
+
+    const session = makeSession(deps);
+
+    const timer = setTimeout(async () => {
+      rotationLanded = true;
+      await store.saveFullJar("stale", withPsidts(freshFullJar(), `rotated-${Date.now()}`));
+    }, 20);
+
+    const owner = await session.findProfileForConversation("c_x");
+    clearTimeout(timer);
+
+    expect(owner).toBe("stale");
+    expect(spawnRefreshRunner.mock.calls).toHaveLength(1);
+    expect(spawnRefreshRunner.mock.calls[0][0]).toBe("stale");
+    const warned = (deps.logger.warn.mock.calls as unknown[][]).some((c) =>
+      String(c[0]).includes("broken"),
+    );
+    expect(warned).toBe(true);
   });
 });

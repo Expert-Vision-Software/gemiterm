@@ -1115,3 +1115,31 @@ do not re-litigate them.
   `tests/cli/utils/gemini-queries.test.ts`
   (openspec/changes/fix-8-stale-profile-reachability).
 
+- **2026-08-18** — fix-8 review gap-3 (pass 2 cold-process unreachability).
+  The fix-8 second pass of `findProfileForConversation`
+  (`src/auth/cookie-session.ts`) consulted "profiles armed stale this
+  invocation" — but `lastArm` is written only by `ensureSession`, and in a
+  cold `fetch`/`continue` process without `-p` nothing arms the configured
+  profiles before the method runs (`activeProfiles()` and the classifier
+  load jars without arming). Every `waitForRotation` returned null, pass 2
+  consulted no one, and the field scenario the change existed for
+  (conversation owned only by a stale profile) stayed broken — the original
+  invariant passed only because it pre-armed manually. After the pass-1
+  miss, the method now arms each configured profile that has no arm record
+  yet this invocation, in `listProfiles()` order, via `ensureSession`
+  (reactive, arm-first D2: a pass-1 live-owner hit still observes zero
+  added cost — the arming loop never runs). Arming a stale jar spawns the
+  detached runner that backs the wait (single-flight guarded); a fresh jar
+  is an in-process read; a jar that fails validation (`SessionValidationError`)
+  or loading is skipped with a warn log without aborting the routing for
+  the other profiles. Profiles are never re-armed (`!lastArm.has(name)`):
+  a post-rotation `ensureSession` would record `stale:false` and wrongly
+  exclude the profile from the wait, which must compare against the
+  ORIGINAL stale-arm baseline. No cookie writes, no in-process browsers,
+  capture/persistence untouched (domain-only policy). Invariant coverage:
+  cold-invocation block in
+  `tests/auth-regression/invariant-stale-owned-conversation.test.ts`
+  (arms un-armed profiles itself and resolves the stale owner; pass-1 hit
+  observes zero added cost; broken-jar profile skipped without aborting)
+  (openspec/changes/fix-8-stale-profile-reachability).
+
