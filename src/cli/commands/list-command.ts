@@ -98,6 +98,10 @@ export class ListCommand implements CliCommand {
     // re-queried profile's pass-1 outcome is replaced, never appended.
     // Live profiles observe zero added latency and zero re-queries.
     const finalOutcomes = await this.awaitStaleOutcomes(outcomes, request, context, logger);
+    if (request.profile) {
+      const failed = finalOutcomes.find((o) => o.profile === request.profile && o.error !== undefined);
+      if (failed) throw failed.error;
+    }
     let chats = this.mergeOutcomes(finalOutcomes);
 
     if (chats.length === 0) {

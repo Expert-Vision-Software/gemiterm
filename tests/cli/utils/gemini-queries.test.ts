@@ -89,6 +89,22 @@ describe("listChatsForRequest", () => {
     expect(personal.listChats).not.toHaveBeenCalled();
   });
 
+  test("explicit profile error propagates", async () => {
+    const dead = {
+      listChats: mock(async () => {
+        throw new Error("Network error");
+      }),
+    };
+    const client: any = {
+      listChats: mock(async () => []),
+      forProfile: mock((_name: string) => dead),
+    };
+
+    await expect(
+      listChatsForRequest(() => client, () => ["dead"], { profile: "dead" }),
+    ).rejects.toThrow("Network error");
+  });
+
   test("allProfiles flag maps onto the same multi-profile path", async () => {
     const work = { listChats: mock(async () => [makeChat("w1", 100)]) };
     const personal = { listChats: mock(async () => [makeChat("p1", 200)]) };

@@ -19,10 +19,11 @@ export interface ListChatsOutcome {
 const logger = new Logger("gemini-queries");
 
 // Per-profile fan-out result (fix-8, design D2): each profile yields either
-// its chats or the error that aborted the query. The aggregate `list` command
-// uses this to await rotations only for the profiles that need it; the thin
-// merge over this map (`listChatsForRequest`) keeps the existing aggregate
-// contract (sorted, descending by timestamp) byte-equivalent for callers.
+// its chats or the error that aborted the query. Errors-as-data is this
+// outcomes form's contract — the `list` command gates its rotation await on
+// it. The thin merge (`listChatsForRequest`) restores the pre-fix-8 seam
+// semantics: an explicit-profile error propagates; aggregate per-profile
+// errors are swallowed with a warn.
 //
 // `onlyProfiles` lets the caller re-query a specific subset after a rotation
 // lands — live profiles are never re-queried (zero added latency, design D2).
@@ -74,9 +75,12 @@ export async function listChatsForRequest(
   getGeminiClient: () => Promise<GeminiClientService>,
   listProfiles: () => Promise<string[]>,
   request: ListChatsRequest,
-  options: { onlyProfiles?: string[] } = {},
 ): Promise<ChatInfo[]> {
-  const outcomes = await listChatsOutcomes(getGeminiClient, listProfiles, request, options);
+  const outcomes = await listChatsOutcomes(getGeminiClient, listProfiles, request);
+  if (request.profile) {
+    const explicit = outcomes.find((outcome) => outcome.profile === request.profile);
+    if (explicit?.error !== undefined) throw explicit.error;
+  }
   const chats: ChatInfo[] = [];
   for (const outcome of outcomes) {
     if (outcome.chats) chats.push(...outcome.chats);

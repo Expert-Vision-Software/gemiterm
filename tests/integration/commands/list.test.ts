@@ -415,19 +415,36 @@ describe("list command integration", () => {
   });
 
   describe("error handling", () => {
-    test("single-profile errors are captured as outcomes; the empty result renders with the empty message", async () => {
-      const stderrSpy = spyOn(process.stderr, "write").mockImplementation(() => true);
-      try {
-        client.listChats.mockRejectedValue(new Error("Network error"));
+    test("explicit dead profile rejects with the underlying error instead of an empty table", async () => {
+      client.listChats.mockRejectedValue(new Error("Network error"));
 
+      await expect(command.execute(["--profile", "work"], context)).rejects.toThrow("Network error");
+      const stdout = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(stdout).not.toContain("No conversations found");
+      expect(stdout).not.toContain("ID");
+    });
+
+    test("explicit profile whose rejection coincides with a landed rotation renders after the re-query", async () => {
+      let listCalls = 0;
+      client.listChats = mock(async () => {
+        listCalls += 1;
+        if (listCalls === 1) throw new Error("phantom jar");
+        return [{ id: "conv-42", title: "Post-rotation chat", isPinned: false, timestamp: 1717100000000, profile: "work" }];
+      });
+      cookieSession.rotationInFlight = mock(() => true);
+      cookieSession.waitForRotation = mock(async () => ({ cookies: [] }));
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
         await command.execute(["--profile", "work"], context);
 
-        const stdout = logSpy.mock.calls.map((c) => c[0]).join("\n");
-        const stderr = stderrSpy.mock.calls.map((c) => c[0]).join("\n");
-        expect(stdout).toContain("No conversations found");
-        expect(stderr).toContain("Network error");
+        expect(cookieSession.waitForRotation).toHaveBeenCalledTimes(1);
+        expect(client.listChats).toHaveBeenCalledTimes(2);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("Post-rotation chat");
+        expect(output).not.toContain("No conversations found");
       } finally {
-        stderrSpy.mockRestore();
+        errSpy.mockRestore();
       }
     });
   });
