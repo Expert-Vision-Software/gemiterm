@@ -158,18 +158,30 @@ jobs:
       - name: Set asset labels
         run: |
           TAG="${{ inputs.tag_name || github.ref_name }}"
-          LINUX_ASSET_ID=$(gh release view "$TAG" --json assets -q '.assets[] | select(.name == "gemiterm") | .id')
-          if [[ -n "$LINUX_ASSET_ID" ]]; then
-            gh api -X PATCH /repos/${{ github.repository }}/releases/assets/$LINUX_ASSET_ID \
-              -f name='GemiTerm' \
-              -f label="GemiTerm $TAG - Linux x64 binary" || true
-          fi
-          WINDOWS_ASSET_ID=$(gh release view "$TAG" --json assets -q '.assets[] | select(.name == "gemiterm.exe") | .id')
-          if [[ -n "$WINDOWS_ASSET_ID" ]]; then
-            gh api -X PATCH /repos/${{ github.repository }}/releases/assets/$WINDOWS_ASSET_ID \
-              -f name='GemiTerm' \
-              -f label="GemiTerm $TAG - Windows x64 binary" || true
-          fi
+          # `gh release view --json assets` returns opaque `RA_…` ids in `.id`;
+          # the REST asset endpoint requires the numeric id, so derive it from `.apiUrl`.
+          asset_id() {
+            local asset_name="$1" url=""
+            for attempt in 1 2 3; do
+              url=$(gh release view "$TAG" --json assets -q ".assets[] | select(.name == \"${asset_name}\") | .apiUrl" || true)
+              if [[ -n "$url" ]]; then
+                printf '%s' "${url##*/}"
+                return 0
+              fi
+              if [[ "$attempt" -lt 3 ]]; then
+                echo "Asset '${asset_name}' not visible on release '${TAG}' yet (attempt ${attempt}/3); retrying in 5s"
+                sleep 5
+              fi
+            done
+            echo "::error::Asset '${asset_name}' not found on release '${TAG}' after 3 attempts; cannot set label"
+            return 1
+          }
+          LINUX_ASSET_ID=$(asset_id gemiterm)
+          WINDOWS_ASSET_ID=$(asset_id gemiterm.exe)
+          gh api -X PATCH "/repos/${{ github.repository }}/releases/assets/$LINUX_ASSET_ID" \
+            -f label="GemiTerm $TAG - Linux x64 binary"
+          gh api -X PATCH "/repos/${{ github.repository }}/releases/assets/$WINDOWS_ASSET_ID" \
+            -f label="GemiTerm $TAG - Windows x64 binary"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
