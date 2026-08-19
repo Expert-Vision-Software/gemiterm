@@ -77,11 +77,7 @@ async function setupServices(): Promise<CliServices> {
   });
 
   async function getGeminiClient(): Promise<GeminiClientService> {
-    try {
-      return await clientCache.get();
-    } catch {
-      throw new AuthenticationError();
-    }
+    return await clientCache.get();
   }
 
   const exportStrategies = {
