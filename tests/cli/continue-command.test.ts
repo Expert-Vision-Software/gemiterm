@@ -39,10 +39,13 @@ describe("ContinueCommand", () => {
         activeProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => null),
         ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+        rotationInFlight: mock(() => false),
+        waitForRotation: mock(async () => null),
+        probe: mock(async () => "live" as const),
         createKeepalive: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
       } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
-      listProfiles: () => [],
+      listProfiles: () => ["default"],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
   });
@@ -159,10 +162,13 @@ describe("ContinueCommand keepalive wiring (fix-3b)", () => {
         activeProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => null),
         ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+        rotationInFlight: mock(() => false),
+        waitForRotation: mock(async () => null),
+        probe: mock(async () => "live" as const),
         createKeepalive: mock(() => ({ start: mock(() => {}), stop: mock(() => {}) })),
       } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
-      listProfiles: () => [],
+      listProfiles: () => ["default"],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     chatSessionModule = await import("../../src/cli/utils/chat-session.ts");

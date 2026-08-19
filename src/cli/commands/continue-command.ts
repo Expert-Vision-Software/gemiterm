@@ -5,8 +5,8 @@ import { getDefaultProfileName } from "../../infrastructure/config.ts";
 import type { GeminiClientService } from "../../services/gemini-client-wrapper.ts";
 import { fetchChatForRequest } from "../utils/gemini-queries.ts";
 import { runWithRotationRetry } from "../utils/rotation-await.ts";
+import { resolveProfileWithRecovery } from "../utils/recovery-offer.ts";
 import { loadEffectivePrompt } from "../utils/prompt-file.ts";
-import { resolveProfile } from "../utils/profile-resolution.ts";
 import { invokeCommand } from "../utils/command-invoker.ts";
 import { startChatSession } from "../utils/chat-session.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
@@ -90,7 +90,7 @@ export class ContinueCommand implements CliCommand {
       return;
     }
 
-    const profileName = await resolveProfile(context, conversationId, options.profile ?? undefined);
+    const profileName = await resolveProfileWithRecovery(context, conversationId, options.profile);
     const rotationProfile = profileName ?? await getDefaultProfileName();
 
     message = await loadEffectivePrompt(message, options.promptFile);

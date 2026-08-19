@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import type { CliCommand, CliCommandContext } from "../command-registry.ts";
 import { Logger } from "../../infrastructure/logger.ts";
-import { listChatsForRequest, type ListChatsRequest } from "../utils/gemini-queries.ts";
+import { listChatsForRequest, listChatsOutcomes, type ListChatsRequest, type ListChatsOutcome } from "../utils/gemini-queries.ts";
 import { parseCommandArgs, renderUsage, type ArgFlagSpec, type UsageSpec } from "../utils/command-args.ts";
 import type { ChatInfo } from "../../core/types.ts";
 import { GemitermError } from "../../core/errors.ts";
@@ -90,6 +90,17 @@ export class ListCommand implements CliCommand {
       return;
     }
 
+    // Per-profile await stage (fix-8, design D2). The merged-empty trigger
+    // was the wrong gate: a live sibling returning chats masked stale
+    // profiles whose rotations were in flight. Now any outcome with no
+    // chats (or rejected) while its rotation is in flight triggers the wait
+    // and a per-profile re-query on the refreshed profiles only. Live
+    // profiles observe zero added latency and zero re-queries.
+    const refreshedChats = await this.awaitStaleOutcomes(request, context, logger);
+    if (refreshedChats !== null) {
+      chats = [...chats, ...refreshedChats].sort((a, b) => b.timestamp - a.timestamp);
+    }
+
     if (chats.length === 0) {
       chats = await this.resolvePhantomEmptyResult(chats, request, context, logger);
     }
@@ -115,39 +126,57 @@ export class ListCommand implements CliCommand {
     );
   }
 
-  private async resolvePhantomEmptyResult(
-    chats: ChatInfo[],
+  private async awaitStaleOutcomes(
     request: ListChatsRequest,
     context: CliCommandContext,
     logger: Logger,
-  ): Promise<ChatInfo[]> {
-    // Rotation-await stage (openspec/changes/await-detached-rotation-on-empty-
-    // list): an empty result on a stale-armed jar usually means the detached
-    // rotation is still in flight — await it (bounded) before reaching for the
-    // heavier probe/recovery flow. Covers the aggregate default listing too
-    // (each configured profile was armed by the fan-out), not just the
-    // single-profile form. stderr-only: stdout bytes stay pinned.
+  ): Promise<ChatInfo[] | null> {
     const rotationCandidates = request.profile
       ? [request.profile]
       : await context.listProfiles();
     const inFlight = rotationCandidates.filter((p) => context.cookieSession.rotationInFlight(p));
-    if (inFlight.length > 0) {
-      console.error(chalk.dim("Session refresh in progress — waiting for it to finish…"));
-      const refreshed = await Promise.all(
-        inFlight.map((p) => context.cookieSession.waitForRotation(p).catch(() => null)),
-      );
-      if (refreshed.some((r) => r !== null)) {
-        const retried = await listChatsForRequest(context.getGeminiClient, context.listProfiles, request);
-        if (retried.length > 0) return retried;
-      }
+    if (inFlight.length === 0) return null;
+
+    console.error(chalk.dim("Session refresh in progress — waiting for it to finish…"));
+    const landed = await Promise.all(
+      inFlight.map((p) => context.cookieSession.waitForRotation(p).catch(() => null)),
+    );
+    const refreshedProfiles = inFlight.filter((_, i) => landed[i] !== null);
+    if (refreshedProfiles.length === 0) {
       const stillInFlight = inFlight.filter((p) => context.cookieSession.rotationInFlight(p));
       if (stillInFlight.length > 0) {
         console.error(chalk.yellow(
           `Session refresh still in progress for ${stillInFlight.length === 1 ? "profile" : "profiles"} '${stillInFlight.join("', '")}' — wait a few seconds and re-run 'gemiterm list'.`,
         ));
       }
+      return null;
     }
 
+    // Re-query only the profiles whose rotation landed (design D2: live
+    // profiles never re-queried, zero added latency for the happy path).
+    const retried = await listChatsForRequest(
+      context.getGeminiClient,
+      context.listProfiles,
+      request,
+      { onlyProfiles: refreshedProfiles },
+    );
+    logger.debug(
+      `List re-queried after rotation: ${refreshedProfiles.length} profile(s) refreshed, ${retried.length} chat(s) recovered`,
+    );
+    return retried;
+  }
+
+  private async resolvePhantomEmptyResult(
+    chats: ChatInfo[],
+    request: ListChatsRequest,
+    context: CliCommandContext,
+    logger: Logger,
+  ): Promise<ChatInfo[]> {
+    // Classification stage: the per-profile rotation-await (awaitStaleOutcomes,
+    // above) already waited for in-flight rotations. If the result is still
+    // empty, classify the named profile — `live` exits, anything else falls
+    // through to the interactive recovery confirm (mirrors the pre-fix-8 flow
+    // but the await has already happened by this point).
     let profileName = request.profile;
     if (!profileName && !request.allProfiles) {
       const profiles = await context.listProfiles();

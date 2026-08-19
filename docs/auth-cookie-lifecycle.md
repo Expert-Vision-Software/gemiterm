@@ -1038,3 +1038,80 @@ do not re-litigate them.
   `AuthCommand` propagation test in `tests/integration/commands/auth.test.ts`
   (openspec/changes/fix-7-capture-gate-routability).
 
+- **2026-08-18** — fix-8 stale-profile reachability. The rotation-await
+  machinery (changes `await-detached-rotation-on-empty-list`,
+  `extend-rotation-wait-to-read-commands`, `fix-rotation-dead-end`) was
+  unreachable in exactly the situations it was built for — three live-only
+  gates sat in front of it. Field repro (DHBGAMING2, 2026-08-18, three
+  profiles, two stale): `fetch c_3a6ae1b615519a7f -p evs-diegohb` failed
+  instantly at 05:55:48 while the profile's rotation was one arm away; the
+  same user's plain `list` reported "3 of 3 profiles active" yet two stayed
+  phantom all day; `continue c_3a6ae1b615519a7f` (owned by stale
+  `evs-diegohb`) silently fell through to the default profile via the
+  `activeProfiles.length <= 1` short-circuit that misfired because the
+  gate's live-only membership shrank the candidate set; `fetch
+  c_3c69396e3d6127a4` (default-client path, no `-p`) waited, the rotation
+  observed at 12:37:30, the retry printed `No messages found.`, and the
+  identical command 10s later (fresh process, fresh arm) rendered the full
+  conversation. The facade was sound but the read paths bounced off
+  live-only gates. Four changes close the gap: (1)
+  `src/cli/utils/profile-resolution.ts` `resolveProfile` explicit-profile
+  path arms the named profile (`ensureSession` — spawns a detached runner
+  when the jar is stale), awaits an in-flight rotation (`waitForRotation`,
+  bounded 90 s, stderr notice only), reclassifies once, and returns the
+  profile when live; the unknown-profile check (name not in the configured
+  set) still fails fast; non-live-after-wait surfaces a typed
+  `AuthenticationError` carrying `{ profileName, sessionState }` so the
+  calling commands can branch. `activeProfiles()` is unchanged — its
+  health-only semantic is preserved everywhere else. (2) `findProfileForConversation`
+  (`src/auth/cookie-session.ts`) now runs two passes: pass 1 unchanged
+  (live profiles in `listProfiles()` order); pass 2 consults profiles that
+  armed stale this invocation and whose detached rotation has landed, in
+  `listProfiles()` order; live profiles keep priority. The method does not
+  spawn, write, or block on profiles whose rotation has not landed —
+  passive by contract. (3) `src/cli/utils/gemini-queries.ts` gains
+  `listChatsOutcomes` (per-profile `{ profile, chats | error }[]`); the
+  existing `listChatsForRequest` becomes a thin merge over it
+  (byte-equivalent for unchanged scenarios). `list`'s await stage
+  (`src/cli/commands/list-command.ts:new `awaitStaleOutcomes`) moves from
+  the merged-empty trigger to a per-profile outcome check: any outcome
+  with zero chats (or rejected) while its rotation is in flight triggers
+  the wait and a re-query of just those profiles — live profiles are
+  never re-queried, zero added latency. Stdout bytes for unchanged
+  scenarios stay pinned (`tests/integration/commands/list.test.ts`).
+  (4) `src/cli/index.ts` `getGeminiClient` now re-arms cheaply on every
+  call (`ensureSession(defaultProfile)` — an in-process jar read, the same
+  cost `forProfile` already pays per call) and reconstructs the
+  `GeminiClientService` via `createDefaultClientCache`
+  (`src/cli/utils/default-client-cache.ts`) when the armed
+  `__Secure-1PSIDTS` differs from the value the cached instance was built
+  with — so post-rotation retries (and any later default-path read in the
+  same process) execute on refreshed credentials. Unchanged PSIDTS
+  short-circuits to the cached instance (zero added latency, zero added
+  init — design D2). One SDK init GET pays per rotation landing — exactly
+  what the retry needs anyway. The explicit-profile recovery ladder
+  (`src/cli/utils/recovery-offer.ts`) is wired into `fetch` and
+  `continue`: on non-live after the wait, the command catches the typed
+  `AuthenticationError`, calls the recovery confirm — interactive TTY
+  accepts/rejects via the prompts facade (mirrors `list`'s
+  NonInteractiveError / CancellationError handling); non-interactive
+  rethrows the typed error so the CLI exits non-zero with the
+  profile + state + `gemiterm auth --renew <name>` remediation — no
+  silent default-profile fallback. `export`, `export-all`, and `delete`
+  inherit the arm-and-await through `resolveProfile` without the new
+  prompts (destructive commands stay lean); `delete`'s explicit-profile
+  path also inherits the typed error. `export-all`'s fan-out remains
+  construct-per-call via `forProfile`, so it was unaffected by gap 4.
+  Invariant coverage:
+  `tests/auth-regression/invariant-explicit-profile-arm-and-await.test.ts`,
+  `tests/auth-regression/invariant-stale-owned-conversation.test.ts`,
+  `tests/auth-regression/invariant-default-client-revalidation.test.ts`,
+  mixed-liveness scenarios in
+  `tests/integration/commands/list.test.ts`, recovery-ladder scenarios in
+  `tests/integration/commands/fetch.test.ts` and
+  `tests/integration/commands/continue.test.ts`, plus
+  `tests/cli/utils/recovery-offer.test.ts` and the
+  `listChatsOutcomes` tests in
+  `tests/cli/utils/gemini-queries.test.ts`
+  (openspec/changes/fix-8-stale-profile-reachability).
+

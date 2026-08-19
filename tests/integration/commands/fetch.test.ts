@@ -8,6 +8,7 @@ import * as configModule from "../../../src/infrastructure/config.ts";
 import { existsSync, unlinkSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setStdinTty, restoreStdinTty } from "../../cli/utils/tty-harness.ts";
 
 function makeClient() {
   const client: any = {
@@ -30,17 +31,16 @@ describe("fetch command integration", () => {
     const cookieSession = {
       activeProfiles: mock(() => ["default"]),
       findProfileForConversation: mock(() => Promise.resolve(null)),
-      ensureSession: mock(() => {
-        throw new Error("not used");
-      }),
+      ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       rotationInFlight: mock(() => false),
       waitForRotation: mock(async () => null),
+      probe: mock(async () => "live" as const),
     };
     context = {
       verbose: false,
       cookieSession: cookieSession as any,
       getGeminiClient: () => client,
-      listProfiles: () => [],
+      listProfiles: () => ["default"],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     originalEnv = {
@@ -260,6 +260,7 @@ describe("fetch command integration", () => {
 
   describe("multi-profile routing", () => {
     test("auto-discovers owning profile and forwards it to forProfile", async () => {
+      context.listProfiles = () => ["dhb-work", "evs-diegohb"];
       (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
       (context.cookieSession as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
 
@@ -271,6 +272,7 @@ describe("fetch command integration", () => {
     });
 
     test("--profile overrides auto-discovery", async () => {
+      context.listProfiles = () => ["dhb-work", "evs-diegohb"];
       (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
       (context.cookieSession as any).findProfileForConversation.mockResolvedValue("dhb-work");
 
@@ -281,6 +283,7 @@ describe("fetch command integration", () => {
     });
 
     test("-p short flag also overrides discovery", async () => {
+      context.listProfiles = () => ["dhb-work", "evs-diegohb"];
       (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
 
       await command.execute(["conv-x", "-p", "evs-diegohb"], context);
@@ -288,7 +291,8 @@ describe("fetch command integration", () => {
       expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
     });
 
-    test("omits forProfile when only one profile is active", async () => {
+    test("omits forProfile when only one profile is configured", async () => {
+      context.listProfiles = () => ["default"];
       (context.cookieSession as any).activeProfiles.mockReturnValue(["default"]);
       (context.cookieSession as any).findProfileForConversation.mockResolvedValue(null);
 
@@ -299,15 +303,17 @@ describe("fetch command integration", () => {
       expect((context.cookieSession as any).findProfileForConversation).not.toHaveBeenCalled();
     });
 
-    test("throws AuthenticationError when --profile names a profile with no valid session", async () => {
+    test("throws AuthenticationError when --profile names a profile that is not configured", async () => {
+      context.listProfiles = () => ["dhb-work"];
       (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work"]);
 
       await expect(
         command.execute(["conv-x", "--profile", "expired-profile"], context),
-      ).rejects.toThrow(/has no valid session/);
+      ).rejects.toThrow(/not a configured profile/);
     });
 
     test("throws AuthenticationError when no active profile owns the conversation and --profile is not given", async () => {
+      context.listProfiles = () => ["dhb-work", "evs-diegohb"];
       (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
       (context.cookieSession as any).findProfileForConversation.mockResolvedValue(null);
 
@@ -369,6 +375,123 @@ describe("fetch command integration", () => {
       expect((context.cookieSession as any).rotationInFlight).not.toHaveBeenCalled();
       expect((context.cookieSession as any).waitForRotation).not.toHaveBeenCalled();
       expect(client.fetchChat).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("fix-8: multi-profile stale-aware routing", () => {
+    test("auto-discovery routes via findProfileForConversation when 2+ profiles are configured", async () => {
+      context.listProfiles = () => ["dhb-work", "evs-diegohb"];
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work"]);
+      (context.cookieSession as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
+      (context.cookieSession as any).ensureSession = mock(async () => ({
+        secure_1psid: "psid",
+        secure_1psidts: "ts",
+      }));
+
+      await command.execute(["c_x"], context);
+
+      expect((context.cookieSession as any).findProfileForConversation).toHaveBeenCalledWith("c_x");
+      expect(client.forProfile).toHaveBeenCalledWith("evs-diegohb");
+    });
+
+    test("auto-discovery short-circuits to the default client only when 1 profile is configured", async () => {
+      context.listProfiles = () => ["default"];
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["default"]);
+
+      await command.execute(["c_x"], context);
+
+      expect((context.cookieSession as any).findProfileForConversation).not.toHaveBeenCalled();
+      expect(client.forProfile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("explicit-profile recovery ladder (fix-8)", () => {
+    test("interactive: stale explicit profile offers recovery; on accept, the read proceeds", async () => {
+      const messages = createMockMessageHistory({ count: 2, contents: ["hi", "yo"] });
+      client.fetchChat = mock(async () => messages);
+
+      context.listProfiles = () => ["stale"];
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["stale"]);
+      (context.cookieSession as any).ensureSession = mock(async () => ({
+        secure_1psid: "psid",
+        secure_1psidts: "ts",
+      }));
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => ({ cookies: [] }));
+      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+      (context.cookieSession as any).recover = mock(async () => ({ secure_1psid: "psid2", secure_1psidts: "ts2" }));
+
+      const promptsModule = await import("../../../src/cli/utils/prompts.ts");
+      const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(true);
+
+      try {
+        setStdinTty(true);
+        await command.execute(["conv-abc123", "--profile", "stale"], context);
+
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect((context.cookieSession as any).recover).toHaveBeenCalledTimes(1);
+        expect((context.cookieSession as any).recover).toHaveBeenCalledWith("stale");
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("hi");
+        expect(output).toContain("yo");
+      } finally {
+        confirmSpy.mockRestore();
+        restoreStdinTty();
+      }
+    });
+
+    test("non-interactive: stale explicit profile fails typed with profile+state+remediation", async () => {
+      context.listProfiles = () => ["stale"];
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["stale"]);
+      (context.cookieSession as any).ensureSession = mock(async () => ({
+        secure_1psid: "psid",
+        secure_1psidts: "ts",
+      }));
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => null);
+      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+
+      try {
+        setStdinTty(false);
+        await expect(
+          command.execute(["conv-abc123", "--profile", "stale"], context),
+        ).rejects.toThrow(/Profile 'stale' session is phantom after the rotation wait/);
+        await expect(
+          command.execute(["conv-abc123", "--profile", "stale"], context),
+        ).rejects.toThrow(/gemiterm auth --renew stale/);
+      } finally {
+        restoreStdinTty();
+      }
+    });
+
+    test("interactive: cancel at the recovery confirm surfaces a decline and skips recovery", async () => {
+      client.fetchChat = mock(async () => []);
+
+      context.listProfiles = () => ["stale"];
+      (context.cookieSession as any).activeProfiles.mockReturnValue(["stale"]);
+      (context.cookieSession as any).ensureSession = mock(async () => ({
+        secure_1psid: "psid",
+        secure_1psidts: "ts",
+      }));
+      (context.cookieSession as any).rotationInFlight = mock(() => true);
+      (context.cookieSession as any).waitForRotation = mock(async () => null);
+      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+      (context.cookieSession as any).recover = mock(async () => ({}));
+
+      const promptsModule = await import("../../../src/cli/utils/prompts.ts");
+      const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(false);
+
+      try {
+        setStdinTty(true);
+        await command.execute(["conv-abc123", "--profile", "stale"], context);
+
+        expect(confirmSpy).toHaveBeenCalledTimes(1);
+        expect((context.cookieSession as any).recover).not.toHaveBeenCalled();
+        expect(client.fetchChat).toHaveBeenCalledTimes(1);
+      } finally {
+        confirmSpy.mockRestore();
+        restoreStdinTty();
+      }
     });
   });
 });

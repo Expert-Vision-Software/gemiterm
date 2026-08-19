@@ -35,17 +35,16 @@ describe("export command integration", () => {
     const cookieSession = {
       activeProfiles: mock(() => ["default"]),
       findProfileForConversation: mock(() => Promise.resolve(null)),
-      ensureSession: mock(() => {
-        throw new Error("not used");
-      }),
+      ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       rotationInFlight: mock(() => false),
       waitForRotation: mock(async () => null),
+      probe: mock(async () => "live" as const),
     };
     context = {
       verbose: false,
       cookieSession: cookieSession as any,
       getGeminiClient: () => client,
-      listProfiles: () => [],
+      listProfiles: () => ["default"],
       exportStrategies: {
         single: new SingleExport({
           fetchChat: (id, profile) => fetchChatForRequest(() => client, id, profile),
@@ -301,6 +300,7 @@ describe("export command integration", () => {
 
   describe("multi-profile routing", () => {
     test("auto-discovers owning profile and forwards it to forProfile", async () => {
+      context.listProfiles = () => ["dhb-work", "evs-diegohb"];
       (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
       (context.cookieSession as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
       const outputPath = join(tmpdir(), `export-multi-profile-${Date.now()}.md`);
@@ -316,6 +316,7 @@ describe("export command integration", () => {
     });
 
     test("--profile overrides auto-discovery", async () => {
+      context.listProfiles = () => ["dhb-work", "evs-diegohb"];
       (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
       (context.cookieSession as any).findProfileForConversation.mockResolvedValue("dhb-work");
       const outputPath = join(tmpdir(), `export-override-${Date.now()}.md`);

@@ -6,9 +6,13 @@ export class GemitermError extends Error {
 }
 
 export class AuthenticationError extends GemitermError {
-  constructor(message = "Not authenticated. Please run 'gemiterm login' first.") {
+  readonly profileName?: string;
+  readonly sessionState?: "live" | "phantom" | "dead";
+  constructor(message = "Not authenticated. Please run 'gemiterm login' first.", opts: { profileName?: string; sessionState?: "live" | "phantom" | "dead" } = {}) {
     super(message);
     this.name = "AuthenticationError";
+    this.profileName = opts.profileName;
+    this.sessionState = opts.sessionState;
   }
 }
 

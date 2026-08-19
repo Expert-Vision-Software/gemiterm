@@ -278,6 +278,9 @@ export class CookieSession {
   }
 
   async findProfileForConversation(conversationId: string): Promise<string | null> {
+    // Pass 1 (unchanged): live profiles only, list order. This is the
+    // historical path — it preserves the "live-first" routing contract that
+    // the multi-profile read commands rely on.
     const profiles = await this.activeProfiles();
     for (const name of profiles) {
       try {
@@ -288,6 +291,33 @@ export class CookieSession {
         continue;
       }
     }
+
+    // Pass 2 (fix-8): conversations owned only by a stale-but-recoverable
+    // profile would otherwise be unresolvable. `waitForRotation` resolves
+    // non-null only when the profile was armed stale THIS invocation AND its
+    // detached rotation has landed (it returns null for fresh arms and on
+    // timeout). The waits run in parallel — the ceiling is per-profile, not
+    // aggregate. We do NOT spawn a second runner, do NOT write cookies, and
+    // preserve listProfiles() order. Live profiles retain priority in pass
+    // 1 even when pass 2 would also match.
+    const configuredProfiles = await this.deps.listProfiles();
+    const settled = await Promise.all(
+      configuredProfiles.map(async (name) => {
+        const landed = await this.waitForRotation(name).catch(() => null);
+        return { name, landed };
+      }),
+    );
+    for (const { name, landed } of settled) {
+      if (landed === null) continue;
+      try {
+        if (await this.deps.conversationLookup.profileHasConversation(name, conversationId)) {
+          return name;
+        }
+      } catch {
+        continue;
+      }
+    }
+
     return null;
   }
 

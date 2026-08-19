@@ -35,7 +35,7 @@ describe("delete command integration", () => {
         ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
-      listProfiles: () => [],
+      listProfiles: () => ["work", "personal"],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
@@ -106,7 +106,8 @@ describe("delete command integration", () => {
       expect(errorMessage).toContain("gemiterm list --all-profiles");
     });
 
-    test("uses default profile when only one profile is active", async () => {
+    test("uses default profile when only one profile is configured", async () => {
+      context.listProfiles = () => ["default"];
       activeProfilesSpy = mock(() => ["default"]);
       context.cookieSession.activeProfiles = activeProfilesSpy;
 

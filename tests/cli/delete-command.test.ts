@@ -27,9 +27,12 @@ describe("DeleteCommand", () => {
         activeProfiles: mock(() => ["default"]),
         findProfileForConversation: mock(() => null),
         ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
+        rotationInFlight: mock(() => false),
+        waitForRotation: mock(async () => null),
+        probe: mock(async () => "live" as const),
       } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
-      listProfiles: () => [],
+      listProfiles: () => ["default"],
     };
     logSpy = spyOn(console, "log").mockImplementation(() => {});
     errorSpy = spyOn(console, "error").mockImplementation(() => {});
@@ -108,6 +111,7 @@ describe("DeleteCommand", () => {
   });
 
   test("--profile forwards the profile name into DELETE_CONVERSATION payload", async () => {
+    context.listProfiles = () => ["default", "evs-diegohb"];
     (context.cookieSession as any).activeProfiles.mockReturnValue(["evs-diegohb"]);
 
     await command.execute(["abc123", "--force", "--profile", "evs-diegohb"], context);
@@ -117,6 +121,7 @@ describe("DeleteCommand", () => {
   });
 
   test("auto-discovers owning profile and forwards it into DELETE_CONVERSATION payload", async () => {
+    context.listProfiles = () => ["dhb-work", "evs-diegohb"];
     (context.cookieSession as any).activeProfiles.mockReturnValue(["dhb-work", "evs-diegohb"]);
     (context.cookieSession as any).findProfileForConversation.mockResolvedValue("evs-diegohb");
 

@@ -7,6 +7,7 @@ import { ProfileLifecycle } from "../services/profile-lifecycle.ts";
 import { SingleExport, BatchExport } from "../services/export-strategy.ts";
 import { fetchChatForRequest } from "./utils/gemini-queries.ts";
 import { runWithRotationRetry } from "./utils/rotation-await.ts";
+import { createDefaultClientCache } from "./utils/default-client-cache.ts";
 import { ProfileManager, CookieStorage } from "../infrastructure/storage.ts";
 import { getDefaultProfileName, listProfiles } from "../infrastructure/config.ts";
 import { getPackageJson } from "../infrastructure/path-utils.ts";
@@ -52,24 +53,32 @@ async function setupServices(): Promise<CliServices> {
     return { secure1psid: armed.secure_1psid, secure1psidts: armed.secure_1psidts };
   };
 
-  let geminiClient: GeminiClientService | null = null;
-
-  async function getGeminiClient(): Promise<GeminiClientService> {
-    if (geminiClient) return geminiClient;
-    const profiles = await listProfiles();
-    if (profiles.length === 0) {
-      throw new AuthenticationError();
-    }
-    const profileName = await getDefaultProfileName();
-    try {
-      const { secure1psid, secure1psidts } = await profileCookieLoader(profileName);
-      geminiClient = new GeminiClientService(
-        { secure1psid, secure1psidts },
+  // Default-client cache revalidation (fix-8, gap 4): the SDK client bakes
+  // cookies at construction, so a process-cached instance built on a stale
+  // PSIDTS cannot read with a refreshed jar. The cache re-arms cheaply on
+  // every call (an in-process jar read — same cost `forProfile` already pays
+  // per call) and reconstructs the `GeminiClientService` when the armed
+  // PSIDTS changes; unchanged PSIDTS short-circuits to the cached instance
+  // (zero added latency, zero added init — design D2).
+  const clientCache = createDefaultClientCache<GeminiClientService>({
+    loadArmed: async (profileName) => await cookieSession.ensureSession(profileName),
+    construct: (armed, profileName) =>
+      new GeminiClientService(
+        { secure1psid: armed.secure_1psid, secure1psidts: armed.secure_1psidts },
         logger,
         profileCookieLoader,
         profileName,
-      );
-      return geminiClient;
+      ),
+    resolveProfile: async () => {
+      const profiles = await listProfiles();
+      if (profiles.length === 0) throw new AuthenticationError();
+      return await getDefaultProfileName();
+    },
+  });
+
+  async function getGeminiClient(): Promise<GeminiClientService> {
+    try {
+      return await clientCache.get();
     } catch {
       throw new AuthenticationError();
     }
