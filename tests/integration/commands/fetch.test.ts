@@ -464,7 +464,7 @@ describe("fetch command integration", () => {
       }
     });
 
-    test("interactive: cancel at the recovery confirm surfaces a decline and skips recovery", async () => {
+    test("interactive: decline at the recovery confirm fails typed instead of proceeding with the dead profile", async () => {
       client.fetchChat = mock(async () => []);
 
       context.listProfiles = () => ["stale"];
@@ -483,11 +483,13 @@ describe("fetch command integration", () => {
 
       try {
         setStdinTty(true);
-        await command.execute(["conv-abc123", "--profile", "stale"], context);
+        await expect(
+          command.execute(["conv-abc123", "--profile", "stale"], context),
+        ).rejects.toThrow(/Profile 'stale' session is phantom after the rotation wait/);
 
         expect(confirmSpy).toHaveBeenCalledTimes(1);
         expect((context.cookieSession as any).recover).not.toHaveBeenCalled();
-        expect(client.fetchChat).toHaveBeenCalledTimes(1);
+        expect(client.fetchChat).not.toHaveBeenCalled();
       } finally {
         confirmSpy.mockRestore();
         restoreStdinTty();

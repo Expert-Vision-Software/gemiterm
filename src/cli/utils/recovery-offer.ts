@@ -63,8 +63,14 @@ export async function resolveProfileWithRecovery(
       error.sessionState &&
       error.sessionState !== "live"
     ) {
-      await offerExplicitProfileRecovery(context, error.profileName, error.sessionState);
-      return explicitProfile;
+      const recovery = await offerExplicitProfileRecovery(context, error.profileName, error.sessionState);
+      if (recovery.recovered) {
+        return explicitProfile;
+      }
+      // Decline/cancel: proceeding would run the command against a non-live
+      // session (empty reads masquerading as success). Rethrow the exact
+      // caught error — it already names the profile, state, and remediation.
+      throw error;
     }
     throw error;
   }
