@@ -1,3 +1,12 @@
+## [3.0.1] - 2026-08-19
+
+### Fixed
+
+- Release workflow now actually labels release assets (Linux/Windows x64 binary labels were silently skipped since v2.7.0 due to a 404 when patching assets by the wrong id format).
+- Release asset labeling no longer renames both binaries to the same asset name (which would have collided) and fails loudly instead of silently ignoring errors.
+
+---
+
 ## [3.0.0] - 2026-08-19
 
 The auth release. GemiTerm's authentication has been rewritten to fix the root cause of the **phantom-session bug** present since v2.4.0: sessions left idle for an hour or two would silently decay — sign-in looked fine, but `list` came back empty and commands eventually failed — because Google supersedes the `__Secure-1PSIDTS` session cookie server-side and GemiTerm never rotated it. In v3.0.0, sessions stay alive via **automatic browser-backed cookie rotation**: when a session starts to decay, GemiTerm loads the profile's persistent browser in the background, lets Google's own page JavaScript rotate the cookie, and saves the refreshed cookie jar — no re-login required.
