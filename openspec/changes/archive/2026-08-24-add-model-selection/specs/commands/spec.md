@@ -83,12 +83,12 @@ The system MUST provide a `continue` command implemented by `ContinueCommand` in
 
 The system MUST provide a `new` command implemented by `NewCommand` in `src/cli/commands/new-command.ts`. The command MUST accept an optional positional `<message>` and MUST support `--profile/-p <name>`, `--model/-m <name>`, and `--help/-h`. When `<message>` is present, the command MUST call `GeminiClientService.startNewChat(message, model)` where `model` is the resolved model (CLI `--model` if non-empty, else the context `defaultModel`, else `Model.BASIC_FLASH`) and MUST print the new conversation id and the model response. When `<message>` is absent, the command MUST start an interactive REPL that starts a new chat on the first non-empty line (using the resolved model) and continues with `sendMessage(conversationId, message, model)` against the resulting `conversationId` for subsequent lines, passing the same resolved model to every dispatch; the REPL MUST exit on `/exit` or `/quit`. When `--model` is supplied with an empty value, the command MUST print `Error: --model requires a non-empty value.` to stderr and exit with code 1. When `--prompt-file` and a positional message are both supplied, the command MUST print the existing `Error: cannot use --prompt-file together with a positional message argument.` to stderr and exit with code 1.
 
-#### Scenario: New with message starts a chat and prints the conversation id
+#### Scenario: New with message sends StartNewChatCommand and prints the conversation id
 
 - **WHEN** the user runs `gemiterm new "Hello Gemini"`
 - **THEN** `GeminiClientService.startNewChat("Hello Gemini", <resolved model>)` is called, the output contains `Conversation ID: <id>`, and the model response is printed after a `Model:` label
 
-#### Scenario: New with --profile includes the profileName in dispatch
+#### Scenario: New with --profile includes profileName in the payload
 
 - **WHEN** the user runs `gemiterm new "Hi" --profile work`
 - **THEN** the chat-session helper resolves the client through `forProfile("work")` and the resolved model is passed to `startNewChat`

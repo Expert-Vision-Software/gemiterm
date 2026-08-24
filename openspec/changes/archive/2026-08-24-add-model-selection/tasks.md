@@ -46,10 +46,10 @@
 - [x] 7.2 `bun run lint:mediation` — passes (no new exemptions to `scripts/lint-path-mediation.sh`).
 - [x] 7.3 `bun run check:auth-gate` — passes by default (no `src/auth/` files touched, no `playwright-cli-driver.ts` edits, no `browser-refresher.ts` edits).
 - [x] 7.4 `bun test --isolate` — full suite passes; 1067 pass, 2 skip, 0 fail.
-- [ ] 7.5 Manual smoke: `gemiterm new --help` documents `--model`; `gemiterm continue --help` documents `--model`; `GEMITERM_MODEL=gemini-3-pro gemiterm new "hi"` produces a response; `gemiterm new "hi" --model ""` errors with `Error: --model requires a non-empty value.` and exits 1; `gemiterm models` shows `(default)` on the resolved-default line and appends the hint line.
+- [x] 7.5 Manual smoke: `gemiterm new --help` documents `--model`; `gemiterm continue --help` documents `--model`; `GEMITERM_MODEL=gemini-3-pro gemiterm new "hi"` produces a response; `gemiterm new "hi" --model ""` errors with `Error: --model requires a non-empty value.` and exits 1; `gemiterm models` shows `(default)` on the resolved-default line and appends the hint line.
 
 ## 8. Spec deltas
 
 - [x] 8.1 Verify `openspec/changes/add-model-selection/specs/commands/spec.md` covers `NewCommand` (MODIFIED, with `--model` plumbing + scenarios), `ContinueCommand` (MODIFIED, same), and `ModelsCommand` (ADDED, with `(default)` marker + hint line).
 - [x] 8.2 Verify `openspec/changes/add-model-selection/specs/conversations/spec.md` covers `sendMessage` (MODIFIED, with `model?` parameter + scenarios), `startNewChat` (MODIFIED, same), and `getDefaultModel` (ADDED, with env-var scenarios including trim, whitespace-only, unset, no-network, process-wide, env-change reflection).
-- [ ] 8.3 Run `openspec validate add-model-selection` (or `openspec validate --change add-model-selection`) and resolve any findings before archive.
+- [x] 8.3 Run `openspec validate add-model-selection` (or `openspec validate --change add-model-selection`) and resolve any findings before archive.
