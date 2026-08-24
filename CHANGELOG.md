@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+---
+
+## [3.1.0] - 2026-08-24
+
 ### Changed
 
 - Implicit default model for `gemiterm new` / `gemiterm continue` flips from `Model.UNSPECIFIED` (server-side tier default) to `Model.BASIC_FLASH` (`gemini-3-flash`). Free-tier users no longer hit `Gemini usage limit reached` on the first turn. Plus/Advanced users can opt back into their tier default with `--model gemini-3-pro-plus` / `--model gemini-3-pro-advanced` or by setting `GEMITERM_MODEL`.
