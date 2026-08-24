@@ -86,7 +86,7 @@ describe("continue command integration", () => {
 
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
       expect(client.forProfile).toHaveBeenCalledWith("work");
-      expect(client.sendMessage).toHaveBeenCalledWith("conv-123", "hello");
+      expect(client.sendMessage).toHaveBeenCalledWith("conv-123", "hello", "gemini-3-flash");
     });
 
     test("throws AuthenticationError when no profile owns the conversation", async () => {
@@ -115,7 +115,7 @@ describe("continue command integration", () => {
       await command.execute(["conv-123", "hello"], context);
 
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
-      expect(client.sendMessage).toHaveBeenCalledWith("conv-123", "hello");
+      expect(client.sendMessage).toHaveBeenCalledWith("conv-123", "hello", "gemini-3-flash");
       expect(client.forProfile).not.toHaveBeenCalled();
     });
   });
@@ -125,7 +125,7 @@ describe("continue command integration", () => {
       await command.execute(["conv-123", "hello world"], context);
 
       expect(client.sendMessage).toHaveBeenCalledTimes(1);
-      expect(client.sendMessage).toHaveBeenCalledWith("conv-123", "hello world");
+      expect(client.sendMessage).toHaveBeenCalledWith("conv-123", "hello world", "gemini-3-flash");
     });
 
     test("prints model response", async () => {

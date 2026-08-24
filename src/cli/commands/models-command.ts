@@ -20,12 +20,19 @@ export class ModelsCommand implements CliCommand {
       return;
     }
 
-    const models = await (await context.getGeminiClient()).listModels();
+    const client = await context.getGeminiClient();
+    const models = await client.listModels();
+    const defaultModel = client.getDefaultModel();
 
     console.log("Available Gemini models:");
     for (const model of models) {
-      console.log(`  ${chalk.cyan(model)}`);
+      const line = model === defaultModel ? `${chalk.cyan(model)} ${chalk.dim("(default)")}` : `  ${chalk.cyan(model)}`;
+      console.log(line);
     }
     logger.info(`${models.length} model(s) available`);
+
+    if (defaultModel.length > 0) {
+      console.log(`Use --model <name> (or set GEMITERM_MODEL=<name>) to select. The default is currently ${defaultModel}.`);
+    }
   }
 }

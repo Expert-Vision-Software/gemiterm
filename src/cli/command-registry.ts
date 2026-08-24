@@ -22,6 +22,7 @@ export interface CliCommandContext {
   exportStrategies: { single: ExportStrategy; batch: ExportStrategy };
   getGeminiClient: () => Promise<GeminiClientService>;
   listProfiles: () => Promise<string[]>;
+  defaultModel?: string;
 }
 
 export interface CliCommand {

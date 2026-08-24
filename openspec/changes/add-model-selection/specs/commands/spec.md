@@ -69,6 +69,11 @@ The system MUST provide a `continue` command implemented by `ContinueCommand` in
 - **WHEN** the user runs `gemiterm continue conv-abc123 -m gemini-3-flash`
 - **THEN** the command behaves identically to `--model gemini-3-flash`
 
+#### Scenario: Continue --help shows usage
+
+- **WHEN** the user runs `gemiterm continue --help`
+- **THEN** the output contains `Usage: gemiterm continue [conversation_id] [message] [options]` and documents `/exit`, `/quit`, and `--help`
+
 #### Scenario: Continue --help documents --model
 
 - **WHEN** the user runs `gemiterm continue --help`
@@ -117,6 +122,11 @@ The system MUST provide a `new` command implemented by `NewCommand` in `src/cli/
 
 - **WHEN** the user runs `gemiterm new -m gemini-3-flash "Hi"`
 - **THEN** the command behaves identically to `--model gemini-3-flash`
+
+#### Scenario: New --help shows usage
+
+- **WHEN** the user runs `gemiterm new --help`
+- **THEN** the output contains `Usage: gemiterm new [message] [options]` and documents `--profile`, `--help`, and the `/exit` / `/quit` REPL commands
 
 #### Scenario: New --help documents --model
 

@@ -2,9 +2,10 @@ import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:
 import { ModelsCommand } from "../../../src/cli/commands/models-command.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 
-function makeClient() {
+function makeClient(defaultModel = "gemini-3-flash") {
   const client: any = {
     listModels: mock(async (): Promise<string[]> => ["gemini-3-pro", "gemini-3-flash", "gemini-3-lite"]),
+    getDefaultModel: () => defaultModel,
   };
   return client;
 }

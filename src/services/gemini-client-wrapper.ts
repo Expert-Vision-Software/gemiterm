@@ -252,8 +252,8 @@ export class GeminiClientService {
     }
   }
 
-  private buildSession(conversationId: string, metadata?: (string | null)[]): RawChatSession {
-    const session = this.client!.newChat();
+  private buildSession(conversationId: string, metadata?: (string | null)[], model?: string): RawChatSession {
+    const session = model !== undefined && model !== "" ? this.client!.newChat({ model }) : this.client!.newChat();
     if (metadata) {
       session.metadata = metadata;
     } else if (conversationId) {
@@ -262,7 +262,7 @@ export class GeminiClientService {
     return session;
   }
 
-  async sendMessage(conversationId: string, message: string): Promise<string> {
+  async sendMessage(conversationId: string, message: string, model?: string): Promise<string> {
     await this.init();
     try {
       let session: RawChatSession;
@@ -272,15 +272,15 @@ export class GeminiClientService {
           session = this.buildSession(conversationId, [
             conversationId, stored.rid, stored.rcid, null, null, null, null, null, null,
             stored.ctx ?? "",
-          ]);
+          ], model);
         } else {
           this.logger.debug(
             `sendMessage: no prior metadata for cid='${conversationId}' on profile='${this.profileName}'; falling back to cid-only send.`,
           );
-          session = this.buildSession(conversationId);
+          session = this.buildSession(conversationId, undefined, model);
         }
       } else {
-        session = this.buildSession(conversationId);
+        session = this.buildSession(conversationId, undefined, model);
       }
       const output = await session.generateContent({ prompt: message });
       const captured = extractChatMetadata(output.metadata);
@@ -296,10 +296,10 @@ export class GeminiClientService {
     }
   }
 
-  async startNewChat(message: string): Promise<{ response: string; conversationId: string }> {
+  async startNewChat(message: string, model?: string): Promise<{ response: string; conversationId: string }> {
     await this.init();
     try {
-      const session = this.buildSession("");
+      const session = this.buildSession("", undefined, model);
       const output = await session.generateContent({ prompt: message });
       const response = output.text.toString();
       const conversationId = output.cid ?? session.cid;
@@ -328,6 +328,14 @@ export class GeminiClientService {
       this.logger.debug(`listModels failed: ${e}`);
       throw err;
     }
+  }
+
+  getDefaultModel(): string {
+    const env = process.env.GEMITERM_MODEL;
+    if (env !== undefined && env.trim().length > 0) {
+      return env.trim();
+    }
+    return "gemini-3-flash";
   }
 
   isAuthenticated(): boolean {

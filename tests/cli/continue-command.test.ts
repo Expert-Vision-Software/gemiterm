@@ -83,7 +83,7 @@ describe("ContinueCommand", () => {
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("Model:");
     expect(output).toContain("Hello from Gemini!");
-    expect(client.sendMessage).toHaveBeenCalledWith("conv123", "Hello there");
+    expect(client.sendMessage).toHaveBeenCalledWith("conv123", "Hello there", "gemini-3-flash");
   });
 
   test("sends correct command type via mediator", async () => {
@@ -125,7 +125,7 @@ describe("ContinueCommand", () => {
     await command.execute(["conv123", "hi", "--profile", "default"], context);
 
     expect(client.forProfile).toHaveBeenCalledWith("default");
-    expect(client.sendMessage).toHaveBeenCalledWith("conv123", "hi");
+    expect(client.sendMessage).toHaveBeenCalledWith("conv123", "hi", "gemini-3-flash");
   });
 
   test("interactive mode forwards resolved profileName into FETCH_CHAT (printLastMessage)", async () => {
