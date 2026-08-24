@@ -15,11 +15,13 @@ interface ContinueCommandOptions {
   help: boolean;
   promptFile: string | null;
   profile: string | null;
+  model: string | null;
 }
 
 const CONTINUE_FLAGS: readonly ArgFlagSpec[] = [
   { key: "promptFile", long: "--prompt-file", short: "-f", type: "string", required: true, valueName: "path", description: "Read the message from a file (bypasses the 2048 code unit arg limit)", helpLabel: "--prompt-file, -f <path>", default: null },
   { key: "profile", long: "--profile", short: "-p", type: "string", required: true, valueName: "profile name", description: "Profile that owns the conversation (default: auto-discover)", helpLabel: "--profile, -p <name>", default: null },
+  { key: "model", long: "--model", short: "-m", type: "string", required: true, valueName: "model name", description: "Model to use (e.g. gemini-3-flash, gemini-3-pro)", helpLabel: "--model, -m <name>", default: null },
   { key: "help", long: "--help", short: "-h", type: "boolean", description: "Show this help message", helpLabel: "--help, -h", default: false },
 ];
 
@@ -95,6 +97,15 @@ export class ContinueCommand implements CliCommand {
 
     message = await loadEffectivePrompt(message, options.promptFile);
 
+    if (options.model !== null && options.model.trim().length === 0) {
+      console.error(chalk.red("Error: --model requires a non-empty value."));
+      process.exit(1);
+    }
+
+    const resolvedModel = (options.model && options.model.trim().length > 0)
+      ? options.model.trim()
+      : (context.defaultModel ?? "gemini-3-flash");
+
     const keepalive = message === null
       ? context.cookieSession.createKeepalive(profileName ?? await getDefaultProfileName())
       : undefined;
@@ -108,6 +119,7 @@ export class ContinueCommand implements CliCommand {
       keepalive,
       cookieSession: context.cookieSession,
       rotationProfile,
+      model: resolvedModel,
       beforeInteractiveLoop: async () => {
         await this.printLastMessage(context.getGeminiClient, conversationId, profileName, context.cookieSession, rotationProfile);
       },

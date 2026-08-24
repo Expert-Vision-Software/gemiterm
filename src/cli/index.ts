@@ -117,6 +117,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const defaultModel = flags.geminiModel ?? "gemini-3-flash";
+
   const verbose = flags.verbose || process.env.GEMITERM_VERBOSE === "true";
   if (verbose) {
     Logger.setVerbose(true);
@@ -159,6 +161,7 @@ async function main(): Promise<void> {
       exportStrategies: services.exportStrategies,
       getGeminiClient: services.getGeminiClient,
       listProfiles: services.listProfiles,
+      defaultModel,
     });
   } catch (error) {
     if (error instanceof LoginCancelledError) {

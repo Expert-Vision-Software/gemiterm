@@ -239,11 +239,13 @@ Start a new chat. One-shot if you pass a message; otherwise drops into an intera
 gemiterm new "Explain the CAP theorem like I'm 12"
 gemiterm new --profile work "Draft a status update"
 gemiterm new --prompt-file ./long-prompt.md
+gemiterm new --model gemini-3-flash "Explain the CAP theorem"
 ```
 
 | Flag | Description |
 | --- | --- |
 | `-p, --profile <name>` | Use a specific profile |
+| `-m, --model <name>` | Model to use (e.g. gemini-3-flash, gemini-3-pro) |
 | `-f, --prompt-file <path>` | Read the message from a file (bypasses shell arg-length limits) |
 | `-h, --help` | Show help |
 
@@ -255,10 +257,12 @@ Continue an existing chat. With no message, enters an interactive REPL. With no 
 gemiterm continue c_abc123
 gemiterm continue c_abc123 "And what about edge cases?"
 gemiterm continue c_abc123 --prompt-file ./refactor-context.md
+gemiterm continue c_abc123 --model gemini-3-pro "Continue this"
 ```
 
 | Flag | Description |
 | --- | --- |
+| `-m, --model <name>` | Model to use (e.g. gemini-3-flash, gemini-3-pro) |
 | `-f, --prompt-file <path>` | Read the message from a file (bypasses shell arg-length limits) |
 | `-h, --help` | Show help |
 
@@ -311,11 +315,13 @@ gemiterm delete c_abc123 --force
 
 ### `gemiterm models`
 
-List all available Gemini models.
+List all available Gemini models. The currently selected default model is marked with `(default)` and a hint is shown explaining how to change it.
 
 ```bash
 gemiterm models
 ```
+
+Use `--model <name>` (or set `GEMITERM_MODEL=<name>`) to select a model. The default is `gemini-3-flash`.
 
 ### `gemiterm auth`
 
@@ -382,6 +388,7 @@ Upgrading from v1.4.1 keeps these paths and files unchanged.
 | Variable | Description | Default |
 | --- | --- | --- |
 | `GEMITERM_CONFIG_DIR` | Override the configuration directory | Platform default |
+| `GEMITERM_MODEL` | Default model for `new` and `continue` commands | `gemini-3-flash` |
 
 ## Contributing
 

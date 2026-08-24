@@ -6,6 +6,7 @@ export interface ParsedFlags {
   verbose: boolean;
   version: boolean;
   help: boolean;
+  geminiModel: string | null;
 }
 
 export interface ParsedArgs {
@@ -59,10 +60,13 @@ export function parseGlobalArgs(argv: string[]): ParsedArgs {
   }
 
   const opts = program.opts<{ verbose?: boolean; version?: boolean; help?: boolean }>();
+  const rawModel = process.env.GEMITERM_MODEL;
+  const geminiModel = (rawModel !== undefined && rawModel.trim().length > 0) ? rawModel.trim() : null;
   const flags: ParsedFlags = {
     verbose: Boolean(opts.verbose),
     version: Boolean(opts.version),
     help: Boolean(opts.help),
+    geminiModel,
   };
 
   return { flags, subcommand, subcommandArgs };

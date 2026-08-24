@@ -150,7 +150,7 @@ describe("NewCommand with long-arg guard", () => {
     await command.execute([arg], context);
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(client.startNewChat).toHaveBeenCalledWith(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg, "gemini-3-flash");
   });
 
   test("message of 5000 chars spills to a temp file and is sent", async () => {
@@ -158,7 +158,7 @@ describe("NewCommand with long-arg guard", () => {
     await command.execute([arg], context);
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(client.startNewChat).toHaveBeenCalledWith(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg, "gemini-3-flash");
   });
 
   test("multi-byte message exceeding 2048 code units spills and is sent", async () => {
@@ -167,7 +167,7 @@ describe("NewCommand with long-arg guard", () => {
     await command.execute([arg], context);
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(client.startNewChat).toHaveBeenCalledWith(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg, "gemini-3-flash");
   });
 
   test("multi-byte message at 2048 code unit boundary is accepted (does not crash, no exit)", async () => {
@@ -181,6 +181,6 @@ describe("NewCommand with long-arg guard", () => {
     const arg = "a".repeat(3000);
     await command.execute([arg], context);
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
-    expect(client.startNewChat).toHaveBeenCalledWith(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg, "gemini-3-flash");
   });
 });

@@ -79,7 +79,7 @@ describe("NewCommand", () => {
 
     await command.execute(["Hello there"], context);
 
-    expect(client.startNewChat).toHaveBeenCalledWith("Hello there");
+    expect(client.startNewChat).toHaveBeenCalledWith("Hello there", "gemini-3-flash");
 
     const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
     expect(output).toContain("conv-123");
@@ -95,7 +95,7 @@ describe("NewCommand", () => {
     await command.execute(["-p", "dhb-worker", "a new test message"], context);
 
     expect(client.forProfile).toHaveBeenCalledWith("dhb-worker");
-    expect(client.startNewChat).toHaveBeenCalledWith("a new test message");
+    expect(client.startNewChat).toHaveBeenCalledWith("a new test message", "gemini-3-flash");
   });
 
   test("sends start-new-chat command with profile specified via --profile", async () => {
@@ -107,7 +107,7 @@ describe("NewCommand", () => {
     await command.execute(["--profile", "my-profile", "test message"], context);
 
     expect(client.forProfile).toHaveBeenCalledWith("my-profile");
-    expect(client.startNewChat).toHaveBeenCalledWith("test message");
+    expect(client.startNewChat).toHaveBeenCalledWith("test message", "gemini-3-flash");
   });
 
   test("does not include profileName in payload when no profile specified", async () => {
@@ -119,7 +119,7 @@ describe("NewCommand", () => {
     await command.execute(["hello"], context);
 
     expect(client.forProfile).not.toHaveBeenCalled();
-    expect(client.startNewChat).toHaveBeenCalledWith("hello");
+    expect(client.startNewChat).toHaveBeenCalledWith("hello", "gemini-3-flash");
   });
 });
 

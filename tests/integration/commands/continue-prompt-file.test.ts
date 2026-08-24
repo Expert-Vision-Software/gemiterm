@@ -69,7 +69,7 @@ describe("continue command --prompt-file option", () => {
     await command.execute(["conv-123", "--prompt-file", path], context);
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content, "gemini-3-flash");
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -80,7 +80,7 @@ describe("continue command --prompt-file option", () => {
     await command.execute(["conv-123", "--prompt-file", path], context);
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content, "gemini-3-flash");
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -92,7 +92,7 @@ describe("continue command --prompt-file option", () => {
     await command.execute(["conv-123", "--prompt-file", path], context);
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content, "gemini-3-flash");
   });
 
   test("works with the -f short alias", async () => {
@@ -102,7 +102,7 @@ describe("continue command --prompt-file option", () => {
     await command.execute(["conv-123", "-f", path], context);
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content, "gemini-3-flash");
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -113,7 +113,7 @@ describe("continue command --prompt-file option", () => {
     await command.execute(["--prompt-file", path, "conv-xyz"], context);
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-xyz", content);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-xyz", content, "gemini-3-flash");
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -200,7 +200,7 @@ describe("continue command --prompt-file option", () => {
 
     await command.execute(["conv-123", "--prompt-file", path], context);
 
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", onDisk);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", onDisk, "gemini-3-flash");
   });
 
   test("--help output includes --prompt-file and the -f alias", async () => {
@@ -273,7 +273,7 @@ describe("continue command spillover: long positional arg is written to a temp f
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg, "gemini-3-flash");
   });
 
   test("5000-char positional spills: temp file is created in tmpdir and DELETED after send", async () => {
@@ -304,7 +304,7 @@ describe("continue command spillover: long positional arg is written to a temp f
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg, "gemini-3-flash");
 
     const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logText.toLowerCase()).not.toContain("spilled to temp file");
@@ -318,7 +318,7 @@ describe("continue command spillover: long positional arg is written to a temp f
     await command.execute(["conv-123", arg], context);
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg, "gemini-3-flash");
 
     const spilledPath = captureSpilledPath();
     expect(spilledPath).not.toBeNull();
@@ -333,7 +333,7 @@ describe("continue command spillover: long positional arg is written to a temp f
     await command.execute(["conv-123", arg], context);
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", arg, "gemini-3-flash");
 
     const spilledPath = captureSpilledPath();
     expect(spilledPath).not.toBeNull();
@@ -344,7 +344,7 @@ describe("continue command spillover: long positional arg is written to a temp f
     const arg = "a".repeat(5000);
     await command.execute(["conv-xyz", arg], context);
 
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-xyz", arg);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-xyz", arg, "gemini-3-flash");
   });
 
   test("when --prompt-file is given (no positional), no spillover happens — user-provided file wins, no spillover log", async () => {
@@ -354,7 +354,7 @@ describe("continue command spillover: long positional arg is written to a temp f
     await command.execute(["conv-123", "--prompt-file", path], context);
 
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
-    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content);
+    expect(client.sendMessage).toHaveBeenCalledWith("conv-123", content, "gemini-3-flash");
 
     const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logText.toLowerCase()).not.toContain("spilled to temp file");

@@ -86,6 +86,7 @@ let mockOverrides: {
   models?: RawAvailableModel[] | null;
   initImplementation?: (client: RawGemini) => void;
   chatsImplementation?: () => never;
+  newChatCalls?: { opts?: any }[];
 } | undefined;
 
 function createMockChatRow(overrides?: Partial<RawChatRow>): RawChatRow {
@@ -207,7 +208,10 @@ function installGeminiReverseMock(overrides?: typeof mockOverrides): GeminiClien
       readChat: mock(async function(this: RawGemini, cid: string, limit?: number) {
         return mockOverrides?.readChat?.(cid, limit) ?? null;
       }),
-      newChat: mock(function(this: RawGemini) {
+      newChat: mock(function(this: RawGemini, opts?: { model?: string }) {
+        if (mockOverrides?.newChatCalls) {
+          mockOverrides.newChatCalls.push({ opts });
+        }
         if (mockOverrides?.newChat) {
           return mockOverrides.newChat();
         }
@@ -804,6 +808,51 @@ describe("GeminiClientService", () => {
 
       expect(sessionMetadataUsed).toEqual(["conv-xyz", "r_m1", "rc_m1", null, null, null, null, null, null, ""]);
     });
+
+    test("sendMessage passes model to newChat when supplied", async () => {
+      const newChatCalls: { opts?: any }[] = [];
+      const d = installGeminiReverseMock({
+        newChatCalls,
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      await service.sendMessage("conv-1", "hello", "gemini-3-pro");
+
+      expect(newChatCalls).toHaveLength(1);
+      expect(newChatCalls[0].opts).toEqual({ model: "gemini-3-pro" });
+    });
+
+    test("sendMessage passes no options to newChat when model is empty", async () => {
+      const newChatCalls: { opts?: any }[] = [];
+      const d = installGeminiReverseMock({
+        newChatCalls,
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      await service.sendMessage("conv-1", "hello", "");
+
+      expect(newChatCalls).toHaveLength(1);
+      expect(newChatCalls[0].opts).toBeUndefined();
+    });
+
+    test("sendMessage passes no options to newChat when model is omitted", async () => {
+      const newChatCalls: { opts?: any }[] = [];
+      const d = installGeminiReverseMock({
+        newChatCalls,
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      await service.sendMessage("conv-1", "hello");
+
+      expect(newChatCalls).toHaveLength(1);
+      expect(newChatCalls[0].opts).toBeUndefined();
+    });
   });
 
   describe("startNewChat", () => {
@@ -917,6 +966,51 @@ describe("GeminiClientService", () => {
       const saved = await chatMetadata.lookup("testprofile", "generated-cid");
       expect(saved).toBeNull();
     });
+
+    test("startNewChat passes model to newChat when supplied", async () => {
+      const newChatCalls: { opts?: any }[] = [];
+      const d = installGeminiReverseMock({
+        newChatCalls,
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      await service.startNewChat("Hello Gemini", "gemini-3-pro");
+
+      expect(newChatCalls).toHaveLength(1);
+      expect(newChatCalls[0].opts).toEqual({ model: "gemini-3-pro" });
+    });
+
+    test("startNewChat passes no options to newChat when model is empty", async () => {
+      const newChatCalls: { opts?: any }[] = [];
+      const d = installGeminiReverseMock({
+        newChatCalls,
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      await service.startNewChat("Hello Gemini", "");
+
+      expect(newChatCalls).toHaveLength(1);
+      expect(newChatCalls[0].opts).toBeUndefined();
+    });
+
+    test("startNewChat passes no options to newChat when model is omitted", async () => {
+      const newChatCalls: { opts?: any }[] = [];
+      const d = installGeminiReverseMock({
+        newChatCalls,
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      await service.startNewChat("Hello Gemini");
+
+      expect(newChatCalls).toHaveLength(1);
+      expect(newChatCalls[0].opts).toBeUndefined();
+    });
   });
 
   describe("deleteChat", () => {
@@ -992,6 +1086,126 @@ describe("GeminiClientService", () => {
       const models = await service.listModels();
 
       expect(models).toEqual([]);
+    });
+  });
+
+  describe("getDefaultModel", () => {
+    test("returns env var when GEMITERM_MODEL is set", async () => {
+      const prevEnv = process.env.GEMITERM_MODEL;
+      process.env.GEMITERM_MODEL = "gemini-3-pro";
+      try {
+        const d = installGeminiReverseMock({});
+        const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+        const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+        expect(service.getDefaultModel()).toBe("gemini-3-pro");
+      } finally {
+        if (prevEnv === undefined) {
+          delete process.env.GEMITERM_MODEL;
+        } else {
+          process.env.GEMITERM_MODEL = prevEnv;
+        }
+      }
+    });
+
+    test("trims whitespace from env var", async () => {
+      const prevEnv = process.env.GEMITERM_MODEL;
+      process.env.GEMITERM_MODEL = "  gemini-3-pro  ";
+      try {
+        const d = installGeminiReverseMock({});
+        const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+        const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+        expect(service.getDefaultModel()).toBe("gemini-3-pro");
+      } finally {
+        if (prevEnv === undefined) {
+          delete process.env.GEMITERM_MODEL;
+        } else {
+          process.env.GEMITERM_MODEL = prevEnv;
+        }
+      }
+    });
+
+    test("ignores whitespace-only env var and returns implicit default", async () => {
+      const prevEnv = process.env.GEMITERM_MODEL;
+      process.env.GEMITERM_MODEL = "   ";
+      try {
+        const d = installGeminiReverseMock({});
+        const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+        const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+        expect(service.getDefaultModel()).toBe("gemini-3-flash");
+      } finally {
+        if (prevEnv === undefined) {
+          delete process.env.GEMITERM_MODEL;
+        } else {
+          process.env.GEMITERM_MODEL = prevEnv;
+        }
+      }
+    });
+
+    test("returns implicit default when env var is unset", async () => {
+      const prevEnv = process.env.GEMITERM_MODEL;
+      delete process.env.GEMITERM_MODEL;
+      try {
+        const d = installGeminiReverseMock({});
+        const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+        const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+        expect(service.getDefaultModel()).toBe("gemini-3-flash");
+      } finally {
+        if (prevEnv === undefined) {
+          delete process.env.GEMITERM_MODEL;
+        } else {
+          process.env.GEMITERM_MODEL = prevEnv;
+        }
+      }
+    });
+
+    test("is process-wide, consistent between factory and forProfile instances", async () => {
+      const prevEnv = process.env.GEMITERM_MODEL;
+      process.env.GEMITERM_MODEL = "gemini-3-pro";
+      try {
+        const profileCookies: Record<string, { secure_1psid: string; secure_1psidts: string | null }> = {
+          work: { secure_1psid: "work-sid", secure_1psidts: null },
+        };
+        const storage = createMockCookieStorage(profileCookies);
+        const css = createProfileCookieLoader(storage);
+
+        const d = installGeminiReverseMock({});
+        const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+        const factory = new GeminiClientService({ secure1psid: "testsid" }, logger, css, undefined, d);
+        const profileService = await factory.forProfile("work");
+
+        expect(factory.getDefaultModel()).toBe("gemini-3-pro");
+        expect(profileService.getDefaultModel()).toBe("gemini-3-pro");
+      } finally {
+        if (prevEnv === undefined) {
+          delete process.env.GEMITERM_MODEL;
+        } else {
+          process.env.GEMITERM_MODEL = prevEnv;
+        }
+      }
+    });
+
+    test("reflects env changes within the same process", async () => {
+      const prevEnv = process.env.GEMITERM_MODEL;
+      process.env.GEMITERM_MODEL = "gemini-3-pro";
+      try {
+        const d = installGeminiReverseMock({});
+        const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+        const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+        expect(service.getDefaultModel()).toBe("gemini-3-pro");
+
+        process.env.GEMITERM_MODEL = "gemini-3-flash";
+        expect(service.getDefaultModel()).toBe("gemini-3-flash");
+
+        delete process.env.GEMITERM_MODEL;
+        expect(service.getDefaultModel()).toBe("gemini-3-flash");
+      } finally {
+        if (prevEnv === undefined) {
+          delete process.env.GEMITERM_MODEL;
+        } else {
+          process.env.GEMITERM_MODEL = prevEnv;
+        }
+      }
     });
   });
 

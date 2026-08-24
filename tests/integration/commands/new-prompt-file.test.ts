@@ -68,7 +68,7 @@ describe("new command --prompt-file option", () => {
     await command.execute(["--prompt-file", path], context);
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
-    expect(client.startNewChat).toHaveBeenCalledWith(content);
+    expect(client.startNewChat).toHaveBeenCalledWith(content, "gemini-3-flash");
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -79,7 +79,7 @@ describe("new command --prompt-file option", () => {
     await command.execute(["--prompt-file", path], context);
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
-    expect(client.startNewChat).toHaveBeenCalledWith(content);
+    expect(client.startNewChat).toHaveBeenCalledWith(content, "gemini-3-flash");
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -91,7 +91,7 @@ describe("new command --prompt-file option", () => {
     await command.execute(["--prompt-file", path], context);
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
-    expect(client.startNewChat).toHaveBeenCalledWith(content);
+    expect(client.startNewChat).toHaveBeenCalledWith(content, "gemini-3-flash");
   });
 
   test("works with the -f short alias", async () => {
@@ -101,7 +101,7 @@ describe("new command --prompt-file option", () => {
     await command.execute(["-f", path], context);
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
-    expect(client.startNewChat).toHaveBeenCalledWith(content);
+    expect(client.startNewChat).toHaveBeenCalledWith(content, "gemini-3-flash");
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -193,7 +193,7 @@ describe("new command --prompt-file option", () => {
     await command.execute(["--prompt-file", path], context);
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
-    expect(client.startNewChat).toHaveBeenCalledWith(content);
+    expect(client.startNewChat).toHaveBeenCalledWith(content, "gemini-3-flash");
     expect(content).not.toBe("");
   });
 
@@ -206,7 +206,7 @@ describe("new command --prompt-file option", () => {
 
     await command.execute(["--prompt-file", path], context);
 
-    expect(client.startNewChat).toHaveBeenCalledWith(onDisk);
+    expect(client.startNewChat).toHaveBeenCalledWith(onDisk, "gemini-3-flash");
   });
 
   test("--help output includes --prompt-file and the -f alias", async () => {
@@ -279,7 +279,7 @@ describe("new command spillover: long positional arg is written to a temp file a
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(client.startNewChat).toHaveBeenCalledWith(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg, "gemini-3-flash");
   });
 
   test("5000-char positional spills: a temp file is created in tmpdir and DELETED after send", async () => {
@@ -310,7 +310,7 @@ describe("new command spillover: long positional arg is written to a temp file a
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(client.startNewChat).toHaveBeenCalledWith(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg, "gemini-3-flash");
 
     const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logText.toLowerCase()).not.toContain("spilled to temp file");
@@ -324,7 +324,7 @@ describe("new command spillover: long positional arg is written to a temp file a
     await command.execute([arg], context);
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
-    expect(client.startNewChat).toHaveBeenCalledWith(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg, "gemini-3-flash");
 
     const spilledPath = captureSpilledPath();
     expect(spilledPath).not.toBeNull();
@@ -339,7 +339,7 @@ describe("new command spillover: long positional arg is written to a temp file a
     await command.execute([arg], context);
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
-    expect(client.startNewChat).toHaveBeenCalledWith(arg);
+    expect(client.startNewChat).toHaveBeenCalledWith(arg, "gemini-3-flash");
 
     const spilledPath = captureSpilledPath();
     expect(spilledPath).not.toBeNull();
@@ -368,7 +368,7 @@ describe("new command spillover: long positional arg is written to a temp file a
     await command.execute(["--prompt-file", path], context);
 
     expect(client.startNewChat).toHaveBeenCalledTimes(1);
-    expect(client.startNewChat).toHaveBeenCalledWith(content);
+    expect(client.startNewChat).toHaveBeenCalledWith(content, "gemini-3-flash");
 
     const logText = logSpy.mock.calls.map((c) => String(c[0])).join("\n");
     expect(logText.toLowerCase()).not.toContain("spilled to temp file");

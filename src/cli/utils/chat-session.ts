@@ -18,6 +18,7 @@ export interface StartChatSessionParams {
   keepalive?: SessionKeepaliveHandle;
   cookieSession?: CookieSession;
   rotationProfile?: string;
+  model?: string;
 }
 
 export async function startChatSession(params: StartChatSessionParams): Promise<void> {
@@ -33,6 +34,7 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
     keepalive,
     cookieSession,
     rotationProfile,
+    model,
   } = params;
 
   const resolveClient = async (): Promise<GeminiClientService> =>
@@ -43,7 +45,9 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
       logger.debug(`Sending message to ${conversationId}`);
       const send = async (): Promise<string> => {
         const client = await resolveClient();
-        return client.sendMessage(conversationId, effectiveMessage);
+        return model !== undefined
+          ? client.sendMessage(conversationId, effectiveMessage, model)
+          : client.sendMessage(conversationId, effectiveMessage);
       };
       const response = cookieSession && rotationProfile
         ? await runWithRotationRetry(cookieSession, rotationProfile, send, () => false)
@@ -52,7 +56,9 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
       console.log(response);
     } else {
       logger.debug("Starting new chat with message");
-      const result = await (await resolveClient()).startNewChat(effectiveMessage);
+      const result = model !== undefined
+        ? await (await resolveClient()).startNewChat(effectiveMessage, model)
+        : await (await resolveClient()).startNewChat(effectiveMessage);
       onFirstTurn?.(result.conversationId);
       console.log(chalk.blue.bold("Model:"));
       console.log(result.response);
@@ -67,12 +73,16 @@ export async function startChatSession(params: StartChatSessionParams): Promise<
   const messageHandler = async (message: string): Promise<MessageHandlerResult> => {
     if (sessionConversationId) {
       logger.debug(`Sending message to ${sessionConversationId}`);
-      const response = await (await resolveClient()).sendMessage(sessionConversationId, message);
+      const response = model !== undefined
+        ? await (await resolveClient()).sendMessage(sessionConversationId, message, model)
+        : await (await resolveClient()).sendMessage(sessionConversationId, message);
       onInteractiveTurn?.(sessionConversationId, false);
       return { response };
     }
 
-    const result = await (await resolveClient()).startNewChat(message);
+    const result = model !== undefined
+      ? await (await resolveClient()).startNewChat(message, model)
+      : await (await resolveClient()).startNewChat(message);
     sessionConversationId = result.conversationId;
     onInteractiveTurn?.(sessionConversationId, true);
     return { response: result.response };
