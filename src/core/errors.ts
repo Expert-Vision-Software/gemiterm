@@ -1,4 +1,4 @@
-import type { SessionState } from "./types.ts";
+import type { SessionProbeState } from "./types.ts";
 
 export class GemitermError extends Error {
   constructor(message: string) {
@@ -9,8 +9,8 @@ export class GemitermError extends Error {
 
 export class AuthenticationError extends GemitermError {
   readonly profileName?: string;
-  readonly sessionState?: SessionState;
-  constructor(message = "Not authenticated. Please run 'gemiterm login' first.", opts: { profileName?: string; sessionState?: SessionState } = {}) {
+  readonly sessionState?: SessionProbeState;
+  constructor(message = "Not authenticated. Please run 'gemiterm login' first.", opts: { profileName?: string; sessionState?: SessionProbeState } = {}) {
     super(message);
     this.name = "AuthenticationError";
     this.profileName = opts.profileName;

@@ -29,6 +29,12 @@ export interface Conversation {
 
 export type SessionState = "live" | "phantom" | "dead";
 
+// gh#25: probe results extend the canonical vocabulary with a transport-level
+// verdict — a failed chats probe says nothing about the session itself and
+// must never be reported as phantom. Output formatting keys off `state`,
+// whose user-facing values stay live/phantom/dead.
+export type SessionProbeState = SessionState | "unreachable";
+
 export interface AuthResult {
   cookies: Cookie[];
   expiresAt: Date | null;
