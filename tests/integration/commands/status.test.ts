@@ -339,5 +339,31 @@ describe("status command integration", () => {
       expect(stderrOutput).toContain("WARN");
       expect(stderrOutput).toContain("broken");
     });
+
+    test("unreachable probe (gh#25) renders ! unreachable, not phantom, and warns with the cause", async () => {
+      setupProfilesWithStatus([
+        { name: "work", exists: true, isActive: true, expiresAt: "2099-12-31T00:00:00.000Z", isDefault: true },
+        { name: "flaky", exists: true, isActive: true, expiresAt: "2099-06-30T00:00:00.000Z", isDefault: false },
+      ]);
+      cookieSessionFake.probeDetailed.mockImplementation(async (name: string) => {
+        if (name === "flaky") {
+          return { state: "unreachable" as const, chatCount: 0, error: new Error("HPE_HEADER_OVERFLOW") };
+        }
+        return { state: "live" as const, chatCount: 2 };
+      });
+
+      await command.execute(["--verbose"], context);
+
+      const output = getOutput(logSpy);
+      expect(output).toContain("live (2)");
+      expect(output).toContain("! unreachable");
+      const flakyLine = output.split("\n").find((l) => l.includes("flaky"));
+      expect(flakyLine).toContain("unreachable");
+      expect(flakyLine).not.toContain("phantom");
+      const stderrOutput = stderrSpy.mock.calls.map((c) => c[0]).join("\n");
+      expect(stderrOutput).toContain("WARN");
+      expect(stderrOutput).toContain("flaky");
+      expect(stderrOutput).toContain("HPE_HEADER_OVERFLOW");
+    });
   });
 });

@@ -16,7 +16,7 @@ export class StatusCommand implements CliCommand {
       console.log("");
       console.log("Options:");
       console.log("  --verbose     Probe each profile's session over the network and report");
-      console.log("                live/phantom/dead (one request per profile; slower)");
+      console.log("                live/phantom/dead/unreachable (one request per profile; slower)");
       console.log("  -h, --help    Show this help message");
       return;
     }

@@ -4,6 +4,7 @@ import {
   formatChatAsJson,
   formatProfileTable,
   formatChatList,
+  type ProfileStatusWithProbe,
 } from "../../src/infrastructure/formatters.ts";
 import type { Message, ChatInfo, ProfileStatus } from "../../src/core/types.ts";
 
@@ -227,6 +228,35 @@ describe("formatters", () => {
       const result = formatProfileTable(statuses);
       expect(result).toContain("Yes");
       expect(result).not.toContain("Ye\u2026");
+    });
+
+    test("renders each probe state in the PROBE column when showProbe is set", () => {
+      const statuses: ProfileStatusWithProbe[] = [
+        { name: "live", exists: true, isActive: true, expiresAt: null, isDefault: false, probe: { state: "live", chatCount: 7 } },
+        { name: "phantom", exists: true, isActive: true, expiresAt: null, isDefault: false, probe: { state: "phantom", chatCount: 0 } },
+        { name: "dead", exists: true, isActive: false, expiresAt: null, isDefault: false, probe: { state: "dead", chatCount: 0 } },
+        { name: "unreachable", exists: true, isActive: true, expiresAt: null, isDefault: false, probe: { state: "unreachable", chatCount: 0, error: new Error("HPE_HEADER_OVERFLOW") } },
+        { name: "unprobed", exists: true, isActive: true, expiresAt: null, isDefault: false },
+      ];
+      const result = formatProfileTable(statuses, { showProbe: true });
+      expect(result).toContain("PROBE");
+      expect(result).toContain("live (7)");
+      expect(result).toContain("! phantom");
+      expect(result).toContain("dead");
+      expect(result).toContain("! unreachable");
+      const unreachableLine = result.split("\n").find((l) => l.includes("unreachable"));
+      expect(unreachableLine).toContain("unreachable");
+      expect(unreachableLine).not.toContain("phantom");
+      expect(unreachableLine).not.toContain("dead");
+    });
+
+    test("omits the PROBE column without showProbe even when probe data is present", () => {
+      const statuses: ProfileStatusWithProbe[] = [
+        { name: "work", exists: true, isActive: true, expiresAt: null, isDefault: false, probe: { state: "unreachable", chatCount: 0 } },
+      ];
+      const result = formatProfileTable(statuses);
+      expect(result).not.toContain("PROBE");
+      expect(result).not.toContain("unreachable");
     });
   });
 

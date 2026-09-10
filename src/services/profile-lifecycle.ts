@@ -162,6 +162,15 @@ export class ProfileLifecycle {
           // em-dash placeholder instead of misreporting a server-side verdict.
           const message = error instanceof Error ? error.message : String(error);
           this.logger.warn(`Session probe failed for profile '${status.name}': ${message}`);
+          continue;
+        }
+        // gh#25: a rejected chats probe surfaces as "unreachable" (not
+        // phantom); keep the rejection-path warn so the transport cause is
+        // still diagnosed on stderr.
+        if (status.probe.state === "unreachable") {
+          const cause = status.probe.error;
+          const message = cause instanceof Error ? cause.message : String(cause);
+          this.logger.warn(`Session probe failed for profile '${status.name}': ${message}`);
         }
       }
     }
