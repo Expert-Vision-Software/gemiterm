@@ -1,5 +1,6 @@
 import type { CliCommandContext } from "../command-registry.ts";
 import { AuthenticationError } from "../../core/errors.ts";
+import type { SessionProbeResult } from "../../auth/cookie-session.ts";
 import { awaitRotationsWithNotice } from "./rotation-await.ts";
 
 // Explicit-profile path (fix-8): an explicit `-p <name>` is no longer
@@ -37,11 +38,22 @@ export async function resolveProfile(
     if (context.cookieSession.rotationInFlight(explicitProfile)) {
       await awaitRotationsWithNotice(context.cookieSession, [explicitProfile]);
     }
-    const state = await context.cookieSession.probe(explicitProfile).catch(() => "dead" as const);
-    if (state !== "live") {
+    // gh#25: classify through probeDetailed so a rejected chats probe reports
+    // "unreachable" — the recovery offer downstream must not fire for a
+    // transport failure. A probeDetailed rejection here means the jar itself
+    // is unreadable; that keeps the historical "dead" fallback.
+    const probe: SessionProbeResult = await context.cookieSession
+      .probeDetailed(explicitProfile)
+      .catch(() => ({ state: "dead" as const, chatCount: 0 }));
+    if (probe.state !== "live") {
+      // gh#25: unreachable is a transport failure — rotating cookies cannot
+      // fix it, so the remediation hint differs from the re-auth path.
+      const remediation = probe.state === "unreachable"
+        ? "Check connectivity and re-run the command."
+        : `Run 'gemiterm auth --renew ${explicitProfile}' to re-authenticate.`;
       throw new AuthenticationError(
-        `Profile '${explicitProfile}' session is ${state} after the rotation wait. Run 'gemiterm auth --renew ${explicitProfile}' to re-authenticate.`,
-        { profileName: explicitProfile, sessionState: state },
+        `Profile '${explicitProfile}' session is ${probe.state} after the rotation wait. ${remediation}`,
+        { profileName: explicitProfile, sessionState: probe.state },
       );
     }
     return explicitProfile;

@@ -2,6 +2,7 @@ import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from "bun:
 import { offerExplicitProfileRecovery, resolveProfileWithRecovery } from "../../../src/cli/utils/recovery-offer.ts";
 import { CancellationError, NonInteractiveError } from "../../../src/cli/utils/prompts.ts";
 import { AuthenticationError } from "../../../src/core/errors.ts";
+import type { SessionProbeResult } from "../../../src/auth/cookie-session.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
 import { setStdinTty, restoreStdinTty } from "./tty-harness.ts";
 
@@ -86,7 +87,11 @@ describe("resolveProfileWithRecovery", () => {
     restoreStdinTty();
   });
 
-  function makeResolutionContext(recover: ReturnType<typeof mock>) {
+  function makeResolutionContext(
+    recover: ReturnType<typeof mock>,
+    probeState: SessionProbeResult["state"] = "phantom",
+    probeExtra: Partial<SessionProbeResult> = {},
+  ) {
     return {
       verbose: false,
       cookieSession: {
@@ -95,7 +100,7 @@ describe("resolveProfileWithRecovery", () => {
         ensureSession: mock(() => ({ secure_1psid: "psid", secure_1psidts: "ts" })),
         rotationInFlight: mock(() => false),
         waitForRotation: mock(async () => null),
-        probe: mock(async () => "phantom" as const),
+        probeDetailed: mock(async () => ({ state: probeState, chatCount: 0, ...probeExtra })),
         recover,
       },
       listProfiles: mock(async () => ["stale"]),
@@ -171,6 +176,25 @@ describe("resolveProfileWithRecovery", () => {
     expect(caught).toBeInstanceOf(AuthenticationError);
     expect((caught as AuthenticationError).profileName).toBe("stale");
     expect((caught as AuthenticationError).sessionState).toBe("phantom");
+    expect(recover).not.toHaveBeenCalled();
+  });
+
+  test("unreachable probe (gh#25) never offers recovery: rethrows without confirm", async () => {
+    setStdinTty(true);
+    const recover = mock(async () => ({}));
+    const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(true);
+    const ctx = makeResolutionContext(recover, "unreachable", { error: new Error("HPE_HEADER_OVERFLOW") });
+
+    let caught: unknown;
+    try {
+      await resolveProfileWithRecovery(ctx, "conv-1", "stale");
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(AuthenticationError);
+    expect((caught as AuthenticationError).sessionState).toBe("unreachable");
+    expect(confirmSpy).not.toHaveBeenCalled();
     expect(recover).not.toHaveBeenCalled();
   });
 

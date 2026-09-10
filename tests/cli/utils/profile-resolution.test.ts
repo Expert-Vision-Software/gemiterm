@@ -1,6 +1,7 @@
 import { describe, test, expect, mock, spyOn } from "bun:test";
 import { resolveProfile } from "../../../src/cli/utils/profile-resolution.ts";
 import type { CliCommandContext } from "../../../src/cli/command-registry.ts";
+import type { SessionProbeResult } from "../../../src/auth/cookie-session.ts";
 import { AuthenticationError } from "../../../src/core/errors.ts";
 
 interface MakeContextOpts {
@@ -10,7 +11,11 @@ interface MakeContextOpts {
   ensureSession?: ReturnType<typeof mock>;
   rotationInFlight?: ReturnType<typeof mock>;
   waitForRotation?: ReturnType<typeof mock>;
-  probe?: ReturnType<typeof mock>;
+  probeDetailed?: ReturnType<typeof mock>;
+}
+
+function probeResult(state: SessionProbeResult["state"], extra: Partial<SessionProbeResult> = {}): SessionProbeResult {
+  return { state, chatCount: 0, ...extra };
 }
 
 function makeContext(opts: MakeContextOpts): CliCommandContext {
@@ -22,7 +27,7 @@ function makeContext(opts: MakeContextOpts): CliCommandContext {
       ensureSession: opts.ensureSession ?? mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       rotationInFlight: opts.rotationInFlight ?? mock(() => false),
       waitForRotation: opts.waitForRotation ?? mock(async () => null),
-      probe: opts.probe ?? mock(async () => "live" as const),
+      probeDetailed: opts.probeDetailed ?? mock(async () => probeResult("live", { chatCount: 1 })),
     },
     listProfiles: mock(async () => opts.configuredProfiles ?? opts.activeProfiles),
   } as unknown as CliCommandContext;
@@ -87,7 +92,7 @@ describe("resolveProfile", () => {
       configuredProfiles: ["dhb-work", "stale"],
       findProfileForConversation: async () => null,
       ensureSession,
-      probe: mock(async () => "live" as const),
+      probeDetailed: mock(async () => probeResult("live", { chatCount: 1 })),
     });
 
     const result = await resolveProfile(ctx, "conv-1", "stale");
@@ -118,7 +123,7 @@ describe("resolveProfile", () => {
       findProfileForConversation: async () => null,
       rotationInFlight: mock(() => true),
       waitForRotation: mock(async () => null),
-      probe: mock(async () => "phantom" as const),
+      probeDetailed: mock(async () => probeResult("phantom")),
     });
 
     await expect(resolveProfile(ctx, "conv-1", "stale")).rejects.toThrow(
@@ -136,7 +141,7 @@ describe("resolveProfile", () => {
         findProfileForConversation: async () => null,
         rotationInFlight: mock(() => true),
         waitForRotation: mock(async () => null),
-        probe: mock(async () => "phantom" as const),
+        probeDetailed: mock(async () => probeResult("phantom")),
       });
 
       await expect(resolveProfile(ctx, "conv-1", "stale")).rejects.toThrow(
@@ -165,7 +170,7 @@ describe("resolveProfile", () => {
           return value;
         }),
         waitForRotation: mock(async () => null),
-        probe: mock(async () => "phantom" as const),
+        probeDetailed: mock(async () => probeResult("phantom")),
       });
 
       await expect(resolveProfile(ctx, "conv-1", "stale")).rejects.toThrow(/phantom/);
@@ -187,7 +192,7 @@ describe("resolveProfile", () => {
         findProfileForConversation: async () => null,
         rotationInFlight: mock(() => true),
         waitForRotation: mock(async () => ({ secure_1psid: "psid", secure_1psidts: "ts2", cookies: [] })),
-        probe: mock(async () => "phantom" as const),
+        probeDetailed: mock(async () => probeResult("phantom")),
       });
 
       await expect(resolveProfile(ctx, "conv-1", "stale")).rejects.toThrow(/phantom/);
@@ -213,5 +218,36 @@ describe("resolveProfile", () => {
     await expect(resolveProfile(ctx, "conv-1", "expired-profile")).rejects.toThrow(
       /not a configured profile/,
     );
+  });
+
+  test("explicit --profile with an unreachable probe reports unreachable (gh#25), never phantom", async () => {
+    const probeError = new Error("HPE_HEADER_OVERFLOW");
+    const ctx = makeContext({
+      activeProfiles: ["stale"],
+      configuredProfiles: ["stale"],
+      findProfileForConversation: async () => null,
+      probeDetailed: mock(async () => probeResult("unreachable", { error: probeError })),
+    });
+
+    await expect(resolveProfile(ctx, "conv-1", "stale")).rejects.toThrow(/unreachable/);
+    await expect(resolveProfile(ctx, "conv-1", "stale")).rejects.toThrow(/Check connectivity/);
+    await expect(resolveProfile(ctx, "conv-1", "stale")).rejects.not.toThrow(/--renew/);
+    await expect(resolveProfile(ctx, "conv-1", "stale")).rejects.toMatchObject({
+      profileName: "stale",
+      sessionState: "unreachable",
+    });
+  });
+
+  test("probeDetailed rejection (unreadable jar) keeps the historical dead fallback", async () => {
+    const ctx = makeContext({
+      activeProfiles: ["stale"],
+      configuredProfiles: ["stale"],
+      findProfileForConversation: async () => null,
+      probeDetailed: mock(async () => {
+        throw new Error("jar unreadable");
+      }),
+    });
+
+    await expect(resolveProfile(ctx, "conv-1", "stale")).rejects.toThrow(/dead/);
   });
 });

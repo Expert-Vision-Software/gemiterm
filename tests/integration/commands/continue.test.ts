@@ -202,7 +202,7 @@ describe("continue command integration", () => {
       }));
       (context.cookieSession as any).rotationInFlight = mock(() => true);
       (context.cookieSession as any).waitForRotation = mock(async () => null);
-      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+      (context.cookieSession as any).probeDetailed = mock(async () => ({ state: "phantom" as const, chatCount: 0 }));
 
       try {
         setStdinTty(false);
@@ -226,7 +226,7 @@ describe("continue command integration", () => {
       }));
       (context.cookieSession as any).rotationInFlight = mock(() => true);
       (context.cookieSession as any).waitForRotation = mock(async () => ({ cookies: [] }));
-      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+      (context.cookieSession as any).probeDetailed = mock(async () => ({ state: "phantom" as const, chatCount: 0 }));
       (context.cookieSession as any).recover = mock(async () => ({ secure_1psid: "psid2", secure_1psidts: "ts2" }));
 
       let sendCalls = 0;

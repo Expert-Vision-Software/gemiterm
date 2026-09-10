@@ -29,7 +29,7 @@ describe("DeleteCommand", () => {
         ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
         rotationInFlight: mock(() => false),
         waitForRotation: mock(async () => null),
-        probe: mock(async () => "live" as const),
+        probeDetailed: mock(async () => ({ state: "live" as const, chatCount: 1 })),
       } as unknown as CliCommandContext["cookieSession"],
       getGeminiClient: () => client,
       listProfiles: () => ["default"],

@@ -34,7 +34,7 @@ describe("fetch command integration", () => {
       ensureSession: mock(() => ({ secure_1psid: "", secure_1psidts: null })),
       rotationInFlight: mock(() => false),
       waitForRotation: mock(async () => null),
-      probe: mock(async () => "live" as const),
+      probeDetailed: mock(async () => ({ state: "live" as const, chatCount: 1 })),
     };
     context = {
       verbose: false,
@@ -418,7 +418,7 @@ describe("fetch command integration", () => {
       }));
       (context.cookieSession as any).rotationInFlight = mock(() => true);
       (context.cookieSession as any).waitForRotation = mock(async () => ({ cookies: [] }));
-      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+      (context.cookieSession as any).probeDetailed = mock(async () => ({ state: "phantom" as const, chatCount: 0 }));
       (context.cookieSession as any).recover = mock(async () => ({ secure_1psid: "psid2", secure_1psidts: "ts2" }));
 
       const promptsModule = await import("../../../src/cli/utils/prompts.ts");
@@ -449,7 +449,7 @@ describe("fetch command integration", () => {
       }));
       (context.cookieSession as any).rotationInFlight = mock(() => true);
       (context.cookieSession as any).waitForRotation = mock(async () => null);
-      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+      (context.cookieSession as any).probeDetailed = mock(async () => ({ state: "phantom" as const, chatCount: 0 }));
 
       try {
         setStdinTty(false);
@@ -475,7 +475,7 @@ describe("fetch command integration", () => {
       }));
       (context.cookieSession as any).rotationInFlight = mock(() => true);
       (context.cookieSession as any).waitForRotation = mock(async () => null);
-      (context.cookieSession as any).probe = mock(async () => "phantom" as const);
+      (context.cookieSession as any).probeDetailed = mock(async () => ({ state: "phantom" as const, chatCount: 0 }));
       (context.cookieSession as any).recover = mock(async () => ({}));
 
       const promptsModule = await import("../../../src/cli/utils/prompts.ts");
