@@ -34,6 +34,24 @@ interface AxiosLikeError {
   message?: string;
 }
 
+// axios surfaces llhttp's HPE_HEADER_OVERFLOW as a plain Error whose `message`
+// carries the parser string verbatim (code is on the top-level error on Bun /
+// Node >= 22, but only on the `cause` chain elsewhere), so the message match is
+// the reliable signal — see issue #24 spike data.
+function isHeaderOverflowError(e: unknown): boolean {
+  const ax = e as AxiosLikeError;
+  if (ax.code === "HPE_HEADER_OVERFLOW" || ax.code === "UND_ERR_HEADERS_OVERFLOW") {
+    return true;
+  }
+  return typeof ax.message === "string" && /parse error:\s*header overflow/i.test(ax.message);
+}
+
+const HEADER_OVERFLOW_MESSAGE =
+  "Gemini's response headers exceeded the local HTTP parser limit (16 KB). " +
+  "This is usually a proxy or large-cookie artifact, not a session problem. " +
+  'Workaround: bun --max-http-header-size=65536 "$(which gemiterm)" <command>; ' +
+  "unset http_proxy/https_proxy to test the proxy path.";
+
 interface RawChatRow {
   cid: string;
   title: string;
@@ -140,6 +158,11 @@ export class GeminiClientService {
     if (ax.code === "ECONNABORTED") {
       return new GeminiAPIError("Request to Gemini timed out");
     }
+    if (isHeaderOverflowError(e)) {
+      const err = new GeminiAPIError(HEADER_OVERFLOW_MESSAGE);
+      err.cause = e;
+      return err;
+    }
     if (e instanceof this.deps.UsageLimitExceeded) {
       return new GeminiAPIError("Gemini usage limit reached; try again later or switch model");
     }
@@ -191,8 +214,8 @@ export class GeminiClientService {
     offset?: number;
     search?: string;
   }): Promise<ChatInfo[]> {
-    await this.init();
     try {
+      await this.init();
       const raw = await this.client!.chats() as RawChatRow[];
       let chats: ChatInfo[] = (raw ?? []).map((c) => this.toDomainChatInfo(c, this.profileName));
 
@@ -218,8 +241,8 @@ export class GeminiClientService {
   }
 
   async fetchChat(conversationId: string): Promise<Message[]> {
-    await this.init();
     try {
+      await this.init();
       const raw = (await this.client!.readChat(conversationId)) as RawChatTurn[] | null;
       const turns = raw ?? [];
       if (turns.length > 0) {
@@ -242,8 +265,8 @@ export class GeminiClientService {
   }
 
   async deleteChat(conversationId: string): Promise<void> {
-    await this.init();
     try {
+      await this.init();
       await this.client!.deleteChat(conversationId);
     } catch (e) {
       const err = this.translateError(e);
@@ -263,8 +286,8 @@ export class GeminiClientService {
   }
 
   async sendMessage(conversationId: string, message: string, model?: string): Promise<string> {
-    await this.init();
     try {
+      await this.init();
       let session: RawChatSession;
       if (this.profileName) {
         const stored = await this.chatMetadata.lookup(this.profileName, conversationId);
@@ -297,8 +320,8 @@ export class GeminiClientService {
   }
 
   async startNewChat(message: string, model?: string): Promise<{ response: string; conversationId: string }> {
-    await this.init();
     try {
+      await this.init();
       const session = this.buildSession("", undefined, model);
       const output = await session.generateContent({ prompt: message });
       const response = output.text.toString();
@@ -318,8 +341,8 @@ export class GeminiClientService {
   }
 
   async listModels(): Promise<string[]> {
-    await this.init();
     try {
+      await this.init();
       const raw = await this.client!.models();
       const models = (raw ?? []).map((m: RawAvailableModel) => this.toDomainModelName(m));
       return models;

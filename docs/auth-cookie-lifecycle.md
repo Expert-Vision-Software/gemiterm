@@ -1175,3 +1175,33 @@ do not re-litigate them.
   0 fail). No production change; the invariant still asserts the
   `recover-<profile>` session name, null propagation, and argument order.
 
+- **2026-09-10** — transport-error translation (issue #24, parent #23).
+  Raw llhttp/axios transport errors (the `HPE_HEADER_OVERFLOW` /
+  "Parse Error: Header overflow" family — 16 KB response-header parser cap,
+  typically proxy or large-cookie artifacts) leaked verbatim to users on the
+  `list` path: every public method of `GeminiClientService`
+  (`src/services/gemini-client-wrapper.ts`) awaited `init()` OUTSIDE its
+  try/catch, so init-time errors bypassed `translateError()` entirely, and
+  `translateError()` itself had no transport branch (falling through to
+  "Unexpected error: …" at best). Two changes: (1) `init()` now runs inside
+  the try/catch in all six public methods (`listChats`, `fetchChat`,
+  `deleteChat`, `sendMessage`, `startNewChat`, `listModels`), so every
+  failure path flows through the same translation; (2) `translateError()`
+  gained a transport branch — `err.code === "HPE_HEADER_OVERFLOW"` or
+  `"UND_ERR_HEADERS_OVERFLOW"`, or message matching
+  `/parse error:\s*header overflow/i` (axios wraps the llhttp error verbatim
+  and the code is not reliably on the top-level error across runtimes, so
+  the message match is the defensive signal, per the #24 spike on Bun 1.4.1
+  and Node 22) — mapping to a `GeminiAPIError` with an actionable message
+  (16 KB parser limit, `--max-http-header-size` workaround,
+  proxy-unset hint) and the original error preserved as `.cause`. Auth
+  classification is unchanged: the `AuthError` -> `AuthenticationError`
+  branch remains first, so the transport branch can never capture an auth
+  error, and init-path auth failures now correctly surface the
+  "run 'gemiterm login'" guidance instead of a raw parser string. No cookie
+  handling, capture, persistence, or rotation logic is touched. Invariant
+  coverage: `tests/auth-regression/invariant-transport-error-translation.test.ts`
+  (auth classification on init and call paths; transport errors never
+  misclassified as `AuthenticationError`; cause preservation) + unit tests
+  in `tests/services/gemini-client-wrapper.test.ts` (issue #24).
+
