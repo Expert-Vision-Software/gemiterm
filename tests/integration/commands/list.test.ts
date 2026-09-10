@@ -1045,5 +1045,34 @@ describe("list command integration", () => {
         restoreStdinTty();
       }
     });
+
+    test("rejected probe (gh#25 unreachable) never offers recovery even on a TTY", async () => {
+      setStdinTty(true);
+      const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(true);
+      cookieSession.probe = mock(async () => {
+        throw new Error("HPE_HEADER_OVERFLOW");
+      });
+      client.listChats = mock(async () => []);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+      const stderrSpy = spyOn(process.stderr, "write").mockImplementation(() => true);
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        expect(cookieSession.probe).toHaveBeenCalledTimes(1);
+        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(cookieSession.recover).not.toHaveBeenCalled();
+        expect(client.listChats).toHaveBeenCalledTimes(1);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+        const stderr = stderrSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(stderr).toContain("Session classification failed");
+        expect(stderr).toContain("HPE_HEADER_OVERFLOW");
+      } finally {
+        errSpy.mockRestore();
+        stderrSpy.mockRestore();
+        restoreStdinTty();
+      }
+    });
   });
 });
