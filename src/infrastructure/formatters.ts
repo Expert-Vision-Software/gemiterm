@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import type { Message, ChatInfo, ProfileStatus } from "../core/types.ts";
+import type { Message, ChatInfo, ProfileStatus, SessionProbeState } from "../core/types.ts";
 import { renderTable, type ColumnDef } from "./cli-table.ts";
 
 function formatDate(date: Date | string | null): string {
@@ -61,7 +61,7 @@ export function formatChatAsJson(messages: Message[], conversationId: string): s
 
 // Structural twin of SessionProbeResult from src/auth — keeps infrastructure decoupled from the auth module.
 export interface ProfileStatusWithProbe extends ProfileStatus {
-  probe?: { state: "live" | "phantom" | "dead"; chatCount: number };
+  probe?: { state: SessionProbeState; chatCount: number; error?: unknown };
 }
 
 export function formatProfileTable(
@@ -88,11 +88,15 @@ export function formatProfileTable(
   if (options?.showProbe) {
     columns.push({
       header: "PROBE",
-      width: 14,
+      // 16 so "! unreachable" (gh#25) fits without cli-table3 truncation.
+      width: 16,
       cell: (s) => {
         if (!s.probe) return chalk.dim("\u2014");
         if (s.probe.state === "live") return chalk.green(`\u2713 live (${s.probe.chatCount})`);
         if (s.probe.state === "phantom") return chalk.yellow("! phantom");
+        // gh#25: transport failure is not a session verdict — never rendered
+        // as phantom (which invites a pointless recovery).
+        if (s.probe.state === "unreachable") return chalk.yellow("! unreachable");
         return chalk.red("\u2717 dead");
       },
     });

@@ -451,8 +451,9 @@ export function createCookieSession(deps: CreateCookieSessionDeps): CookieSessio
     cookieStore,
     // No limit: GeminiClientService.listChats fetches all chats and slices client-side,
     // so the probe sees the full list and classifyDetailed's chatCount is real.
-    probeChats: async (profile) =>
-      await makeProbeClient(profile).then((c) => c.listChats()).catch(() => []),
+    // No catch: a rejected probe must reach classifyDetailed so it can report
+    // "unreachable" (gh#25) instead of flattening into a phantom verdict.
+    probeChats: async (profile) => await makeProbeClient(profile).then((c) => c.listChats()),
   });
 
   let session!: CookieSession;

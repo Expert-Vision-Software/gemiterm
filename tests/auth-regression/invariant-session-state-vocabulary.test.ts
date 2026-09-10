@@ -1,11 +1,14 @@
-// Invariant: the live/phantom/dead session-state vocabulary has a single
-// source of truth (fix-8 review). `SessionState` (src/core/types.ts) is the
-// canonical declaration; `AuthenticationError.sessionState`
+// Invariant: the session-state vocabulary has a single source of truth
+// (fix-8 review; extended by gh#25). `SessionState` (src/core/types.ts) is
+// the canonical declaration; `AuthenticationError.sessionState`
 // (src/core/errors.ts) and `SessionProbeResult.state`
-// (src/auth/session-classifier.ts) must share that type, never re-declare
-// the union. The compile-time checks below pin both consumers to the core
-// type in both directions; the runtime checks pin the emitted values to
-// exactly {live, phantom, dead}.
+// (src/auth/session-classifier.ts) share the probe vocabulary
+// `SessionState | "unreachable"` — never a re-declared union. "unreachable"
+// is transport-only (gh#25): it is a property of the probe, not of the
+// session, and the core live/phantom/dead triple stays unchanged for output
+// formatting. The compile-time checks below pin both consumers to that
+// relationship in both directions; the runtime checks pin the emitted
+// values.
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import type { SessionState } from "../../src/core/types.ts";
 import { AuthenticationError } from "../../src/core/errors.ts";
@@ -18,33 +21,38 @@ beforeEach(setupIsolation);
 afterEach(teardownIsolation);
 
 const EXPECTED_STATES = ["live", "phantom", "dead"] as const;
+const PROBE_STATES = ["live", "phantom", "dead", "unreachable"] as const;
 
 // Compile-time drift guards (fail the type-check whenever a consumer
-// re-declares or widens the vocabulary instead of importing the core type).
+// re-declares or diverges from the shared vocabulary).
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 type Expect<T extends true> = T;
-type _ProbeStateIsCoreState = Expect<Equals<SessionState, SessionProbeResult["state"]>>;
-type _ErrorStateIsCoreState = Expect<Equals<SessionState, NonNullable<AuthenticationError["sessionState"]>>>;
+type _CoreStateUnchanged = Expect<Equals<SessionState, "live" | "phantom" | "dead">>;
+type _ProbeStateIsCorePlusUnreachable = Expect<Equals<SessionProbeResult["state"], SessionState | "unreachable">>;
+type _ErrorStateIsCorePlusUnreachable = Expect<Equals<NonNullable<AuthenticationError["sessionState"]>, SessionState | "unreachable">>;
 
-// Bidirectional assignment checks: a value of the core type flows into both
-// consumer positions, and consumer-typed values flow back into the core type.
+// Bidirectional assignment checks: the core triple flows into both consumer
+// positions, and any probe state (including "unreachable") flows into the
+// error position.
 const coreState: SessionState = "phantom";
 const coreAsProbe: SessionProbeResult["state"] = coreState;
 const coreAsError: NonNullable<AuthenticationError["sessionState"]> = coreState;
-const probeAsCore: SessionState = coreAsProbe;
-const errorAsCore: SessionState = coreAsError;
+const probeAsError: NonNullable<AuthenticationError["sessionState"]> = "unreachable" as SessionProbeResult["state"];
 
 async function seedJar(): Promise<void> {
   await new CookieStore().saveFullJar("test-profile", freshFullJar());
 }
 
-function classifierFor(html: string | Error, chats: unknown[]) {
+function classifierFor(html: string | Error, chats: unknown[] | Error) {
   return new SessionClassifier({
     fetchInitHtml: mock(async () => {
       if (html instanceof Error) throw html;
       return html;
     }),
-    probeChats: mock(async () => chats),
+    probeChats: mock(async () => {
+      if (chats instanceof Error) throw chats;
+      return chats;
+    }),
   });
 }
 
@@ -62,18 +70,17 @@ describe("auth-regression: session-state vocabulary", () => {
   test("compile-time assignment checks hold the shared vocabulary at runtime values", () => {
     expect(coreAsProbe).toBe("phantom");
     expect(coreAsError).toBe("phantom");
-    expect(probeAsCore).toBe("phantom");
-    expect(errorAsCore).toBe("phantom");
+    expect(probeAsError).toBe("unreachable");
   });
 
-  test("AuthenticationError round-trips every canonical state", () => {
-    for (const state of EXPECTED_STATES) {
+  test("AuthenticationError round-trips every canonical state and the transport state", () => {
+    for (const state of [...EXPECTED_STATES, "unreachable" as const]) {
       const err = new AuthenticationError("probe", { sessionState: state });
       if (err.sessionState === undefined) {
         throw new Error(`AuthenticationError dropped sessionState '${state}'`);
       }
       expect(err.sessionState).toBe(state);
-      expect(EXPECTED_STATES).toContain(err.sessionState);
+      expect(PROBE_STATES).toContain(err.sessionState);
     }
   });
 
@@ -89,5 +96,16 @@ describe("auth-regression: session-state vocabulary", () => {
       expect(EXPECTED_STATES).toContain(state);
     }
     expect(new Set(states)).toEqual(new Set(EXPECTED_STATES));
+  });
+
+  test("the only state outside the canonical triple is unreachable, and only for a rejected probe", async () => {
+    await seedJar();
+
+    const unreachable = await classifierFor(ONE_NON_EMPTY, new Error("network down")).classifyDetailed("test-profile");
+    expect(unreachable.state).toBe("unreachable");
+    for (const state of EXPECTED_STATES) {
+      expect(unreachable.state).not.toBe(state);
+    }
+    expect(unreachable.error).toBeInstanceOf(Error);
   });
 });

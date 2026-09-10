@@ -1,4 +1,4 @@
-import type { Cookie, SessionState } from "../core/types.ts";
+import type { Cookie, SessionProbeState, SessionState } from "../core/types.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { isRoutableTo } from "./cookie-validation.ts";
 import { GEMINI_APP_URL, hasAnyExtractedInitToken } from "./auth-constants.ts";
@@ -9,8 +9,12 @@ const USER_AGENT =
 export type { SessionState };
 
 export interface SessionProbeResult {
-  state: SessionState;
+  state: SessionProbeState;
   chatCount: number;
+  // Set only when `state` is "unreachable" (gh#25): a rejected chats probe is
+  // a transport verdict, not a server-side "no conversations" verdict, so the
+  // cause travels with the result instead of being flattened into phantom.
+  error?: unknown;
 }
 
 export interface SessionClassifierDeps {
@@ -50,7 +54,13 @@ export class SessionClassifier {
   }
 
   async classify(profile: string): Promise<SessionState> {
-    return (await this.classifyDetailed(profile)).state;
+    const detailed = await this.classifyDetailed(profile);
+    if (detailed.state === "unreachable") {
+      // gh#25: the state vocabulary has no slot for transport failure, so the
+      // binary classifier rejects and lets each caller apply its own fallback.
+      throw detailed.error instanceof Error ? detailed.error : new Error(String(detailed.error));
+    }
+    return detailed.state;
   }
 
   async classifyDetailed(profile: string): Promise<SessionProbeResult> {
@@ -68,7 +78,15 @@ export class SessionClassifier {
       return { state: "dead", chatCount: 0 };
     }
 
-    const chats = await this.probeChats(profile).catch(() => []);
+    let chats: unknown[];
+    try {
+      chats = await this.probeChats(profile);
+    } catch (error) {
+      // gh#25: a transport failure (HPE_HEADER_OVERFLOW, timeout, 5xx) is not
+      // evidence of a phantom session — surface it so callers can skip
+      // recovery instead of rotating cookies against a dead network path.
+      return { state: "unreachable", chatCount: 0, error };
+    }
     return { state: chats.length > 0 ? "live" : "phantom", chatCount: chats.length };
   }
 }

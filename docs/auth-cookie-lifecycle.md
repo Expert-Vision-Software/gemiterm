@@ -1175,3 +1175,32 @@ do not re-litigate them.
   0 fail). No production change; the invariant still asserts the
   `recover-<profile>` session name, null propagation, and argument order.
 
+- **2026-09-10** — probe-transport failures are no longer phantom (gh#25).
+  `SessionClassifier.classifyDetailed` flattened any rejected chats probe
+  (transport failure: `HPE_HEADER_OVERFLOW`, timeout, 5xx) into
+  `state: "phantom"`, and the factory wiring in `createCookieSession`
+  swallowed probe rejections a second time (`.catch(() => [])`). A valid
+  session on a header-overflow environment classified phantom (the init
+  HTML fetch uses native `fetch` while the probe rides the SDK's 16 KB
+  axios cap), and `list`'s phantom flow then offered "Attempt session
+  recovery now?" — rotating cookies pointlessly against a dead transport.
+  The probe vocabulary gains `"unreachable"`:
+  `SessionProbeState = SessionState | "unreachable"` (`src/core/types.ts`,
+  canonical triple unchanged). `classifyDetailed` returns
+  `{ state: "unreachable", chatCount: 0, error }` with the captured cause;
+  the binary `classify()` rejects instead of inventing a session verdict
+  (callers keep their existing fallbacks: `activeProfiles` → non-live,
+  `list`'s classification-failure warn → no recovery prompt).
+  `resolveProfile` (explicit `-p` read commands) classifies via
+  `probeDetailed` and reports `session is unreachable` with
+  `AuthenticationError.sessionState = "unreachable"`; the fix-8 recovery
+  offer gate skips unreachable (a rotation cannot fix transport). `status
+  --verbose` renders `! unreachable` (never `! phantom`) and warns with the
+  cause; the PROBE column widened 14→16 to fit. Recovery behavior for
+  genuine live/phantom/dead verdicts is unchanged; `dead` detection (init
+  HTML failure / missing tokens) is unchanged; cookie capture, filtering,
+  and rotation paths are untouched. Invariant coverage:
+  `tests/auth-regression/invariant-probe-error-not-phantom.test.ts`;
+  vocabulary drift guards updated in
+  `tests/auth-regression/invariant-session-state-vocabulary.test.ts`.
+
