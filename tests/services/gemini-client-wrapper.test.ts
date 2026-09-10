@@ -181,6 +181,12 @@ function createProfileCookieLoader(storage: CookieStorage): ProfileCookieLoader 
   };
 }
 
+function axiosHeaderOverflowError(): Error & { code?: string } {
+  const e = new Error("Parse Error: Header overflow") as Error & { code?: string };
+  e.code = "HPE_HEADER_OVERFLOW";
+  return e;
+}
+
 function installGeminiReverseMock(overrides?: typeof mockOverrides): GeminiClientDeps {
   mockClientInstances = [];
   mockClientConstructorCallCount = 0;
@@ -1317,8 +1323,7 @@ describe("GeminiClientService", () => {
     });
 
     test("HPE_HEADER_OVERFLOW transport error -> actionable GeminiAPIError preserving cause", async () => {
-      const original = new Error("Parse Error: Header overflow") as Error & { code?: string };
-      original.code = "HPE_HEADER_OVERFLOW";
+      const original = axiosHeaderOverflowError();
       const d = installGeminiReverseMock({
         chatsImplementation: () => {
           throw original;
@@ -1377,8 +1382,7 @@ describe("GeminiClientService", () => {
     });
 
     test("init() failure in listChats is translated (no raw parser error leak)", async () => {
-      const original = new Error("Parse Error: Header overflow") as Error & { code?: string };
-      original.code = "HPE_HEADER_OVERFLOW";
+      const original = axiosHeaderOverflowError();
       const d = installGeminiReverseMock({
         initImplementation: () => {
           throw original;
