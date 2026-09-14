@@ -1,4 +1,4 @@
-import type { Cookie, SessionState } from "../core/types.ts";
+import type { Cookie, SessionState, SessionStateOrUnreachable } from "../core/types.ts";
 import { CookieStore } from "./cookie-store.ts";
 import { isRoutableTo } from "./cookie-validation.ts";
 import { GEMINI_APP_URL, hasAnyExtractedInitToken } from "./auth-constants.ts";
@@ -12,7 +12,7 @@ export type { SessionState };
 // live/phantom/dead vocabulary (src/core/types.ts) — a transport failure in
 // the chats probe is not a session verdict and must never be folded into
 // phantom (which gates recovery offers).
-export type ProbeState = SessionState | "unreachable";
+export type ProbeState = SessionStateOrUnreachable;
 
 export interface SessionProbeResult {
   state: ProbeState;

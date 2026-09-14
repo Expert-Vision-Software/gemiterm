@@ -1,9 +1,4 @@
-import type { SessionState } from "./types.ts";
-
-// "unreachable" is the probe-only extension from issue 25: a transport
-// failure during classification is not one of the core session verdicts
-// (live/phantom/dead) but still flows through typed error fields.
-export type SessionStateOrUnreachable = SessionState | "unreachable";
+import type { SessionStateOrUnreachable } from "./types.ts";
 
 export class GemitermError extends Error {
   constructor(message: string) {

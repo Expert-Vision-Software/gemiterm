@@ -209,8 +209,8 @@ describe("formatProfileTable", () => {
       ] as ProfileStatusWithProbe[],
       { showProbe: true },
     );
-    expect(result).toContain("unreachable");
-    expect(result).toContain("phantom");
+    expect(result).toContain("! unreachable");
+    expect(result).toContain("! phantom");
     expect(result).not.toContain("dead");
   });
 });

@@ -9,7 +9,7 @@ import { CookieValidator, findRoutableCookieValue, isRoutableTo } from "./cookie
 import { CookieStore } from "./cookie-store.ts";
 import { RotationCooldown, type RotationCooldownSeam } from "./rotation-cooldown.ts";
 import { SessionKeepalive, type SessionKeepaliveOptions } from "./session-keepalive.ts";
-import { SessionClassifier, type SessionProbeResult } from "./session-classifier.ts";
+import { SessionClassifier, type ProbeState, type SessionProbeResult } from "./session-classifier.ts";
 
 // The facade is the only sanctioned import surface outside src/auth — re-export the probe result type for commands.
 export type { SessionProbeResult } from "./session-classifier.ts";
@@ -224,7 +224,7 @@ export class CookieSession {
     }
   }
 
-  async probe(profile: string): Promise<SessionProbeResult["state"]> {
+  async probe(profile: string): Promise<ProbeState> {
     return await this.deps.classifier.classify(profile);
   }
 

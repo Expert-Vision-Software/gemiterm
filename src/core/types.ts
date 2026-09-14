@@ -29,6 +29,11 @@ export interface Conversation {
 
 export type SessionState = "live" | "phantom" | "dead";
 
+// Probe-only extension (issue 25): a transport failure during the chats
+// probe is not a session verdict. Single canonical alias — the classifier
+// (`ProbeState`) and `AuthenticationError.sessionState` both re-export it.
+export type SessionStateOrUnreachable = SessionState | "unreachable";
+
 export interface AuthResult {
   cookies: Cookie[];
   expiresAt: Date | null;
