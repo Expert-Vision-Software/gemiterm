@@ -575,7 +575,12 @@ test("propagates other PlaywrightCliError failures", async () => {
       const bunx = createMockRunner("bunx");
       bunx._run.mockResolvedValue({ exitCode: 0, stdout: "0.1.17", stderr: "" });
 
-      const d = new PlaywrightCliDriver({ probeRunners: [direct, bunx] });
+      const d = new PlaywrightCliDriver({
+        probeRunners: [direct, bunx],
+        // probeRunners are synthetic mocks; the real WSL interop guard must not
+        // skip the direct candidate based on the host's actual PATH (issue #27).
+        wslDetector: async () => false,
+      });
 
       await d.runCli(["--version"]);
 
