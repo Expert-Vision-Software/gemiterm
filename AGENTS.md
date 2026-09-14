@@ -50,7 +50,7 @@ Add new helpers to those modules; a new exemption must be added to the lint scri
 - The only auth surface is `src/auth/cookie-session.ts` (`CookieSession`), wired via `createCookieSession`. Nothing outside `src/auth/` imports the collaborators directly.
 - **No cookie-name filtering, anywhere, ever** — capture/persistence filter by domain only (`filterToGeminiDomains`).
 - **Auth-regression gate**: a change touching an auth-sensitive path (`AUTH_SENSITIVE_PATHS`, read by `scripts/check-auth-gate.{sh,ps1}`) must also touch `tests/auth-regression/` and append a `docs/auth-cookie-lifecycle.md` changelog entry, in the same change. Opt-out `SKIP_AUTH_REGRESSION_GATE=1` with a stated reason (audited). Blocking in CI (`.github/workflows/test.yml`).
-- **Docs authority order** (binding, `docs/README.md`): `docs/auth-cookie-lifecycle.md` (canonical) > `docs/cookie-ablation-findings.md` (empirical) > `docs/archive/**` (non-normative history) > everything else must not contradict. Resolve conflicts by rule, not judgment.
+- **Docs authority order** (binding, `docs/README.md`): `docs/auth-cookie-lifecycle.md` (canonical) > `docs/cookie-ablation-findings.md` (empirical) > everything else must not contradict. Resolve conflicts by rule, not judgment.
 - Standing traps (don't re-litigate): never probe with the SDK's static `models()` table (use the init-GET + listChats classifier); cookie `expires` is meaningless for decay (server-side PSIDTS supersession is undetectable locally); no cookie-name filtering.
 - **WSL interop guard (issue #27)**: under WSL, the driver probe rejects `playwright-cli` resolved under `/mnt/*` (Windows interop — its `state-save` re-resolves POSIX paths against the current drive, landing state files on `C:\tmp`) and falls through to `bunx @playwright/cli`; WSL users need a distro-native playwright-cli (`npm i -g @playwright/cli` inside the distro). Seams: `wslDetector`/`binaryPathResolver` in `PlaywrightCliDriverOptions`; invariant in `tests/auth-regression/invariant-wsl-interop-guard.test.ts`.
 - **Sensitive driver surface (do not modify lightly)** — `src/services/playwright-cli-driver.ts` is regression-gated: `openHeaded` (persistent-profile argv WITH `--headed`), `openHeadless` (persistent-profile argv WITHOUT `--headed` — the headless rotation path), and `stateSave` (wraps the `state-save` subcommand). The only PSIDTS rotation engine is `src/auth/browser-refresher.ts` (headless persistent-profile page load → poll `cookie-list` → `state-save` → persist full jar). Deleted in the fix-1 cutover, do not resurrect: `src/services/{auth-service,cookie-monitor,cookie-storage-service,profile-auth-manager}.ts` (and their tests).
@@ -58,6 +58,12 @@ Add new helpers to those modules; a new exemption must be added to the lint scri
 
 ### Prompt facade
 `src/cli/utils/prompts.ts` is the only module allowed to import `@inquirer/*`. All interactive I/O routes through it. `gemiterm list -i` is the only chat-list TUI entry point; non-interactive `list` output must stay byte-equivalent (regression => `tests/integration/commands/list.test.ts`).
+
+## Skills: testing quality gates
+
+- **`test-baselining`** — run tests, compare against `docs/agents/testing-baseline.xml` (protocol: `docs/agents/testing-protocol.md`). Use for: "did we break anything?", pre-commit/PR verification, any request to evaluate or update the test baseline. `init` (once, already done), `eval` (default), `update` (only on PASS + threshold exceeded). Protocol thresholds are the live source.
+- **`regression-checking`** — interprets test-baselining results into a PROCEED / STOP / REVIEW decision. Use when deciding whether to proceed or stop after a test run, or when asked "is it safe to commit?".
+- Chain: `regression-checking` loads `test-baselining` for execution; run `eval` before every meaningful change lands, `update` only when the user confirms new numbers are acceptable.
 
 ## OpenSpec workflow
 
