@@ -1,5 +1,5 @@
-import { getProfileDir, getTempFilePath } from "../infrastructure/path-utils.ts";
-import { readJsonFile, removeDir } from "../infrastructure/io.ts";
+import { getProfileDir, getTempFilePath, isWSL, isWindowsInteropPath } from "../infrastructure/path-utils.ts";
+import { IOError, readJsonFile, removeDir } from "../infrastructure/io.ts";
 import type { Cookie } from "../core/types.ts";
 
 const CLI_BIN_DIRECT = "playwright-cli";
@@ -23,10 +23,16 @@ export class PlaywrightCliError extends Error {
   }
 }
 
+const WSL_INTEROP_HINT =
+  "Under WSL this usually means the Windows playwright-cli was resolved via " +
+  "/mnt/* interop; install a distro-native one with 'npm i -g @playwright/cli' " +
+  "inside the WSL distro (issue #27).";
+
 export class PlaywrightCliUnavailableError extends Error {
-  constructor() {
+  constructor(message?: string) {
     super(
-      "Playwright CLI not found. Install it with 'npm i -g @playwright/cli' " +
+      message ??
+        "Playwright CLI not found. Install it with 'npm i -g @playwright/cli' " +
         "(or 'bun add -g @playwright/cli'), or ensure 'bunx' is available to run '@playwright/cli'.",
     );
     this.name = "PlaywrightCliUnavailableError";
@@ -94,6 +100,27 @@ export interface PlaywrightCliDriverOptions {
   runner?: PlaywrightRunner;
   profileDirResolver?: (profileName: string) => string;
   probeRunners?: PlaywrightRunner[];
+  wslDetector?: () => Promise<boolean>;
+  binaryPathResolver?: (bin: string) => Promise<string[]>;
+}
+
+// Default `binaryPathResolver`: `which -a <bin>`, one resolved path per line.
+// Empty on failure — the probe then falls back to the plain version check.
+async function whichAll(bin: string): Promise<string[]> {
+  try {
+    const proc = Bun.spawn(["which", "-a", bin], {
+      stdout: "pipe",
+      stderr: "ignore",
+      stdin: "ignore",
+      windowsHide: true,
+    });
+    const stdout = await new Response(proc.stdout).text();
+    const code = await proc.exited;
+    if (code !== 0) return [];
+    return stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 export class PlaywrightCliDriver {
@@ -101,7 +128,10 @@ export class PlaywrightCliDriver {
   private runner: PlaywrightRunner;
   private readonly profileDirResolver: (profileName: string) => string;
   private readonly probeRunners: PlaywrightRunner[];
+  private readonly wslDetector: () => Promise<boolean>;
+  private readonly binaryPathResolver: (bin: string) => Promise<string[]>;
   private probed = false;
+  private unavailableMessage?: string;
 
   constructor(opts: PlaywrightCliDriverOptions = {}) {
     this.logger = opts.logger;
@@ -111,6 +141,8 @@ export class PlaywrightCliDriver {
       new BunPlaywrightRunner("direct"),
       new BunPlaywrightRunner("bunx"),
     ];
+    this.wslDetector = opts.wslDetector ?? isWSL;
+    this.binaryPathResolver = opts.binaryPathResolver ?? whichAll;
     this.probed = opts.runner !== undefined;
   }
 
@@ -131,7 +163,7 @@ export class PlaywrightCliDriver {
     if (!this.probed) {
       const ok = await this.isAvailable();
       if (!ok) {
-        throw new PlaywrightCliUnavailableError();
+        throw new PlaywrightCliUnavailableError(this.unavailableMessage);
       }
     }
     const result = await this.runner.run(args);
@@ -199,7 +231,12 @@ export class PlaywrightCliDriver {
     const tempPath = getTempFilePath("gemiterm-state", ".json");
     try {
       await this.stateSave(session, tempPath);
-      const state = await readJsonFile<{ cookies?: unknown[] }>(tempPath);
+      let state: { cookies?: unknown[] };
+      try {
+        state = await readJsonFile<{ cookies?: unknown[] }>(tempPath);
+      } catch (err) {
+        throw this.classifyStateReadError(tempPath, err);
+      }
       const cookies = Array.isArray(state.cookies) ? state.cookies : [];
       return cookies
         .filter((c): c is Record<string, unknown> => c !== null && typeof c === "object")
@@ -207,6 +244,29 @@ export class PlaywrightCliDriver {
     } finally {
       await removeDir(tempPath);
     }
+  }
+
+  // Distinguish "state-save claimed success but the file is not there" (the
+  // WSL interop signature — the Windows binary wrote it to the Windows
+  // filesystem, issue #27) from "the file exists but is not valid JSON".
+  private classifyStateReadError(path: string, err: unknown): Error {
+    if (!(err instanceof IOError)) {
+      return err instanceof Error ? err : new Error(String(err));
+    }
+    const raw = err.cause;
+    const code = (raw as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") {
+      return new IOError(
+        `playwright-cli reported success writing '${path}' but the file was not found. ` +
+          WSL_INTEROP_HINT,
+        raw instanceof Error ? raw : err,
+      );
+    }
+    return new IOError(
+      `readJsonFile: state file '${path}' is not valid JSON; the playwright-cli ` +
+        `write may have failed silently. ${WSL_INTEROP_HINT}`,
+      err,
+    );
   }
 
   async stateSave(session: string, path: string): Promise<void> {
@@ -234,6 +294,9 @@ export class PlaywrightCliDriver {
 
   private async probe(): Promise<boolean> {
     for (const candidate of this.probeRunners) {
+      if (candidate.strategy === "direct" && (await this.isWindowsInteropBinary())) {
+        continue;
+      }
       if (await this.tryVersion(candidate)) {
         this.runner = candidate;
         return true;
@@ -241,6 +304,27 @@ export class PlaywrightCliDriver {
     }
     this.logger?.warn("Neither 'playwright-cli' nor 'bunx @playwright/cli' is available on this system.");
     return false;
+  }
+
+  // WSL guard (issue #27): a `playwright-cli` resolved under /mnt/* is the
+  // WINDOWS install reached through interop. It accepts POSIX paths but
+  // re-resolves them against the current drive (`/tmp/x` -> `C:\tmp\x`), so
+  // state-save round-trips land outside the WSL filesystem. Require a
+  // distro-native binary and fall through to the bunx strategy instead.
+  private async isWindowsInteropBinary(): Promise<boolean> {
+    if (!(await this.wslDetector())) {
+      return false;
+    }
+    const paths = await this.binaryPathResolver(CLI_BIN_DIRECT);
+    if (paths.length === 0 || !paths.every(isWindowsInteropPath)) {
+      return false;
+    }
+    this.unavailableMessage =
+      "playwright-cli resolved only through Windows interop (" +
+      paths.join(", ") +
+      "). " + WSL_INTEROP_HINT;
+    this.logger?.warn(this.unavailableMessage);
+    return true;
   }
 
   private async tryVersion(r: PlaywrightRunner): Promise<boolean> {

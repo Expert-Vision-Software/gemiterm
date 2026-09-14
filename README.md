@@ -173,6 +173,7 @@ GEMITERM_TAG=v2.4.0-rc.1 bash install.sh
 - **[Bun](https://bun.sh)** runtime ≥ 1.0.0 (only required for `bunx` / `bun install` use — not needed for install scripts)
 - **Chromium browser** — GemiTerm prefers your system Chrome / Edge; otherwise it installs Playwright's Chromium automatically (`gemiterm install-browser`)
 - **Google Account** with access to [Gemini](https://gemini.google.com)
+- **WSL users**: playwright-cli must be installed *inside* the distro (`npm i -g @playwright/cli`). A Windows playwright-cli reached through `/mnt/*` PATH interop is rejected by the driver probe — it writes state files to the Windows filesystem (e.g. `C:\tmp`), breaking auth renew (issue #27). GemiTerm falls back to `bunx @playwright/cli` automatically when available.
 
 ## Commands
 
