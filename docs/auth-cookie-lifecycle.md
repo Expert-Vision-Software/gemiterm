@@ -1176,6 +1176,17 @@ do not re-litigate them.
   `recover-<profile>` session name, null propagation, and argument order.
 
 
+- **2026-09-13** - transport-error hygiene on the client wrapper (issue #24).
+  `GeminiClientService` moved `await this.init()` inside each method's
+  try/catch (`src/services/gemini-client-wrapper.ts`) so init-path failures
+  route through `translateError()` instead of leaking raw axios/llhttp parser
+  errors, and `translateError()` gained an HPE_HEADER_OVERFLOW /
+  UND_ERR_HEADERS_OVERFLOW / "Parse Error: Header overflow" branch that maps
+  to `GeminiAPIError` with `.cause` preserved. Auth-error classification is
+  untouched: `AuthError` is still checked first and matched by type, not
+  message. Drift-guarded by
+  `tests/auth-regression/invariant-transport-error-hygiene.test.ts`.
+
 - **2026-09-14** - WSL Windows-interop playwright-cli guard (issue #27).
   Under WSL, `playwright-cli` can resolve via PATH interop to the WINDOWS
   install (`/mnt/c/...`). That binary accepts POSIX paths but re-resolves
