@@ -1,5 +1,6 @@
 ## [Unreleased]
 
+
 ---
 
 ## [3.1.0] - 2026-09-14
@@ -9,6 +10,7 @@
 - **WSL**: the Playwright driver probe now rejects a `playwright-cli` binary resolved under `/mnt/*` (Windows interop — its `state-save` re-resolves POSIX paths against the current drive, silently landing session state files on `C:\tmp`) and falls through to `bunx @playwright/cli`. WSL users should install a distro-native playwright-cli (`npm i -g @playwright/cli` inside the distro). (#27)
 - Large Gemini API responses no longer fail with `ParseError: Parse error / Max header size exceeded` (undici `HPE_HEADER_OVERFLOW`): `gemini-web-sdk` bumped to `^2.3.0` (max response header size fix) and the transport error is translated into an actionable message. (#24)
 - Test-only: `profile-lifecycle` status/list assertions no longer flake when chalk colorizes output on a TTY (`bun run test:all` run interactively).
+- **WSL**: building from source now requires Bun ≥ 1.4.2. Bun 1.4.0's `bun build --compile` fails under WSL with `Error truncating ELF file: EACCES: Permission denied (ftruncate())` regardless of output location (native filesystem included); fixed upstream in 1.4.2. Run `bun upgrade` inside the distro. No script workaround needed — `bun run build` / `build:linux` work unchanged on Bun ≥ 1.4.2, including outputs on `/mnt/*` paths.
 
 ---
 
