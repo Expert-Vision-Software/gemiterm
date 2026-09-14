@@ -23,6 +23,12 @@ interface LifecycleHarness {
   logSpy: ReturnType<typeof spyOn>;
 }
 
+// chalk colorizes when stdout is a TTY (e.g. interactive `bun run test:all`),
+// wrapping rendered strings in ANSI escapes; assertions must see plain text.
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 function makeStatus(name: string, overrides: Partial<ProfileStatus> = {}): ProfileStatus {
   return {
     name,
@@ -132,7 +138,8 @@ describe("ProfileLifecycle", () => {
       expect(tableArg.find((s) => s.name === "work")?.isDefault).toBe(true);
       expect(tableArg.find((s) => s.name === "personal")?.isDefault).toBe(false);
 
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Profiles"));
+      const output = stripAnsi(logSpy.mock.calls.map((c) => String(c[0])).join("\n"));
+      expect(output).toContain("Profiles");
     });
 
     test("prints guidance when no profiles exist", async () => {
@@ -142,9 +149,8 @@ describe("ProfileLifecycle", () => {
 
       await lifecycle.manageProfiles("list", {});
 
-      expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining("No profiles found"),
-      );
+      const output = stripAnsi(logSpy.mock.calls.map((c) => String(c[0])).join("\n"));
+      expect(output).toContain("No profiles found");
     });
   });
 
@@ -158,7 +164,7 @@ describe("ProfileLifecycle", () => {
 
       await lifecycle.manageProfiles("status", {});
 
-      const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+      const output = stripAnsi(logSpy.mock.calls.map((c) => String(c[0])).join("\n"));
       expect(output).toContain("Configuration");
       expect(output).toContain("Directory: /tmp/gemiterm");
       expect(output).toContain("Profiles");
@@ -174,9 +180,8 @@ describe("ProfileLifecycle", () => {
       const result = await lifecycle.manageProfiles("status", {});
 
       expect(result).toEqual({ exitCode: 2 });
-      expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining("No profiles found"),
-      );
+      const output = stripAnsi(logSpy.mock.calls.map((c) => String(c[0])).join("\n"));
+      expect(output).toContain("No profiles found");
     });
 
     test("logs no-valid-sessions message when profiles exist but none are active", async () => {
@@ -255,7 +260,8 @@ describe("ProfileLifecycle", () => {
       await lifecycle.manageProfiles("delete", { name: "work" });
 
       expect(profileManager.delete).not.toHaveBeenCalled();
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Cancelled."));
+      const output = stripAnsi(logSpy.mock.calls.map((c) => String(c[0])).join("\n"));
+      expect(output).toContain("Cancelled.");
     });
 
     test("non-TTY without --yes throws a clear error and does NOT delete", async () => {
@@ -419,9 +425,8 @@ describe("ProfileLifecycle", () => {
       await lifecycle.manageProfiles("auth", {});
 
       expect(cookieSession.captureLogin).not.toHaveBeenCalled();
-      expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Continuing with current default"),
-      );
+      const output = stripAnsi(logSpy.mock.calls.map((c) => String(c[0])).join("\n"));
+      expect(output).toContain("Continuing with current default");
     });
   });
 

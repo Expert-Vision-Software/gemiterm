@@ -2,6 +2,16 @@
 
 ---
 
+## [3.1.0] - 2026-09-14
+
+### Fixed
+
+- **WSL**: the Playwright driver probe now rejects a `playwright-cli` binary resolved under `/mnt/*` (Windows interop — its `state-save` re-resolves POSIX paths against the current drive, silently landing session state files on `C:\tmp`) and falls through to `bunx @playwright/cli`. WSL users should install a distro-native playwright-cli (`npm i -g @playwright/cli` inside the distro). (#27)
+- Large Gemini API responses no longer fail with `ParseError: Parse error / Max header size exceeded` (undici `HPE_HEADER_OVERFLOW`): `gemini-web-sdk` bumped to `^2.3.0` (max response header size fix) and the transport error is translated into an actionable message. (#24)
+- Test-only: `profile-lifecycle` status/list assertions no longer flake when chalk colorizes output on a TTY (`bun run test:all` run interactively).
+
+---
+
 ## [3.0.2] - 2026-08-24
 
 ### Changed
