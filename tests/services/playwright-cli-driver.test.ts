@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, mock, spyOn } from "bun:test";
 import { writeFileSync } from "node:fs";
+import { IOError } from "../../src/infrastructure/io.ts";
 import {
   BunPlaywrightRunner,
   PlaywrightCliDriver,
@@ -616,6 +617,135 @@ test("propagates other PlaywrightCliError failures", async () => {
       await d.isAvailable();
 
       expect(candidate._run).toHaveBeenCalledTimes(1);
+    });
+  });
+  describe("WSL interop guard (issue #27)", () => {
+    const interopPaths = ["/mnt/c/nvm4w/nodejs/playwright-cli", "/mnt/c/Users/diego/AppData/Roaming/npm/playwright-cli"];
+
+    function wslDriverOpts(extra: Partial<ConstructorParameters<typeof PlaywrightCliDriver>[0]> = {}) {
+      return {
+        wslDetector: async () => true,
+        binaryPathResolver: async () => interopPaths,
+        ...extra,
+      };
+    }
+
+    test("rejects /mnt/*-resolved direct binary and falls back to bunx", async () => {
+      const direct = createMockRunner("direct");
+      direct._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
+      const bunx = createMockRunner("bunx");
+      bunx._run.mockResolvedValue({ exitCode: 0, stdout: "0.1.17", stderr: "" });
+
+      const d = new PlaywrightCliDriver({
+        probeRunners: [direct, bunx],
+        ...wslDriverOpts(),
+      });
+      await d.runCli(["--version"]);
+
+      expect(d.strategy).toBe("bunx");
+      expect(direct._run).not.toHaveBeenCalled(); // interop binary never version-probed
+      expect(bunx._run).toHaveBeenCalled();
+    });
+
+    test("accepts a distro-native direct binary under WSL", async () => {
+      const direct = createMockRunner("direct");
+      direct._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
+      const bunx = createMockRunner("bunx");
+      const d = new PlaywrightCliDriver({
+        probeRunners: [direct, bunx],
+        ...wslDriverOpts({ binaryPathResolver: async () => ["/usr/local/bin/playwright-cli"] }),
+      });
+      await d.runCli(["--version"]);
+
+      expect(d.strategy).toBe("direct");
+      expect(bunx._run).not.toHaveBeenCalled();
+    });
+
+    test("runCli rejects with actionable interop message when no native binary and bunx fails", async () => {
+      const direct = createMockRunner("direct");
+      const bunx = createMockRunner("bunx");
+      bunx._run.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "" });
+      const d = new PlaywrightCliDriver({
+        probeRunners: [direct, bunx],
+        ...wslDriverOpts(),
+      });
+
+      try {
+        await d.runCli(["--version"]);
+        expect.unreachable();
+      } catch (err) {
+        expect(err).toBeInstanceOf(PlaywrightCliUnavailableError);
+        expect((err as Error).message).toContain("/mnt/c");
+        expect((err as Error).message).toContain("distro-native");
+      }
+    });
+
+    test("guard is inert when not running under WSL", async () => {
+      const direct = createMockRunner("direct");
+      direct._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
+      const bunx = createMockRunner("bunx");
+      const d = new PlaywrightCliDriver({
+        probeRunners: [direct, bunx],
+        wslDetector: async () => false,
+        binaryPathResolver: async () => interopPaths,
+      });
+      await d.runCli(["--version"]);
+
+      expect(d.strategy).toBe("direct");
+    });
+
+    test("mixed resolution (some native) keeps the direct candidate", async () => {
+      const direct = createMockRunner("direct");
+      direct._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
+      const bunx = createMockRunner("bunx");
+      const d = new PlaywrightCliDriver({
+        probeRunners: [direct, bunx],
+        ...wslDriverOpts({
+          binaryPathResolver: async () => ["/mnt/c/nvm4w/nodejs/playwright-cli", "/usr/bin/playwright-cli"],
+        }),
+      });
+      await d.runCli(["--version"]);
+
+      expect(d.strategy).toBe("direct");
+    });
+  });
+
+  describe("cookieListFromState read-failure classification (issue #27)", () => {
+    test("missing state file after successful state-save names the interop problem and carries .cause", async () => {
+      const runner = createMockRunner();
+      runner._run.mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" }); // state-save "succeeds", writes nothing
+      const d = new PlaywrightCliDriver({ runner });
+
+      try {
+        await d.cookieListFromState("sess1");
+        expect.unreachable();
+      } catch (err) {
+        expect(err).toBeInstanceOf(IOError);
+        expect((err as Error).message).toContain("not found");
+        expect((err as Error).message).toContain("distro-native");
+        expect((err as IOError).cause).toBeInstanceOf(Error);
+        expect(((err as IOError).cause as NodeJS.ErrnoException).code).toBe("ENOENT");
+      }
+    });
+
+    test("invalid JSON state file gets a distinct message with .cause", async () => {
+      const runner = createMockRunner();
+      runner._run.mockImplementationOnce(async (args) => {
+        const savedPath = args[args.indexOf("state-save") + 1] ?? "";
+        writeFileSync(savedPath, "{not valid json", "utf-8");
+        return { exitCode: 0, stdout: "", stderr: "" };
+      });
+      const d = new PlaywrightCliDriver({ runner });
+
+      try {
+        await d.cookieListFromState("sess1");
+        expect.unreachable();
+      } catch (err) {
+        expect(err).toBeInstanceOf(IOError);
+        expect((err as Error).message).toContain("not valid JSON");
+        expect((err as Error).message).not.toContain("not found");
+        expect((err as IOError).cause).toBeInstanceOf(IOError);
+      }
     });
   });
 });

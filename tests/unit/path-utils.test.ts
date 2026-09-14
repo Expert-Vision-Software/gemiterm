@@ -13,6 +13,7 @@ import {
   getDefaultProfileMarkerPath,
   getLogFilePath,
   isWSL,
+  isWindowsInteropPath,
   getProjectRoot,
   getPackageJson,
   STORAGE_STATE_FILE,
@@ -253,6 +254,28 @@ describe("path-utils", () => {
       expect(getDefaultProfileMarkerPath()).toBe(
         join("/tmp/gemiterm", PROFILES_DIR, DEFAULT_PROFILE_MARKER),
       );
+    });
+  });
+
+  describe("isWindowsInteropPath", () => {
+    test("matches /mnt/<letter>/ paths", () => {
+      expect(isWindowsInteropPath("/mnt/c/Users/diego/AppData/Roaming/npm/playwright-cli")).toBe(true);
+      expect(isWindowsInteropPath("/mnt/c/tmp/state.json")).toBe(true);
+      expect(isWindowsInteropPath("/mnt/C/nvm4w/nodejs/playwright-cli")).toBe(true);
+    });
+
+    test("matches bare /mnt/<letter>", () => {
+      expect(isWindowsInteropPath("/mnt/c")).toBe(true);
+    });
+
+    test("rejects distro-native paths", () => {
+      expect(isWindowsInteropPath("/tmp/gemiterm-state-1.json")).toBe(false);
+      expect(isWindowsInteropPath("/usr/bin/playwright-cli")).toBe(false);
+      expect(isWindowsInteropPath("/home/diego/.npm-global/bin/playwright-cli")).toBe(false);
+      expect(isWindowsInteropPath("/mnt")).toBe(false);
+      expect(isWindowsInteropPath("/mntool/bin/x")).toBe(false);
+      expect(isWindowsInteropPath("C:\\tmp\\state.json")).toBe(false);
+      expect(isWindowsInteropPath("")).toBe(false);
     });
   });
 
