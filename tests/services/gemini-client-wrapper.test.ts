@@ -4,6 +4,7 @@ import { ChatMetadataStorage } from "../../src/services/chat-metadata-storage.ts
 import { setupTestConfig, teardownTestConfig } from "../setup.ts";
 import type { CookieStorage } from "../../src/infrastructure/storage.ts";
 import type { Cookie } from "../../src/core/types.ts";
+import { GeminiAPIError } from "../../src/core/errors.ts";
 import type { GeminiClientDeps, ProfileCookieLoader } from "../../src/services/gemini-client-wrapper.ts";
 
 interface RawChatRow {
@@ -1314,6 +1315,98 @@ describe("GeminiClientService", () => {
       const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
 
       await expect(service.listChats()).rejects.toThrow("generic gemini error");
+    });
+
+    function headerOverflowError(shape: "code" | "message"): Error {
+      if (shape === "code") {
+        const e = new Error("Parse Error: Header overflow") as Error & { code?: string };
+        e.code = "HPE_HEADER_OVERFLOW";
+        return e;
+      }
+      return new Error("Parse Error: Header overflow");
+    }
+
+    const HEADER_OVERFLOW_HINT = "exceeded the local HTTP parser limit";
+
+    test("HPE_HEADER_OVERFLOW -> actionable GeminiAPIError with cause", async () => {
+      const d = installGeminiReverseMock({
+        chatsImplementation: () => {
+          throw headerOverflowError("code");
+        },
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      const errPromise = service.listChats();
+      expect(errPromise).rejects.toBeInstanceOf(GeminiAPIError);
+      const err = await errPromise.catch((e: unknown) => e as GeminiAPIError);
+      expect(err.message).toContain(HEADER_OVERFLOW_HINT);
+      expect(err.cause).toBeInstanceOf(Error);
+      expect((err.cause as Error).message).toBe("Parse Error: Header overflow");
+    });
+
+    test("UND_ERR_HEADERS_OVERFLOW -> actionable GeminiAPIError", async () => {
+      const d = installGeminiReverseMock({
+        chatsImplementation: () => {
+          const e = new Error("Response header overflow") as Error & { code?: string };
+          e.code = "UND_ERR_HEADERS_OVERFLOW";
+          throw e;
+        },
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      await expect(service.listChats()).rejects.toThrow(HEADER_OVERFLOW_HINT);
+    });
+
+    test("message-match 'Parse Error: Header overflow' -> actionable GeminiAPIError", async () => {
+      const d = installGeminiReverseMock({
+        chatsImplementation: () => {
+          throw headerOverflowError("message");
+        },
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      const err = await service.listChats().catch((e: unknown) => e as GeminiAPIError);
+      expect(err).toBeInstanceOf(GeminiAPIError);
+      expect(err.message).toContain(HEADER_OVERFLOW_HINT);
+      expect(err.message).not.toContain("Unexpected error");
+      expect(err.message).not.toBe("Parse Error: Header overflow");
+    });
+
+    test("init-path header overflow from listChats() is translated (no raw leakage)", async () => {
+      const d = installGeminiReverseMock({
+        initImplementation: () => {
+          throw headerOverflowError("message");
+        },
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      const err = await service.listChats().catch((e: unknown) => e as GeminiAPIError);
+      expect(err).toBeInstanceOf(GeminiAPIError);
+      expect(err.message).toContain(HEADER_OVERFLOW_HINT);
+      expect(err.message).not.toBe("Parse Error: Header overflow");
+    });
+
+    test("init-path header overflow from fetchChat() is translated", async () => {
+      const d = installGeminiReverseMock({
+        initImplementation: () => {
+          const e = new Error("Parse Error: Header overflow") as Error & { code?: string };
+          e.code = "HPE_HEADER_OVERFLOW";
+          throw e;
+        },
+      });
+
+      const { GeminiClientService } = await import("../../src/services/gemini-client-wrapper.ts");
+      const service = new GeminiClientService({ secure1psid: "testsid" }, logger, undefined, undefined, d);
+
+      await expect(service.fetchChat("conv-1")).rejects.toThrow(HEADER_OVERFLOW_HINT);
     });
   });
 
