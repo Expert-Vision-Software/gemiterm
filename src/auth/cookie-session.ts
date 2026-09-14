@@ -224,7 +224,7 @@ export class CookieSession {
     }
   }
 
-  async probe(profile: string): Promise<SessionState> {
+  async probe(profile: string): Promise<SessionProbeResult["state"]> {
     return await this.deps.classifier.classify(profile);
   }
 

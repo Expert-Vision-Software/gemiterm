@@ -55,6 +55,22 @@ describe("auth-regression: classifier truth table", () => {
     expect(probeChats).not.toHaveBeenCalled();
   });
 
+  // Issue 25: a rejected chats probe is a transport verdict, not a session
+  // verdict — it must never be folded into phantom, which gates recovery.
+  test("unreachable: probeChats rejection carries error and is never phantom", async () => {
+    await seedJar();
+    const boom = new Error("HPE_HEADER_OVERFLOW");
+    const classifier = new SessionClassifier({
+      fetchInitHtml: mock(async () => TOKEN_HTML),
+      probeChats: mock(async () => {
+        throw boom;
+      }),
+    });
+    const result = await classifier.classifyDetailed("test-profile");
+    expect(result).toEqual({ state: "unreachable", chatCount: 0, error: boom });
+    expect(await classifier.classify("test-profile")).toBe("unreachable");
+  });
+
   test("deterministic across repeated runs on the same jar shape", async () => {
     await seedJar();
     const classifier = classifierFor(TOKEN_HTML, ["chat1"]);

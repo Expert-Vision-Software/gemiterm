@@ -1,5 +1,10 @@
 import type { SessionState } from "./types.ts";
 
+// "unreachable" is the probe-only extension from issue 25: a transport
+// failure during classification is not one of the core session verdicts
+// (live/phantom/dead) but still flows through typed error fields.
+export type SessionStateOrUnreachable = SessionState | "unreachable";
+
 export class GemitermError extends Error {
   constructor(message: string) {
     super(message);
@@ -9,8 +14,8 @@ export class GemitermError extends Error {
 
 export class AuthenticationError extends GemitermError {
   readonly profileName?: string;
-  readonly sessionState?: SessionState;
-  constructor(message = "Not authenticated. Please run 'gemiterm login' first.", opts: { profileName?: string; sessionState?: SessionState } = {}) {
+  readonly sessionState?: SessionStateOrUnreachable;
+  constructor(message = "Not authenticated. Please run 'gemiterm login' first.", opts: { profileName?: string; sessionState?: SessionStateOrUnreachable } = {}) {
     super(message);
     this.name = "AuthenticationError";
     this.profileName = opts.profileName;

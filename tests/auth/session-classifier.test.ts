@@ -88,10 +88,10 @@ describe("SessionClassifier", () => {
     expect(await makeClassifier(deps).classify("p")).toBe("dead");
   });
 
-  test("tokens present + chats probe failure -> phantom", async () => {
+  test("tokens present + chats probe failure -> unreachable (issue 25: never phantom)", async () => {
     writeJar("p");
     const deps = makeDeps({ probeChats: mock(async () => { throw new Error("AuthError"); }) });
-    expect(await makeClassifier(deps).classify("p")).toBe("phantom");
+    expect(await makeClassifier(deps).classify("p")).toBe("unreachable");
   });
 
   test("Cookie header includes gate cookies and excludes non-routable ones", async () => {
@@ -128,6 +128,16 @@ describe("classifyDetailed", () => {
     const deps = makeDeps({ fetchInitHtml: mock(async () => HTML_WITHOUT_TOKENS) });
     expect(await makeClassifier(deps).classifyDetailed("p")).toEqual({ state: "dead", chatCount: 0 });
     expect(deps.probeChats).not.toHaveBeenCalled();
+  });
+
+  test("chats probe rejection -> { state: 'unreachable', chatCount: 0, error }", async () => {
+    writeJar("p");
+    const boom = new Error("HPE_HEADER_OVERFLOW");
+    const deps = makeDeps({ probeChats: mock(async () => { throw boom; }) });
+    const result = await makeClassifier(deps).classifyDetailed("p");
+    expect(result.state).toBe("unreachable");
+    expect(result.chatCount).toBe(0);
+    expect(result.error).toBe(boom);
   });
 
   test("classify and classifyDetailed agree on state for the live case", async () => {

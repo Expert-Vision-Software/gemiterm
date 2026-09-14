@@ -8,9 +8,16 @@ const USER_AGENT =
 
 export type { SessionState };
 
+// Issue 25: "unreachable" is a probe-only extension of the core
+// live/phantom/dead vocabulary (src/core/types.ts) — a transport failure in
+// the chats probe is not a session verdict and must never be folded into
+// phantom (which gates recovery offers).
+export type ProbeState = SessionState | "unreachable";
+
 export interface SessionProbeResult {
-  state: SessionState;
+  state: ProbeState;
   chatCount: number;
+  error?: unknown;
 }
 
 export interface SessionClassifierDeps {
@@ -49,7 +56,7 @@ export class SessionClassifier {
     this.probeChats = deps.probeChats;
   }
 
-  async classify(profile: string): Promise<SessionState> {
+  async classify(profile: string): Promise<ProbeState> {
     return (await this.classifyDetailed(profile)).state;
   }
 
@@ -68,7 +75,14 @@ export class SessionClassifier {
       return { state: "dead", chatCount: 0 };
     }
 
-    const chats = await this.probeChats(profile).catch(() => []);
-    return { state: chats.length > 0 ? "live" : "phantom", chatCount: chats.length };
+    // A rejected probe is surfaced as "unreachable" with the cause attached
+    // (issue 25): callers gate recovery on live/phantom/dead only, so a
+    // header-overflow or 5xx can no longer trigger a bogus recovery prompt.
+    try {
+      const chats = await this.probeChats(profile);
+      return { state: chats.length > 0 ? "live" : "phantom", chatCount: chats.length };
+    } catch (error) {
+      return { state: "unreachable", chatCount: 0, error };
+    }
   }
 }

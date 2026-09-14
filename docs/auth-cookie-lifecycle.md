@@ -1175,3 +1175,22 @@ do not re-litigate them.
   0 fail). No production change; the invariant still asserts the
   `recover-<profile>` session name, null propagation, and argument order.
 
+
+- **2026-09-14** - issue 25: probe transport failures are no longer
+  misclassified as phantom. `classifyDetailed`
+  (`src/auth/session-classifier.ts`) used to convert a rejected
+  `probeChats` into `chats: []`, folding transport errors (header
+  overflow, timeouts, 5xx) into a phantom verdict whose recovery prompt
+  rotated cookies pointlessly. The probe result now carries a probe-only
+  `"unreachable"` state plus the captured `error`; the core `SessionState`
+  vocabulary (`live | phantom | dead`, `src/core/types.ts`) is unchanged
+  for output formatting, and `AuthenticationError.sessionState` widens to
+  `SessionState | "unreachable"`. Recovery gating skips unreachable
+  probes in `list` (`resolvePhantomEmptyResult`), the explicit-profile
+  recovery ladder (`src/cli/utils/recovery-offer.ts`), and `status`
+  renders `! unreachable` distinctly from `! phantom`
+  (`src/infrastructure/formatters.ts`). Dead detection, capture,
+  persistence, and rotation paths untouched. Invariants updated/added:
+  `tests/auth-regression/invariant-classifier-truth-table.test.ts`
+  (unreachable row), `invariant-session-state-vocabulary.test.ts`
+  (widened vocabulary, compile-time guards).
