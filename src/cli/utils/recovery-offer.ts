@@ -61,7 +61,10 @@ export async function resolveProfileWithRecovery(
       explicitProfile &&
       error.profileName === explicitProfile &&
       error.sessionState &&
-      error.sessionState !== "live"
+      error.sessionState !== "live" &&
+      // Issue 25: an unreachable probe is a transport failure, not a session
+      // verdict — never offer recovery for it.
+      error.sessionState !== "unreachable"
     ) {
       const recovery = await offerExplicitProfileRecovery(context, error.profileName, error.sessionState);
       if (recovery.recovered) {

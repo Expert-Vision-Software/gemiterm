@@ -940,6 +940,29 @@ describe("list command integration", () => {
       }
     });
 
+    // Issue 25: an unreachable probe is a transport failure, not a session
+    // verdict — no recovery offer, no retry, stdout stays the empty listing.
+    test("unreachable probe never offers recovery (TTY or not)", async () => {
+      const confirmSpy = spyOn(promptsModule, "confirm");
+      client.listChats = mock(async () => []);
+      cookieSession.probe = mock(async () => "unreachable" as const);
+      const errSpy = spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        await command.execute(["--profile", "work"], context);
+
+        expect(cookieSession.recover).not.toHaveBeenCalled();
+        expect(confirmSpy).not.toHaveBeenCalled();
+        expect(client.listChats).toHaveBeenCalledTimes(1);
+        const output = logSpy.mock.calls.map((c) => c[0]).join("\n");
+        expect(output).toContain("No conversations found");
+        expect(errSpy.mock.calls.map((c) => c[0]).join("\n")).not.toContain("recovery");
+      } finally {
+        errSpy.mockRestore();
+        restoreStdinTty();
+      }
+    });
+
     test("TTY decline leaves the empty output and skips recovery", async () => {
       setStdinTty(true);
       const confirmSpy = spyOn(promptsModule, "confirm").mockResolvedValue(false);

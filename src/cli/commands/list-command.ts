@@ -203,6 +203,16 @@ export class ListCommand implements CliCommand {
 
     if (state === "live") return chats;
 
+    // Issue 25: an unreachable probe is a transport failure, not a session
+    // verdict — recovery would rotate cookies pointlessly and re-fail. Warn
+    // and return the empty result; stdout stays untouched either way.
+    if (state === "unreachable") {
+      logger.warn(
+        `Session probe could not reach the server for profile '${profileName}' — skipping recovery offer.`,
+      );
+      return chats;
+    }
+
     let accepted: boolean;
     try {
       accepted = await confirm({
