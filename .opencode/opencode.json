@@ -9,7 +9,7 @@
     },
   },
   "mcp": {
-    "serena": {"enabled": true}
+    "serena": {"enabled": false}
   },
   "plugin": [
     "opencode-intellisearch"
