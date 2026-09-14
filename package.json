@@ -60,6 +60,6 @@
     "chalk": "^5.6.2",
     "cli-table3": "^0.6.5",
     "commander": "^15.0.0",
-    "gemini-web-sdk": "github:Expert-Vision-Software/gemini-web-sdk#e505edbb58ca581ee0139949fcf6c019da7780c6"
+    "gemini-web-sdk": "^2.3.0"
   }
 }
