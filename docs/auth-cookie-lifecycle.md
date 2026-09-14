@@ -1175,3 +1175,23 @@ do not re-litigate them.
   0 fail). No production change; the invariant still asserts the
   `recover-<profile>` session name, null propagation, and argument order.
 
+
+- **2026-09-14** - WSL Windows-interop playwright-cli guard (issue #27).
+  Under WSL, `playwright-cli` can resolve via PATH interop to the WINDOWS
+  install (`/mnt/c/...`). That binary accepts POSIX paths but re-resolves
+  them against the current drive (`/tmp/x` -> `C:\tmp\x`), so the
+  `cookieListFromState` state-save round-trip (rotation, capture) landed
+  outside the WSL filesystem and every renew failed with the bare
+  `readJsonFile failed ... ENOENT` while the valid jar accumulated under
+  `C:\tmp`. The driver probe now rejects `/mnt/*`-resolved binaries when
+  WSL is detected (`isWSL()` + `which -a` via injectable
+  `wslDetector`/`binaryPathResolver` seams) and falls through to the
+  `bunx @playwright/cli` strategy; if nothing distro-native remains it
+  fails with an actionable interop message naming the fix (`npm i -g
+  @playwright/cli` inside the distro). `cookieListFromState` read
+  failures are classified: missing-file errors carry the ENOENT cause and
+  the interop hint; invalid-JSON errors carry a distinct message. No
+  argv changes to `openHeaded`/`openHeadless`/`stateSave`; capture,
+  persistence, and rotation semantics untouched (domain-only policy).
+  Invariant coverage: `tests/auth-regression/invariant-wsl-interop-guard.test.ts`
+  (+ `tests/services/playwright-cli-driver.test.ts` classification tests).
