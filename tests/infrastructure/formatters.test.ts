@@ -6,6 +6,7 @@ import {
   formatChatList,
 } from "../../src/infrastructure/formatters.ts";
 import type { Message, ChatInfo, ProfileStatus } from "../../src/core/types.ts";
+import type { ProfileStatusWithProbe } from "../../src/infrastructure/formatters.ts";
 
 function makeMessages(): Message[] {
   return [
@@ -184,6 +185,33 @@ describe("formatProfileTable", () => {
     const result = formatProfileTable(statuses);
     expect(result).toContain("LAST USED");
     expect(result).not.toContain("N/A");
+  });
+
+  test("probe column renders unreachable distinctly from phantom (issue 25)", () => {
+    const result = formatProfileTable(
+      [
+        {
+          name: "unreach",
+          exists: true,
+          isActive: true,
+          expiresAt: null,
+          isDefault: false,
+          probe: { state: "unreachable", chatCount: 0 },
+        },
+        {
+          name: "phantomy",
+          exists: true,
+          isActive: true,
+          expiresAt: null,
+          isDefault: false,
+          probe: { state: "phantom", chatCount: 0 },
+        },
+      ] as ProfileStatusWithProbe[],
+      { showProbe: true },
+    );
+    expect(result).toContain("unreachable");
+    expect(result).toContain("phantom");
+    expect(result).not.toContain("dead");
   });
 });
 
