@@ -21,7 +21,6 @@ Gotchas:
 - On Windows run the bash scripts via Git Bash (`C:\Program Files\Git\bin\bash.exe`), not WSL `bash.exe` (the WSL relay fails with `execvpe(/bin/bash)`). `bun run lint:mediation`, `check:auth-gate`, and `canary:auth` all invoke `bash`.
 - `bun run lint:mediation:ps` is broken (hardcodes an old path) — always use the bash form. CI runs the bash form.
 - `bun run typecheck` will NOT catch type errors in `tests/` (tsconfig `include` is `src/**` only). Verify test-only type errors by running the test file.
-- `bun run test:parity` finds no test files. Real parity checks are `tests/parity/test-commands-parity.{sh,ps1}`, which diff against a Python `gemiterm` CLI on PATH (`GEMITERM_PYTHON_CLI`). Not run in CI.
 
 ## Architecture
 
