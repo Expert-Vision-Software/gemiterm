@@ -81,6 +81,10 @@ _Avoid_: presence, domain match
 Loading the on-disk jar into a ready-to-use client without any network call or browser. Arm-first: even a stale jar arms immediately; staleness spawns background work instead of blocking.
 _Avoid_: load, restore, login
 
+**Stale jar**:
+A jar whose on-disk snapshot is old enough that arming it spawns a detached refresh. Judged by snapshot age — deliberately distinct from Freshness, which judges the cookie's own expiry. A jar can be fresh (display) and stale (snapshot) at once.
+_Avoid_: expired, old session
+
 **Probe**:
 The read-only classification of a profile's session state: live, phantom, or dead. It is the only sanctioned validity oracle — freshness, cookie expiry, and static tables never decide validity.
 _Avoid_: health check, ping, validate
@@ -110,6 +114,10 @@ _Avoid_: strict/loose mode
 **Renew**:
 Re-running login for a profile that already exists.
 _Avoid_: refresh, re-auth
+
+**Login cancellation**:
+The user closing the headed browser mid-login. Treated as the user's choice, not a failure: the wait ends immediately and any pre-existing jar is preserved untouched. Distinct from a gate timeout, which is a genuine failure.
+_Avoid_: timeout (a different event), abort
 
 **Rotation**:
 A server-issued change of the PSIDTS value, captured by a headless page load and persisted as the full jar. Companion cookies are preserved — rotation replaces, never trims.
