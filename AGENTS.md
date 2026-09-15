@@ -75,3 +75,17 @@ Add new helpers to those modules; a new exemption must be added to the lint scri
 - Never comment out code — delete it (git remembers). Explanatory comments capture the *why* and link the governing spec/OpenSpec change.
 - Run `bun test --isolate` (or the focused file) + `bun run typecheck` after non-trivial changes.
 - Default to delegating to subagents (parallel for independent work, sequential when one feeds the next).
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage labels are used as-is (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` at repo root + `docs/adr/`, created lazily. See `docs/agents/domain.md`.
