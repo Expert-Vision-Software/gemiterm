@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TestingBaseline>
+    <Metadata>
+        <LastUpdated>2026-09-14T00:00:00Z</LastUpdated>
+        <BaselineId>BL-001</BaselineId>
+        <Framework>Bun test (TypeScript CLI)</Framework>
+        <Platform>win32 (builds captured for both linux + windows targets)</Platform>
+    </Metadata>
+
+    <Unit>
+        <Framework>bun test</Framework>
+        <CoverageTool>bun builtin (--coverage)</CoverageTool>
+        <Command>bun test tests/unit --coverage</Command>
+        <TestFiles>4</TestFiles>
+        <Passed>103</Passed>
+        <Failed>0</Failed>
+        <Skipped>0</Skipped>
+        <Total>103</Total>
+        <Duration>251.00</Duration>
+        <Coverage>
+            <LineRate>82.74</LineRate>
+        </Coverage>
+    </Unit>
+
+    <Integration>
+        <Framework>bun test</Framework>
+        <CoverageTool>bun builtin (--coverage)</CoverageTool>
+        <Command>bun test tests/integration --coverage</Command>
+        <TestFiles>11</TestFiles>
+        <Passed>226</Passed>
+        <Failed>0</Failed>
+        <Skipped>0</Skipped>
+        <Total>226</Total>
+        <Duration>941.00</Duration>
+        <Coverage>
+            <LineRate>82.00</LineRate>
+        </Coverage>
+        <Note>tests/auth-regression/ invariants run via the full suite (bun test --isolate), not this command</Note>
+    </Integration>
+
+    <Smoke>
+        <Framework>bun test</Framework>
+        <CoverageTool>bun builtin (--coverage)</CoverageTool>
+        <Command>bun test tests/smoke --coverage</Command>
+        <TestFiles>3</TestFiles>
+        <Passed>21</Passed>
+        <Failed>0</Failed>
+        <Skipped>0</Skipped>
+        <Total>21</Total>
+        <Duration>694.00</Duration>
+        <Coverage>
+            <LineRate>100.00</LineRate>
+        </Coverage>
+    </Smoke>
+
+    <Gates>
+        <Typecheck>tsc --noEmit — exit 0</Typecheck>
+        <LintMediation>OK: no forbidden node:fs / node:path / node:os imports in src/</LintMediation>
+        <AuthGate>PASS (no auth-sensitive changes)</AuthGate>
+    </Gates>
+
+    <Build>
+        <Status>Success</Status>
+        <BuildTimeLinuxSeconds>0.42</BuildTimeLinuxSeconds>
+        <BuildTimeWindowsSeconds>0.51</BuildTimeWindowsSeconds>
+        <OutputDirectory>./dist</OutputDirectory>
+        <FileCount>2</FileCount>
+        <TotalSizeMB>185.13</TotalSizeMB>
+        <CriticalFiles>
+            <File>
+                <Name>gemiterm (linux, bun-linux-x64)</Name>
+                <SizeKB>92890.12</SizeKB>
+                <SizeGzippedKB>36205.74</SizeGzippedKB>
+            </File>
+            <File>
+                <Name>gemiterm.exe (windows, bun-windows-x64)</Name>
+                <SizeKB>96687.50</SizeKB>
+                <SizeGzippedKB>38862.23</SizeGzippedKB>
+            </File>
+        </CriticalFiles>
+        <LintWarnings>0</LintWarnings>
+        <LintWarningsByCategory>
+            <MediationViolations>0</MediationViolations>
+            <Typecheck>0</Typecheck>
+        </LintWarningsByCategory>
+    </Build>
+
+    <FailedTests>
+        <Test>
+            <Name>None</Name>
+        </Test>
+    </FailedTests>
+
+    <FlakyTests>
+        <Test>
+            <Name>None</Name>
+        </Test>
+    </FlakyTests>
+
+    <KnownErrors>
+        <Error>
+            <Description>None</Description>
+        </Error>
+    </KnownErrors>
+
+    <Dependencies>
+        <Runtime>Bun >= 1.0.0 (observed 1.3.14)</Runtime>
+        <PrimaryTestFramework>bun test</PrimaryTestFramework>
+        <CoverageTool>bun builtin --coverage</CoverageTool>
+        <BuildTooling>bun build --compile (scripts/build.ts, profiles: linux/windows)</BuildTooling>
+        <Gates>tsc --noEmit; bash scripts/lint-path-mediation.sh; bash scripts/check-auth-gate.sh</Gates>
+    </Dependencies>
+
+    <Changelog>
+        <Entry>
+            <BaselineId>BL-001</BaselineId>
+            <Date>2026-09-14</Date>
+            <Changes>Initial baseline (full suite 1091 pass / 2 skip / 0 fail across 80 files; tiers: unit 103, integration 226, smoke 21; both platform binaries fingerprinted)</Changes>
+            <Reason>Project baseline established; parity tier removed from repo</Reason>
+        </Entry>
+    </Changelog>
+</TestingBaseline>

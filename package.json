@@ -31,7 +31,6 @@
     "test": "bun test --isolate",
     "test:unit": "bun test tests/unit",
     "test:integration": "bun test tests/integration",
-    "test:parity": "bun test tests/parity",
     "test:smoke": "bun test tests/smoke",
     "test:all": "bun test --isolate",
     "lint:mediation": "bash scripts/lint-path-mediation.sh",
@@ -40,9 +39,9 @@
     "check:auth-gate:ps": "pwsh scripts/check-auth-gate.ps1",
     "canary:auth": "bash scripts/run-auth-mutation-canary.sh",
     "build": "bun run scripts/build.ts",
-    "build:linux": "bun run scripts/build.ts linux",
-    "build:windows": "bun run scripts/build.ts windows",
-    "build:release": "bun run scripts/build.ts release"
+    "build:linux": "bun run scripts/build.ts linux --release",
+    "build:windows": "bun run scripts/build.ts windows --release",
+    "build:release": "bun run build:linux && bun run build:windows"
   },
   "devDependencies": {
     "@inquirer/testing": "^2.1.0",

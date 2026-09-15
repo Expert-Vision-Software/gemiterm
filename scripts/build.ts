@@ -38,15 +38,27 @@ function loadPackageJson(): { name: string; version: string } {
   return { name: parsed.name, version: parsed.version };
 }
 
-function pickProfile(): Profile {
-  const requested = process.argv[2];
-  if (!requested) return PROFILES.default!;
+function pickProfile(): { profile: Profile; release: boolean } {
+  const args = process.argv.slice(2);
+  const positional: string[] = [];
+  let release = false;
+  for (const arg of args) {
+    if (arg === "--release") {
+      release = true;
+    } else if (arg.startsWith("--")) {
+      throw new Error(`scripts/build.ts: unknown flag "${arg}". Only --release is supported.`);
+    } else {
+      positional.push(arg);
+    }
+  }
+  const requested = positional[0];
+  if (!requested) return { profile: PROFILES.default!, release };
   const profile = PROFILES[requested];
   if (!profile) {
     const known = Object.keys(PROFILES).join(", ");
     throw new Error(`scripts/build.ts: unknown profile "${requested}". Known: ${known}`);
   }
-  return profile;
+  return { profile, release };
 }
 
 function ensureWindowsExeSuffix(path: string, target: Target): string {
@@ -55,7 +67,8 @@ function ensureWindowsExeSuffix(path: string, target: Target): string {
 }
 
 async function main(): Promise<void> {
-  const profile = pickProfile();
+  const { profile, release } = pickProfile();
+  const minify = release || profile.minify;
   const pkg = loadPackageJson();
   const target = profile.target === "host" ? hostTarget() : profile.target;
 
@@ -70,7 +83,7 @@ async function main(): Promise<void> {
       target,
       outfile,
     },
-    minify: profile.minify,
+    minify,
     define: {
       __GEMITERM_VERSION__: JSON.stringify(pkg.version),
       __GEMITERM_NAME__: JSON.stringify(pkg.name),
@@ -79,10 +92,10 @@ async function main(): Promise<void> {
 
   if (!result.success) {
     for (const log of result.logs) console.error(log);
-    throw new Error(`scripts/build.ts: build failed for profile ${JSON.stringify(profile)}`);
+    throw new Error(`scripts/build.ts: build failed (target=${target}, minify=${minify})`);
   }
 
-  console.log(`built ${profile.outfile} (target=${target}, minify=${profile.minify}, version=${pkg.version})`);
+  console.log(`built ${profile.outfile} (target=${target}, minify=${minify}, version=${pkg.version})`);
 }
 
 await main();
