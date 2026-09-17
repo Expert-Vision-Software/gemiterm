@@ -24,6 +24,7 @@ import {
 } from "./auth-constants.ts";
 import { sleep } from "./timing.ts";
 import { spawnDetachedRefreshRunner } from "./refresh-runner.ts";
+import { makeRunnerLockObserver, type RunnerLockObserver } from "./refresh-runner-lock.ts";
 
 const STALE_JAR_MS = 30 * 60 * 1000;
 const DEFAULT_LOGIN_TIMEOUT_MS = 300_000;
@@ -64,6 +65,10 @@ export interface CookieSessionDeps {
   listProfiles: () => Promise<string[]>;
   conversationLookup: { profileHasConversation(profileName: string, conversationId: string): Promise<boolean> };
   driver: CaptureDriver;
+  // Cross-process completion signal for waitForRotation (2026-09-17): the
+  // refresh-runner.lock observer. Absent/unset means the lock cannot be
+  // observed and the wait must stay conservative.
+  runnerLock?: RunnerLockObserver;
   pollIntervalMs?: number;
   rotationWaitMs?: number;
 }
@@ -97,6 +102,7 @@ export class CookieSession {
   private readonly deps: CookieSessionDeps;
   private readonly pollIntervalMs: number;
   private readonly rotationWaitMs: number;
+  private readonly runnerLock: RunnerLockObserver;
   private readonly spawnedRunnerProfiles = new Set<string>();
   private readonly lastArm = new Map<string, ArmRecord>();
 
@@ -104,6 +110,9 @@ export class CookieSession {
     this.deps = deps;
     this.pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.rotationWaitMs = deps.rotationWaitMs ?? DEFAULT_ROTATION_WAIT_MS;
+    // Unobservable lock (direct constructions): assume in flight so the wait
+    // falls back to its timeout instead of concluding on a blind spot.
+    this.runnerLock = deps.runnerLock ?? { isActive: async () => true };
   }
 
   createKeepalive(profile: string, options?: SessionKeepaliveOptions): SessionKeepalive {
@@ -144,9 +153,10 @@ export class CookieSession {
   }
 
   // Awaits the detached runner's rotation by observing the only cross-process
-  // truth the facade shares with it: the on-disk jar (openspec/changes/
-  // await-detached-rotation-on-empty-list, design D2). Passive by contract —
-  // spawns nothing, writes nothing, never rejects.
+  // truths the facade shares with it: the on-disk jar and the runner lock
+  // (openspec/changes/await-detached-rotation-on-empty-list, design D2;
+  // lock completion added 2026-09-17). Passive by contract — spawns nothing,
+  // writes nothing (lastArm bookkeeping aside), never rejects.
   async waitForRotation(
     profile: string,
     opts: { timeoutMs?: number } = {},
@@ -158,6 +168,11 @@ export class CookieSession {
 
     const timeoutMs = opts.timeoutMs ?? this.rotationWaitMs;
     const deadline = Date.now() + timeoutMs;
+    // The spawning parent acquires refresh-runner.lock before spawn returns,
+    // but the spawn is fire-and-forget from ensureSession — absence is only
+    // trusted once the lock was observed, or after 2 poll intervals.
+    let lockSeen = false;
+    let polls = 0;
     for (;;) {
       try {
         const { cookies } = await this.deps.cookieStore.load(profile);
@@ -172,6 +187,21 @@ export class CookieSession {
       } catch (err) {
         this.deps.logger.debug(`waitForRotation(${profile}): jar poll failed: ${err}`);
       }
+      const runnerActive = await this.runnerLock.isActive(profile);
+      if (runnerActive) {
+        lockSeen = true;
+      } else if (lockSeen || polls >= 2) {
+        // The runner concluded (lock released in runRefresh's finally, or the
+        // stale sweep judged it dead) without a jar change: the rotation will
+        // never land from this runner. Record the conclusion so
+        // rotationInFlight — and the await hint that filters on it — stays
+        // honest instead of claiming "still in flight" for the full ceiling.
+        this.lastArm.set(profile, { psidts: record.psidts, stale: false });
+        this.deps.logger.info(
+          `waitForRotation(${profile}): detached rotation concluded without a jar change`,
+        );
+        return null;
+      }
       if (Date.now() >= deadline) {
         this.deps.logger.info(
           `waitForRotation(${profile}): no PSIDTS change within ${timeoutMs}ms (detached rotation still in flight)`,
@@ -179,6 +209,7 @@ export class CookieSession {
         return null;
       }
       await sleep(this.pollIntervalMs);
+      polls++;
     }
   }
 
@@ -472,6 +503,7 @@ export function createCookieSession(deps: CreateCookieSessionDeps): CookieSessio
     recovery,
     logger,
     spawnRefreshRunner: deps.spawnRefreshRunner ?? spawnDetachedRefreshRunner,
+    runnerLock: makeRunnerLockObserver(),
     listProfiles: deps.listProfiles,
     conversationLookup: {
       profileHasConversation: async (profileName, conversationId) => {

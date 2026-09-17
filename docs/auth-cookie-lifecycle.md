@@ -1231,3 +1231,39 @@ do not re-litigate them.
   the timeout line; after = 5.9s to the signed-out diagnosis. Invariant
   coverage: `tests/auth-regression/invariant-rotation-signed-out-fails-fast.test.ts`
   + signed-out fast-fail cases in `tests/auth/browser-refresher.test.ts`.
+
+- **2026-09-17** - rotation wait observes runner completion instead of the
+  fixed timeout. When the detached refresh-runner FAILED (e.g. browser
+  session signed out - see the fails-fast entry above), the waiting CLI still
+  burned the full 90s ceiling: `CookieSession.waitForRotation`
+  (`src/auth/cookie-session.ts`) polls only the on-disk jar and the runner's
+  outcome is invisible in-process, so the field symptom was the wait timing
+  out with "detached rotation still in flight" AFTER the runner had already
+  logged `rotated=false`, followed by a false "Session refresh still in
+  progress" hint. The wait now also observes the cross-process signal that
+  already exists: `refresh-runner.lock` (present + fresh => runner active;
+  absent or older than the same 120s stale window => rotation concluded).
+  New `makeRunnerLockObserver` (`src/auth/refresh-runner-lock.ts`) exposes
+  the observation side of the lock; it never rejects and an observation
+  failure reports active, so a blind spot keeps waiting instead of ending
+  the wait on a guess. `waitForRotation` checks the lock alongside the jar
+  poll with a startup grace - absence is trusted only once the lock has been
+  observed at least once, or after 2 poll intervals (the spawning parent
+  acquires the lock before spawn returns, but the spawn is fire-and-forget).
+  On conclusion it logs "detached rotation concluded without a jar change",
+  returns null immediately, and records the conclusion in the in-process arm
+  record (lastArm bookkeeping), which keeps `rotationInFlight` - and the
+  "still in progress" hint filter in `awaitRotationsWithNotice`, which
+  filters on it - honest with zero caller changes. Design choice:
+  `rotationInFlight` stays synchronous; an async lock-aware query would have
+  migrated 4 sync call sites plus the mocked facade surfaces behind the
+  byte-equivalence list tests for no additional behavior, because every
+  `rotationInFlight` consumer immediately awaits the rotation and the wait
+  now corrects the record the moment the lock proves conclusion. The seam is
+  DI-only (`CookieSessionDeps.runnerLock`, default conservative
+  assume-active so direct constructions keep the exact timeout behavior);
+  `createCookieSession` wires the real observer. `waitForRotation` remains
+  passive: no spawns, no writes beyond lastArm bookkeeping, never rejects.
+  Invariant coverage: released/stale/fresh lock cases in
+  `tests/auth-regression/invariant-await-rotation.test.ts` (+ unit cases in
+  `tests/auth/rotation-wait-completion.test.ts`).

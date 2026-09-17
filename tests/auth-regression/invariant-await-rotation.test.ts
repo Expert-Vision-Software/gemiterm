@@ -4,9 +4,11 @@
 // on-disk truth and passivity (no spawn / no write during the wait).
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import type { Cookie } from "../../src/core/types.ts";
 import { CookieStore } from "../../src/auth/cookie-store.ts";
+import { makeRunnerLockObserver } from "../../src/auth/refresh-runner-lock.ts";
+import { getRefreshRunnerLockPath } from "../../src/infrastructure/path-utils.ts";
 import { freshFullJar } from "./fixtures.ts";
 import { TEST_DIR, setupIsolation, teardownIsolation, makeSessionDeps, makeSession, psidtsValue, withPsidts } from "./harness.ts";
 
@@ -105,5 +107,99 @@ describe("auth-regression: await detached rotation", () => {
     expect(session.rotationInFlight("p")).toBe(false);
     expect(await session.waitForRotation("p")).toBeNull();
     expect(deps.spawnRefreshRunner).not.toHaveBeenCalled();
+  });
+});
+
+// On-disk invariant (2026-09-17): the wait must observe the cross-process
+// runner lock, not just the jar. The runner child releases
+// refresh-runner.lock in runRefresh's finally - released or stale lock means
+// the rotation CONCLUDED, so the wait ends instead of burning the ceiling.
+describe("auth-regression: rotation wait respects runner completion", () => {
+  const lockPath = () => getRefreshRunnerLockPath("p");
+
+  test("a released runner lock ends the wait instead of the full timeout", async () => {
+    const store = new CookieStore();
+    const baselineJar = freshFullJar();
+    await store.saveFullJar("p", baselineJar);
+    writeFileSync(lockPath(), String(process.pid), "utf-8");
+    const deps = makeSessionDeps({
+      cookieStore: {
+        load: (p: string) => store.load(p),
+        saveFullJar: (p: string, c: Cookie[]) => store.saveFullJar(p, c),
+        getJarMtime: async () => STALE_MTIME(),
+      },
+      runnerLock: makeRunnerLockObserver(),
+      rotationWaitMs: 10_000,
+    });
+    const session = makeSession(deps);
+    await session.ensureSession("p");
+    expect(session.rotationInFlight("p")).toBe(true);
+
+    const releaser = setTimeout(() => rmSync(lockPath(), { force: true }), 25);
+    const started = Date.now();
+    const result = await session.waitForRotation("p");
+    const elapsed = Date.now() - started;
+    clearTimeout(releaser);
+
+    expect(result).toBeNull();
+    expect(elapsed).toBeLessThan(5_000);
+    expect(psidtsOnDisk("p")).toBe(psidtsValue(baselineJar));
+    expect(session.rotationInFlight("p")).toBe(false);
+    expect(deps.spawnRefreshRunner).toHaveBeenCalledTimes(1);
+    const infoMessages = (deps.logger.info.mock.calls as unknown[][]).map((c) => String(c[0])).join("\n");
+    expect(infoMessages).toContain("concluded without a jar change");
+  });
+
+  test("a stale runner lock (older than the 120s window) ends the wait", async () => {
+    const store = new CookieStore();
+    await store.saveFullJar("p", freshFullJar());
+    writeFileSync(lockPath(), String(process.pid), "utf-8");
+    const backdated = new Date(Date.now() - 121_000);
+    utimesSync(lockPath(), backdated, backdated);
+    const deps = makeSessionDeps({
+      cookieStore: {
+        load: (p: string) => store.load(p),
+        saveFullJar: (p: string, c: Cookie[]) => store.saveFullJar(p, c),
+        getJarMtime: async () => STALE_MTIME(),
+      },
+      runnerLock: makeRunnerLockObserver(),
+      rotationWaitMs: 10_000,
+    });
+    const session = makeSession(deps);
+    await session.ensureSession("p");
+
+    const started = Date.now();
+    const result = await session.waitForRotation("p");
+    const elapsed = Date.now() - started;
+
+    expect(result).toBeNull();
+    expect(elapsed).toBeLessThan(5_000);
+    expect(session.rotationInFlight("p")).toBe(false);
+  });
+
+  test("a present fresh runner lock keeps the wait running to the timeout", async () => {
+    const store = new CookieStore();
+    await store.saveFullJar("p", freshFullJar());
+    writeFileSync(lockPath(), String(process.pid), "utf-8");
+    const deps = makeSessionDeps({
+      cookieStore: {
+        load: (p: string) => store.load(p),
+        saveFullJar: (p: string, c: Cookie[]) => store.saveFullJar(p, c),
+        getJarMtime: async () => STALE_MTIME(),
+      },
+      runnerLock: makeRunnerLockObserver(),
+      rotationWaitMs: 60,
+      pollIntervalMs: 5,
+    });
+    const session = makeSession(deps);
+    await session.ensureSession("p");
+
+    const started = Date.now();
+    const result = await session.waitForRotation("p");
+    const elapsed = Date.now() - started;
+
+    expect(result).toBeNull();
+    expect(elapsed).toBeGreaterThanOrEqual(50);
+    expect(session.rotationInFlight("p")).toBe(true);
   });
 });

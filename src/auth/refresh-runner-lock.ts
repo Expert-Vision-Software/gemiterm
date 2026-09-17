@@ -25,6 +25,10 @@ export interface RunnerLock {
   release(profile: string): Promise<void>;
 }
 
+export interface RunnerLockObserver {
+  isActive(profile: string): Promise<boolean>;
+}
+
 // Contract: never rejects - a locking failure must not block a refresh (same
 // axiom as the spawn log fd). On an io failure the acquire resolves true so
 // the spawn proceeds unguarded.
@@ -56,4 +60,24 @@ export function makeRunnerLock(io: RunnerLockIo = defaultIo, staleMs = STALE_RUN
   }
 
   return { tryAcquire, release };
+}
+
+// Observation side of the lock (2026-09-17 rotation-wait fix): present and
+// fresh means a runner is active; absent or older than the same stale window
+// means the rotation concluded. Never rejects - an observation failure must
+// not end a wait, so it reports active (keep waiting).
+export function makeRunnerLockObserver(io: RunnerLockIo = defaultIo, staleMs = STALE_RUNNER_LOCK_MS): RunnerLockObserver {
+  async function isActive(profile: string): Promise<boolean> {
+    const lockPath = getRefreshRunnerLockPath(profile);
+    try {
+      if (!(await io.existsFile(lockPath))) return false;
+      const mtime = await io.getFileMtime(lockPath);
+      if (mtime === null) return false;
+      return Date.now() - mtime.getTime() <= staleMs;
+    } catch {
+      return true;
+    }
+  }
+
+  return { isActive };
 }
