@@ -1267,3 +1267,34 @@ do not re-litigate them.
   Invariant coverage: released/stale/fresh lock cases in
   `tests/auth-regression/invariant-await-rotation.test.ts` (+ unit cases in
   `tests/auth/rotation-wait-completion.test.ts`).
+
+- **2026-09-17** - cross-OS browser access to auth profiles is blocked at the
+  driver. The profile dir doubles as device identity (§4.3 device continuity)
+  AND browser-side session storage, so it is bound to the OS browser that
+  created it. Field evidence 2026-09-15/16: running the WSL (Linux) Chromium
+  against profile dirs created by the Windows Chromium wiped the browser-side
+  auth cookies (only anonymous cookies remained), so every subsequent rotation
+  failed — exactly the anonymous-only shape of the anti-pattern above, but
+  caused before any page even loaded. Users now separate OSes via per-OS
+  config dirs (`.gemiterm-win` / `.gemiterm-wsl`), but nothing stopped one
+  OS's browser from being pointed at the other OS's profiles again. The two
+  browser-opening driver methods — `PlaywrightCliDriver.openHeaded`
+  (capture) and `openHeadless` (rotation) — now enforce a per-profile
+  OS-ownership marker (`browser-os.marker` inside the user-data dir; not a
+  Chromium-managed filename) BEFORE any spawn: absent/unreadable/corrupt
+  marker ⇒ claim the current platform and proceed (a claim-write failure
+  logs and proceeds, same axiom as the refresh-runner lock — never brick a
+  profile over a bad marker); marker matches `process.platform` ⇒ proceed
+  byte-for-byte unchanged; marker names a different platform ⇒ the new typed
+  `ProfileOsMismatchError` (`src/core/errors.ts`) naming the profile, both
+  platforms, the hazard, and the remedy: point `GEMITERM_CONFIG_DIR` at a
+  per-OS config dir (e.g. `./.gemiterm-wsl` under WSL) and run
+  `gemiterm auth` there. Marker I/O goes through the `io.ts` helpers (no new
+  path-mediation exemptions); the marker port is injectable
+  (`PlaywrightCliDriverOptions.profileOsMarker`, default `FsProfileOsMarker`)
+  with `platformDetector` as the platform seam. `list`/`fetch`/`status` never
+  open a browser and are untouched; capture, persistence, and rotation
+  semantics unchanged (domain-only policy). Real-environment cross-OS
+  validation is owned by the integrator (both shells). Invariant coverage:
+  `tests/auth-regression/invariant-cross-os-profile-guard.test.ts` (+ unit
+  cases in `tests/services/playwright-cli-driver-os-guard.test.ts`).

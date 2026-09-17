@@ -91,3 +91,15 @@ export class BrowserSignedOutError extends GemitermError {
     this.name = "BrowserSignedOutError";
   }
 }
+
+export class ProfileOsMismatchError extends GemitermError {
+  constructor(profile: string, markerPlatform: string, currentPlatform: string) {
+    super(
+      `Profile '${profile}' was created by a '${markerPlatform}' browser but this GemiTerm is running on '${currentPlatform}'. ` +
+        `Opening a profile with a different OS's Chromium corrupts or loses its browser-side session ` +
+        `(observed 2026-09-15/16: a WSL Chromium run against a Windows-created profile wiped the auth cookies). ` +
+        `Point GEMITERM_CONFIG_DIR at a per-OS config dir (e.g. ./.gemiterm-wsl under WSL) and run 'gemiterm auth' there.`,
+    );
+    this.name = "ProfileOsMismatchError";
+  }
+}
