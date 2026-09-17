@@ -1,5 +1,6 @@
-import { getProfileDir, getTempFilePath, isWSL, isWindowsInteropPath } from "../infrastructure/path-utils.ts";
-import { IOError, readJsonFile, removeDir } from "../infrastructure/io.ts";
+import { getProfileDir, getTempFilePath, isWSL, isWindowsInteropPath, joinPath } from "../infrastructure/path-utils.ts";
+import { IOError, readJsonFile, readTextFile, removeDir, writeTextFile } from "../infrastructure/io.ts";
+import { ProfileOsMismatchError } from "../core/errors.ts";
 import type { Cookie } from "../core/types.ts";
 
 const CLI_BIN_DIRECT = "playwright-cli";
@@ -53,6 +54,41 @@ export interface PlaywrightRunner {
   spawnDetached(args: string[]): void;
 }
 
+// Cross-OS profile guard (docs/auth-cookie-lifecycle.md §4.3 device
+// continuity): the profile's Chromium user-data dir doubles as device identity
+// AND browser-side session storage, so it is bound to the OS browser that
+// created it. Field evidence 2026-09-15/16: the other OS's Chromium wiped the
+// browser-side auth cookies (only anonymous cookies remained), killing every
+// later rotation. `browser-os.marker` records the owning OS inside the
+// user-data dir (no Chromium-managed file uses that name).
+export const PROFILE_OS_MARKER_FILE = "browser-os.marker";
+
+const MARKER_PLATFORMS = ["win32", "linux", "darwin"] as const;
+
+export interface ProfileOsMarker {
+  /** The platform recorded in the profile's marker, or null when absent/unreadable/corrupt (claimable). */
+  read(profileDir: string): Promise<string | null>;
+  /** Records the owning platform in the profile. May reject; the driver never lets that block auth. */
+  claim(profileDir: string, platform: string): Promise<void>;
+}
+
+export class FsProfileOsMarker implements ProfileOsMarker {
+  async read(profileDir: string): Promise<string | null> {
+    let content: string;
+    try {
+      content = await readTextFile(joinPath(profileDir, PROFILE_OS_MARKER_FILE));
+    } catch {
+      return null;
+    }
+    const platform = content.trim();
+    return (MARKER_PLATFORMS as readonly string[]).includes(platform) ? platform : null;
+  }
+
+  async claim(profileDir: string, platform: string): Promise<void> {
+    await writeTextFile(joinPath(profileDir, PROFILE_OS_MARKER_FILE), platform);
+  }
+}
+
 // windowsHide: Bun.spawn defaults it to false at the JS layer, so every
 // short-lived playwright-cli subprocess would flash its own console window
 // on Windows (no-op elsewhere).
@@ -102,6 +138,8 @@ export interface PlaywrightCliDriverOptions {
   probeRunners?: PlaywrightRunner[];
   wslDetector?: () => Promise<boolean>;
   binaryPathResolver?: (bin: string) => Promise<string[]>;
+  profileOsMarker?: ProfileOsMarker;
+  platformDetector?: () => string;
 }
 
 // Default `binaryPathResolver`: `which -a <bin>`, one resolved path per line.
@@ -130,6 +168,8 @@ export class PlaywrightCliDriver {
   private readonly probeRunners: PlaywrightRunner[];
   private readonly wslDetector: () => Promise<boolean>;
   private readonly binaryPathResolver: (bin: string) => Promise<string[]>;
+  private readonly profileOsMarker: ProfileOsMarker;
+  private readonly platformDetector: () => string;
   private probed = false;
   private unavailableMessage?: string;
 
@@ -143,6 +183,8 @@ export class PlaywrightCliDriver {
     ];
     this.wslDetector = opts.wslDetector ?? isWSL;
     this.binaryPathResolver = opts.binaryPathResolver ?? whichAll;
+    this.profileOsMarker = opts.profileOsMarker ?? new FsProfileOsMarker();
+    this.platformDetector = opts.platformDetector ?? (() => process.platform);
     this.probed = opts.runner !== undefined;
   }
 
@@ -193,7 +235,38 @@ export class PlaywrightCliDriver {
     return args;
   }
 
+  // Cross-OS profile guard: the only two browser-opening methods (capture =
+  // openHeaded, rotation = openHeadless) must refuse a profile owned by a
+  // different OS BEFORE any spawn. Absent/unreadable/corrupt marker => claim
+  // the current platform; a claim failure must never block auth (same axiom as
+  // the refresh-runner lock).
+  private async enforceProfileOsOwnership(profile: string): Promise<void> {
+    const profileDir = this.profileDirResolver(profile);
+    const currentPlatform = this.platformDetector();
+    let recorded: string | null;
+    try {
+      recorded = await this.profileOsMarker.read(profileDir);
+    } catch {
+      recorded = null;
+    }
+    if (recorded === null) {
+      try {
+        await this.profileOsMarker.claim(profileDir, currentPlatform);
+      } catch (err) {
+        this.logger?.warn(
+          `Could not write ${PROFILE_OS_MARKER_FILE} for profile '${profile}' ` +
+            `(${err instanceof Error ? err.message : String(err)}); proceeding without an OS marker.`,
+        );
+      }
+      return;
+    }
+    if (recorded !== currentPlatform) {
+      throw new ProfileOsMismatchError(profile, recorded, currentPlatform);
+    }
+  }
+
   async openHeaded(url: string, profile: string, session?: string): Promise<void> {
+    await this.enforceProfileOsOwnership(profile);
     const args = this.buildOpenHeadedArgs(url, profile, session);
     await this.runCli(args);
   }
@@ -214,6 +287,7 @@ export class PlaywrightCliDriver {
   }
 
   async openHeadless(url: string, profile: string, session?: string): Promise<void> {
+    await this.enforceProfileOsOwnership(profile);
     const args = this.buildOpenHeadlessArgs(url, profile, session);
     await this.runCli(args);
   }

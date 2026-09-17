@@ -1204,5 +1204,99 @@ do not re-litigate them.
   the interop hint; invalid-JSON errors carry a distinct message. No
   argv changes to `openHeaded`/`openHeadless`/`stateSave`; capture,
   persistence, and rotation semantics untouched (domain-only policy).
-  Invariant coverage: `tests/auth-regression/invariant-wsl-interop-guard.test.ts`
-  (+ `tests/services/playwright-cli-driver.test.ts` classification tests).
+   Invariant coverage: `tests/auth-regression/invariant-wsl-interop-guard.test.ts`
+   (+ `tests/services/playwright-cli-driver.test.ts` classification tests).
+
+- **2026-09-17** — rotation fails fast on signed-out browser. When the
+  profile's browser-side session was signed out, `BrowserRefresher.rotatePsidts`
+  (`src/auth/browser-refresher.ts`) opened the headless page anyway and burned
+  the full 60s poll budget on a rotation that could never succeed: a
+  signed-out cookie DB holds only anonymous cookies (~6: NID, _ga, COMPASS,
+  ...) and zero auth cookies, so no PSIDTS change could ever appear. The
+  runner then logged the generic "PSIDTS rotation timed out after 60000ms
+  (no change from baseline)", misleading the user into retrying. The poll
+  loop now observes both `__Secure-1PSIDTS` and `__Secure-1PSID` per poll
+  (`pollPsidts` replaced by `pollAuthCookies`; routability via the existing
+  `findRoutableCookieValue` — name-only presence is not enough) and, once
+  the anonymous-only shape holds on 2 consecutive polls (1s apart — a
+  single poll could race browser startup), throws the new typed
+  `BrowserSignedOutError` (`src/core/errors.ts`) naming the profile and the
+  remediation: `gemiterm auth <profile>`. `cookie-list` driver failures
+  still never abort early — a failed poll is tolerated, never counts toward
+  the streak, and leaves the current streak intact (a driver failure is no
+  evidence the session is live), and the loop
+  keeps tolerating them until the deadline; timeout semantics, session
+  naming, and the full-jar persist path are unchanged (domain-only policy).
+  The detached runner's error logging needed no change: `runRefresh`'s
+  existing `err.message` warn surfaces the typed message verbatim. Field
+  control (never-authed profile `diag-fix1`, 2026-09-17): before = 62s to
+  the timeout line; after = 5.9s to the signed-out diagnosis. Invariant
+  coverage: `tests/auth-regression/invariant-rotation-signed-out-fails-fast.test.ts`
+  + signed-out fast-fail cases in `tests/auth/browser-refresher.test.ts`.
+
+- **2026-09-17** - rotation wait observes runner completion instead of the
+  fixed timeout. When the detached refresh-runner FAILED (e.g. browser
+  session signed out - see the fails-fast entry above), the waiting CLI still
+  burned the full 90s ceiling: `CookieSession.waitForRotation`
+  (`src/auth/cookie-session.ts`) polls only the on-disk jar and the runner's
+  outcome is invisible in-process, so the field symptom was the wait timing
+  out with "detached rotation still in flight" AFTER the runner had already
+  logged `rotated=false`, followed by a false "Session refresh still in
+  progress" hint. The wait now also observes the cross-process signal that
+  already exists: `refresh-runner.lock` (present + fresh => runner active;
+  absent or older than the same 120s stale window => rotation concluded).
+  New `makeRunnerLockObserver` (`src/auth/refresh-runner-lock.ts`) exposes
+  the observation side of the lock; it never rejects and an observation
+  failure reports active, so a blind spot keeps waiting instead of ending
+  the wait on a guess. `waitForRotation` checks the lock alongside the jar
+  poll with a startup grace - absence is trusted only once the lock has been
+  observed at least once, or after 2 poll intervals (the spawning parent
+  acquires the lock before spawn returns, but the spawn is fire-and-forget).
+  On conclusion it logs "detached rotation concluded without a jar change",
+  returns null immediately, and records the conclusion in the in-process arm
+  record (lastArm bookkeeping), which keeps `rotationInFlight` - and the
+  "still in progress" hint filter in `awaitRotationsWithNotice`, which
+  filters on it - honest with zero caller changes. Design choice:
+  `rotationInFlight` stays synchronous; an async lock-aware query would have
+  migrated 4 sync call sites plus the mocked facade surfaces behind the
+  byte-equivalence list tests for no additional behavior, because every
+  `rotationInFlight` consumer immediately awaits the rotation and the wait
+  now corrects the record the moment the lock proves conclusion. The seam is
+  DI-only (`CookieSessionDeps.runnerLock`, default conservative
+  assume-active so direct constructions keep the exact timeout behavior);
+  `createCookieSession` wires the real observer. `waitForRotation` remains
+  passive: no spawns, no writes beyond lastArm bookkeeping, never rejects.
+  Invariant coverage: released/stale/fresh lock cases in
+  `tests/auth-regression/invariant-await-rotation.test.ts` (+ unit cases in
+  `tests/auth/rotation-wait-completion.test.ts`).
+
+- **2026-09-17** - cross-OS browser access to auth profiles is blocked at the
+  driver. The profile dir doubles as device identity (§4.3 device continuity)
+  AND browser-side session storage, so it is bound to the OS browser that
+  created it. Field evidence 2026-09-15/16: running the WSL (Linux) Chromium
+  against profile dirs created by the Windows Chromium wiped the browser-side
+  auth cookies (only anonymous cookies remained), so every subsequent rotation
+  failed — exactly the anonymous-only shape of the anti-pattern above, but
+  caused before any page even loaded. Users now separate OSes via per-OS
+  config dirs (`.gemiterm-win` / `.gemiterm-wsl`), but nothing stopped one
+  OS's browser from being pointed at the other OS's profiles again. The two
+  browser-opening driver methods — `PlaywrightCliDriver.openHeaded`
+  (capture) and `openHeadless` (rotation) — now enforce a per-profile
+  OS-ownership marker (`browser-os.marker` inside the user-data dir; not a
+  Chromium-managed filename) BEFORE any spawn: absent/unreadable/corrupt
+  marker ⇒ claim the current platform and proceed (a claim-write failure
+  logs and proceeds, same axiom as the refresh-runner lock — never brick a
+  profile over a bad marker); marker matches `process.platform` ⇒ proceed
+  byte-for-byte unchanged; marker names a different platform ⇒ the new typed
+  `ProfileOsMismatchError` (`src/core/errors.ts`) naming the profile, both
+  platforms, the hazard, and the remedy: point `GEMITERM_CONFIG_DIR` at a
+  per-OS config dir (e.g. `./.gemiterm-wsl` under WSL) and run
+  `gemiterm auth` there. Marker I/O goes through the `io.ts` helpers (no new
+  path-mediation exemptions); the marker port is injectable
+  (`PlaywrightCliDriverOptions.profileOsMarker`, default `FsProfileOsMarker`)
+  with `platformDetector` as the platform seam. `list`/`fetch`/`status` never
+  open a browser and are untouched; capture, persistence, and rotation
+  semantics unchanged (domain-only policy). Real-environment cross-OS
+  validation is owned by the integrator (both shells). Invariant coverage:
+  `tests/auth-regression/invariant-cross-os-profile-guard.test.ts` (+ unit
+  cases in `tests/services/playwright-cli-driver-os-guard.test.ts`).

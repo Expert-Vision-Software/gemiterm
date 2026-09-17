@@ -34,6 +34,12 @@ function createMockRunner(strategy: PlaywrightStrategy = "direct"): PlaywrightRu
   };
 }
 
+// Permissive marker stub: open-tests are about argv/runCli, never the real fs.
+const permissiveOsMarker = {
+  read: async (_dir: string) => null as string | null,
+  claim: async (_dir: string, _platform: string) => {},
+};
+
 describe("PlaywrightCliDriver", () => {
   let driver: PlaywrightCliDriver;
 
@@ -127,7 +133,7 @@ describe("PlaywrightCliDriver", () => {
 
     test("openHeaded awaits runCli with URL as last arg", async () => {
       const runner = createMockRunner();
-      const d = new PlaywrightCliDriver({ runner });
+      const d = new PlaywrightCliDriver({ runner, profileOsMarker: permissiveOsMarker });
       await d.openHeaded("https://gemini.google.com/app", "p1", "s1");
       expect(runner._run).toHaveBeenCalledTimes(1);
       const args = runner._run.mock.calls[0]![0] as string[];
@@ -139,7 +145,7 @@ describe("PlaywrightCliDriver", () => {
     test("openHeaded throws PlaywrightCliError when open command fails", async () => {
       const runner = createMockRunner();
       runner._run.mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "open failed" });
-      const d = new PlaywrightCliDriver({ runner });
+      const d = new PlaywrightCliDriver({ runner, profileOsMarker: permissiveOsMarker });
       await expect(d.openHeaded("https://gemini.google.com/app", "p1", "s1")).rejects.toBeInstanceOf(PlaywrightCliError);
     });
   });
@@ -184,6 +190,7 @@ describe("PlaywrightCliDriver", () => {
       const runner = createMockRunner();
       const d = new PlaywrightCliDriver({
         runner,
+        profileOsMarker: permissiveOsMarker,
         profileDirResolver: (name) => `/resolved/${name}`,
       });
       await d.openHeadless("https://gemini.google.com/app", "p1", "s1");
@@ -202,6 +209,7 @@ describe("PlaywrightCliDriver", () => {
       runner._run.mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "open failed" });
       const d = new PlaywrightCliDriver({
         runner,
+        profileOsMarker: permissiveOsMarker,
         profileDirResolver: (name) => `/resolved/${name}`,
       });
       await expect(d.openHeadless("https://gemini.google.com/app", "p1", "s1")).rejects.toBeInstanceOf(

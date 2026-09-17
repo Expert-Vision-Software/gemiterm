@@ -20,3 +20,5 @@ dist/
 
 # runtime / testing
 .gemiterm
+.gemiterm-win
+.gemiterm-wsl
