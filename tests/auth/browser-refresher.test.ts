@@ -241,4 +241,30 @@ describe("BrowserRefresher.rotatePsidts", () => {
 
     expect(err).toBeInstanceOf(BrowserSignedOutError);
   });
+
+  test("signed-out confirmation polls are one poll interval apart", async () => {
+    const timestamps: number[] = [];
+    const driver = {
+      ...makeSequenceDriver([ANONYMOUS_JAR, ANONYMOUS_JAR]),
+      cookieList: mock(async () => {
+        timestamps.push(Date.now());
+        return ANONYMOUS_JAR;
+      }),
+    };
+    const store = makeStore();
+    const pollIntervalMs = 25;
+    const refresher = new BrowserRefresher({
+      driver,
+      cookieStore: store as never,
+      logger: makeLogger() as never,
+      pollIntervalMs,
+    });
+
+    const err = await refresher.rotatePsidts("p", "baseline-ts", 5_000).catch((e: unknown) => e as Error);
+
+    expect(err).toBeInstanceOf(BrowserSignedOutError);
+    expect(timestamps.length).toBe(2);
+    const gap = timestamps[1]! - timestamps[0]!;
+    expect(gap).toBeGreaterThanOrEqual(pollIntervalMs);
+  });
 });

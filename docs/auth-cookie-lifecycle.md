@@ -1222,7 +1222,9 @@ do not re-litigate them.
   single poll could race browser startup), throws the new typed
   `BrowserSignedOutError` (`src/core/errors.ts`) naming the profile and the
   remediation: `gemiterm auth <profile>`. `cookie-list` driver failures
-  still never abort early — a failed poll resets the streak and the loop
+  still never abort early — a failed poll is tolerated, never counts toward
+  the streak, and leaves the current streak intact (a driver failure is no
+  evidence the session is live), and the loop
   keeps tolerating them until the deadline; timeout semantics, session
   naming, and the full-jar persist path are unchanged (domain-only policy).
   The detached runner's error logging needed no change: `runRefresh`'s
