@@ -1204,5 +1204,30 @@ do not re-litigate them.
   the interop hint; invalid-JSON errors carry a distinct message. No
   argv changes to `openHeaded`/`openHeadless`/`stateSave`; capture,
   persistence, and rotation semantics untouched (domain-only policy).
-  Invariant coverage: `tests/auth-regression/invariant-wsl-interop-guard.test.ts`
-  (+ `tests/services/playwright-cli-driver.test.ts` classification tests).
+   Invariant coverage: `tests/auth-regression/invariant-wsl-interop-guard.test.ts`
+   (+ `tests/services/playwright-cli-driver.test.ts` classification tests).
+
+- **2026-09-17** — rotation fails fast on signed-out browser. When the
+  profile's browser-side session was signed out, `BrowserRefresher.rotatePsidts`
+  (`src/auth/browser-refresher.ts`) opened the headless page anyway and burned
+  the full 60s poll budget on a rotation that could never succeed: a
+  signed-out cookie DB holds only anonymous cookies (~6: NID, _ga, COMPASS,
+  ...) and zero auth cookies, so no PSIDTS change could ever appear. The
+  runner then logged the generic "PSIDTS rotation timed out after 60000ms
+  (no change from baseline)", misleading the user into retrying. The poll
+  loop now observes both `__Secure-1PSIDTS` and `__Secure-1PSID` per poll
+  (`pollPsidts` replaced by `pollAuthCookies`; routability via the existing
+  `findRoutableCookieValue` — name-only presence is not enough) and, once
+  the anonymous-only shape holds on 2 consecutive polls (1s apart — a
+  single poll could race browser startup), throws the new typed
+  `BrowserSignedOutError` (`src/core/errors.ts`) naming the profile and the
+  remediation: `gemiterm auth <profile>`. `cookie-list` driver failures
+  still never abort early — a failed poll resets the streak and the loop
+  keeps tolerating them until the deadline; timeout semantics, session
+  naming, and the full-jar persist path are unchanged (domain-only policy).
+  The detached runner's error logging needed no change: `runRefresh`'s
+  existing `err.message` warn surfaces the typed message verbatim. Field
+  control (never-authed profile `diag-fix1`, 2026-09-17): before = 62s to
+  the timeout line; after = 5.9s to the signed-out diagnosis. Invariant
+  coverage: `tests/auth-regression/invariant-rotation-signed-out-fails-fast.test.ts`
+  + signed-out fast-fail cases in `tests/auth/browser-refresher.test.ts`.

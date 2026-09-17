@@ -82,3 +82,12 @@ export class LoginUnroutableError extends GemitermError {
     this.name = "LoginUnroutableError";
   }
 }
+
+export class BrowserSignedOutError extends GemitermError {
+  constructor(profile: string) {
+    super(
+      `The browser session for profile '${profile}' is signed out (no __Secure-1PSID or __Secure-1PSIDTS cookies routable to gemini.google.com), so PSIDTS rotation can never succeed. Run 'gemiterm auth ${profile}' to sign in again.`,
+    );
+    this.name = "BrowserSignedOutError";
+  }
+}
