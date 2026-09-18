@@ -17,7 +17,6 @@ import {
 function fakeRunner(): PlaywrightRunner & { _run: ReturnType<typeof mock> } {
   const _run = mock(async (_args: string[]) => ({ exitCode: 0, stdout: "", stderr: "" }));
   return {
-    strategy: "direct",
     _run,
     async run(args) {
       return _run(args);

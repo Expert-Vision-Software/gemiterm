@@ -1,5 +1,8 @@
 ## [Unreleased]
 
+### Changed
+
+- **Bunx-only playwright-cli invocation** (#31): the browser driver now invokes the Playwright CLI exclusively as `bunx @playwright/cli` — a globally installed `playwright-cli` is no longer resolved or required. This removes the version skew between the runtime invocation path and `install-browser` (both now resolve the same bunx-managed revision), so no browser revision is ever "missing" after an update. Supersedes the v3.1.0 WSL interop guard (#27): `bunx` resolves distro-natively under WSL, making the `/mnt/*` interop hazard unreachable. The availability probe is a single `bunx @playwright/cli --version` check; if it fails, install [Bun](https://bun.sh).
 
 ---
 

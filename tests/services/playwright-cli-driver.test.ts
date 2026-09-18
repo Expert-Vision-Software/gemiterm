@@ -9,10 +9,9 @@ import {
   isBrowserClosedError,
   type PlaywrightRunner,
   type PlaywrightRunnerResult,
-  type PlaywrightStrategy,
 } from "../../src/services/playwright-cli-driver.ts";
 
-function createMockRunner(strategy: PlaywrightStrategy = "direct"): PlaywrightRunner & {
+function createMockRunner(): PlaywrightRunner & {
   _run: ReturnType<typeof mock>;
   _spawnDetached: ReturnType<typeof mock>;
   _results: PlaywrightRunnerResult[];
@@ -20,7 +19,6 @@ function createMockRunner(strategy: PlaywrightStrategy = "direct"): PlaywrightRu
   const _run = mock(async (_args: string[]) => ({ exitCode: 0, stdout: "1.0.0", stderr: "" }));
   const _spawnDetached = mock((_args: string[]) => {});
   return {
-    strategy,
     _run,
     _spawnDetached,
     _results: [],
@@ -567,164 +565,50 @@ test("propagates other PlaywrightCliError failures", async () => {
     });
   });
 
-  describe("strategy", () => {
-    test("exposes the runner's strategy", () => {
-      const d1 = new PlaywrightCliDriver({ runner: createMockRunner("direct") });
-      expect(d1.strategy).toBe("direct");
-      const d2 = new PlaywrightCliDriver({ runner: createMockRunner("bunx") });
-      expect(d2.strategy).toBe("bunx");
-    });
-  });
-
   describe("auto-detection", () => {
-    test("selects bunx strategy when direct probe fails and bunx probe succeeds", async () => {
-      const direct = createMockRunner("direct");
-      direct._run.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "not found" });
-      const bunx = createMockRunner("bunx");
-      bunx._run.mockResolvedValue({ exitCode: 0, stdout: "0.1.17", stderr: "" });
-
-      const d = new PlaywrightCliDriver({
-        probeRunners: [direct, bunx],
-        // probeRunners are synthetic mocks; the real WSL interop guard must not
-        // skip the direct candidate based on the host's actual PATH (issue #27).
-        wslDetector: async () => false,
+    test("runCli throws PlaywrightCliUnavailableError when the bunx probe fails", async () => {
+      const spy = spyOn(BunPlaywrightRunner.prototype, "run").mockResolvedValue({
+        exitCode: 1,
+        stdout: "",
+        stderr: "",
       });
-
-      await d.runCli(["--version"]);
-
-      expect(d.strategy).toBe("bunx");
-      expect(direct._run).toHaveBeenCalled();
-      expect(bunx._run).toHaveBeenCalled();
-    });
-
-    test("runCli throws PlaywrightCliUnavailableError when all probe candidates fail", async () => {
-      const direct = createMockRunner("direct");
-      direct._run.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "" });
-      const bunx = createMockRunner("bunx");
-      bunx._run.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "" });
-
-      const d = new PlaywrightCliDriver({ probeRunners: [direct, bunx] });
-
-      await expect(d.runCli(["--version"])).rejects.toBeInstanceOf(
-        PlaywrightCliUnavailableError,
-      );
+      try {
+        const d = new PlaywrightCliDriver();
+        await expect(d.runCli(["--version"])).rejects.toBeInstanceOf(
+          PlaywrightCliUnavailableError,
+        );
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     test("does not probe when a runner is injected", async () => {
-      const runner = createMockRunner("direct");
-      const probeCandidate = createMockRunner("bunx");
-      const d = new PlaywrightCliDriver({ runner, probeRunners: [probeCandidate] });
+      const runner = createMockRunner();
+      const d = new PlaywrightCliDriver({ runner });
 
       await d.runCli(["--version"]);
 
-      expect(probeCandidate._run).not.toHaveBeenCalled();
       expect(runner._run).toHaveBeenCalledTimes(1);
     });
 
     test("probes at most once across repeated isAvailable calls", async () => {
-      const candidate = createMockRunner("bunx");
-      candidate._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
-      const d = new PlaywrightCliDriver({ probeRunners: [candidate] });
-
-      await d.isAvailable();
-      await d.isAvailable();
-
-      expect(candidate._run).toHaveBeenCalledTimes(1);
-    });
-  });
-  describe("WSL interop guard (issue #27)", () => {
-    const interopPaths = ["/mnt/c/nvm4w/nodejs/playwright-cli", "/mnt/c/Users/diego/AppData/Roaming/npm/playwright-cli"];
-
-    function wslDriverOpts(extra: Partial<ConstructorParameters<typeof PlaywrightCliDriver>[0]> = {}) {
-      return {
-        wslDetector: async () => true,
-        binaryPathResolver: async () => interopPaths,
-        ...extra,
-      };
-    }
-
-    test("rejects /mnt/*-resolved direct binary and falls back to bunx", async () => {
-      const direct = createMockRunner("direct");
-      direct._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
-      const bunx = createMockRunner("bunx");
-      bunx._run.mockResolvedValue({ exitCode: 0, stdout: "0.1.17", stderr: "" });
-
-      const d = new PlaywrightCliDriver({
-        probeRunners: [direct, bunx],
-        ...wslDriverOpts(),
+      const spy = spyOn(BunPlaywrightRunner.prototype, "run").mockResolvedValue({
+        exitCode: 0,
+        stdout: "1.0.0",
+        stderr: "",
       });
-      await d.runCli(["--version"]);
-
-      expect(d.strategy).toBe("bunx");
-      expect(direct._run).not.toHaveBeenCalled(); // interop binary never version-probed
-      expect(bunx._run).toHaveBeenCalled();
-    });
-
-    test("accepts a distro-native direct binary under WSL", async () => {
-      const direct = createMockRunner("direct");
-      direct._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
-      const bunx = createMockRunner("bunx");
-      const d = new PlaywrightCliDriver({
-        probeRunners: [direct, bunx],
-        ...wslDriverOpts({ binaryPathResolver: async () => ["/usr/local/bin/playwright-cli"] }),
-      });
-      await d.runCli(["--version"]);
-
-      expect(d.strategy).toBe("direct");
-      expect(bunx._run).not.toHaveBeenCalled();
-    });
-
-    test("runCli rejects with actionable interop message when no native binary and bunx fails", async () => {
-      const direct = createMockRunner("direct");
-      const bunx = createMockRunner("bunx");
-      bunx._run.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "" });
-      const d = new PlaywrightCliDriver({
-        probeRunners: [direct, bunx],
-        ...wslDriverOpts(),
-      });
-
       try {
-        await d.runCli(["--version"]);
-        expect.unreachable();
-      } catch (err) {
-        expect(err).toBeInstanceOf(PlaywrightCliUnavailableError);
-        expect((err as Error).message).toContain("/mnt/c");
-        expect((err as Error).message).toContain("distro-native");
+        const d = new PlaywrightCliDriver();
+        await d.isAvailable();
+        await d.isAvailable();
+        expect(spy).toHaveBeenCalledTimes(1);
+      } finally {
+        spy.mockRestore();
       }
     });
-
-    test("guard is inert when not running under WSL", async () => {
-      const direct = createMockRunner("direct");
-      direct._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
-      const bunx = createMockRunner("bunx");
-      const d = new PlaywrightCliDriver({
-        probeRunners: [direct, bunx],
-        wslDetector: async () => false,
-        binaryPathResolver: async () => interopPaths,
-      });
-      await d.runCli(["--version"]);
-
-      expect(d.strategy).toBe("direct");
-    });
-
-    test("mixed resolution (some native) keeps the direct candidate", async () => {
-      const direct = createMockRunner("direct");
-      direct._run.mockResolvedValue({ exitCode: 0, stdout: "1.0.0", stderr: "" });
-      const bunx = createMockRunner("bunx");
-      const d = new PlaywrightCliDriver({
-        probeRunners: [direct, bunx],
-        ...wslDriverOpts({
-          binaryPathResolver: async () => ["/mnt/c/nvm4w/nodejs/playwright-cli", "/usr/bin/playwright-cli"],
-        }),
-      });
-      await d.runCli(["--version"]);
-
-      expect(d.strategy).toBe("direct");
-    });
   });
-
-  describe("cookieListFromState read-failure classification (issue #27)", () => {
-    test("missing state file after successful state-save names the interop problem and carries .cause", async () => {
+  describe("cookieListFromState read-failure classification", () => {
+    test("missing state file after successful state-save carries the ENOENT cause", async () => {
       const runner = createMockRunner();
       runner._run.mockResolvedValueOnce({ exitCode: 0, stdout: "", stderr: "" }); // state-save "succeeds", writes nothing
       const d = new PlaywrightCliDriver({ runner });
@@ -735,7 +619,6 @@ test("propagates other PlaywrightCliError failures", async () => {
       } catch (err) {
         expect(err).toBeInstanceOf(IOError);
         expect((err as Error).message).toContain("not found");
-        expect((err as Error).message).toContain("distro-native");
         expect((err as IOError).cause).toBeInstanceOf(Error);
         expect(((err as IOError).cause as NodeJS.ErrnoException).code).toBe("ENOENT");
       }
@@ -775,12 +658,14 @@ describe("BunPlaywrightRunner spawn options", () => {
   test("run spawns with windowsHide so Windows console windows do not flash", async () => {
     const spawnSpy = fakeSpawnSpy();
     try {
-      const runner = new BunPlaywrightRunner("direct");
+      const runner = new BunPlaywrightRunner();
 
       const result = await runner.run(["--version"]);
 
       expect(result.exitCode).toBe(0);
       expect(spawnSpy).toHaveBeenCalledTimes(1);
+      const argv = spawnSpy.mock.calls[0][0] as string[];
+      expect(argv.slice(0, 2)).toEqual(["bunx", "@playwright/cli"]);
       const opts = spawnSpy.mock.calls[0][1] as { windowsHide?: boolean };
       expect(opts.windowsHide).toBe(true);
     } finally {
@@ -791,11 +676,13 @@ describe("BunPlaywrightRunner spawn options", () => {
   test("spawnDetached spawns with windowsHide so Windows console windows do not flash", () => {
     const spawnSpy = fakeSpawnSpy();
     try {
-      const runner = new BunPlaywrightRunner("direct");
+      const runner = new BunPlaywrightRunner();
 
       runner.spawnDetached(["open", "--browser=chromium"]);
 
       expect(spawnSpy).toHaveBeenCalledTimes(1);
+      const argv = spawnSpy.mock.calls[0][0] as string[];
+      expect(argv.slice(0, 2)).toEqual(["bunx", "@playwright/cli"]);
       const opts = spawnSpy.mock.calls[0][1] as { windowsHide?: boolean };
       expect(opts.windowsHide).toBe(true);
     } finally {

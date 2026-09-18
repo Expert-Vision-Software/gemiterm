@@ -15,7 +15,6 @@ import {
 
 function neverSpawnRunner(): PlaywrightRunner {
   return {
-    strategy: "direct",
     run: mock(async (_args: string[]) => {
       throw new Error("INVARIANT VIOLATION: browser spawn reached with a cross-OS marker");
     }),
