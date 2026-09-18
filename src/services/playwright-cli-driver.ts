@@ -29,6 +29,27 @@ const WSL_INTEROP_HINT =
   "/mnt/* interop; install a distro-native one with 'npm i -g @playwright/cli' " +
   "inside the WSL distro (issue #27).";
 
+const MISSING_DEPS_MARKER = "missing system dependencies required to run browser";
+const MISSING_DEPS_REMEDIATION =
+  "Browser system dependencies are missing. Run one of:\n" +
+  "  sudo npx playwright install-deps chrome-for-testing\n" +
+  "  npx @playwright/cli install-browser --with-deps\n" +
+  "then retry the command (issue #30).";
+
+// Issue #30: the playwright-cli daemon leaks a multi-page stack trace when the
+// browser binary cannot launch for lack of system libraries; classify it so
+// callers print the remediation, not the trace.
+export function isMissingDependenciesStderr(stderr: string): boolean {
+  return stderr.toLowerCase().includes(MISSING_DEPS_MARKER);
+}
+
+export class MissingBrowserDependenciesError extends Error {
+  constructor() {
+    super(MISSING_DEPS_REMEDIATION);
+    this.name = "MissingBrowserDependenciesError";
+  }
+}
+
 export class PlaywrightCliUnavailableError extends Error {
   constructor(message?: string) {
     super(
@@ -210,6 +231,9 @@ export class PlaywrightCliDriver {
     }
     const result = await this.runner.run(args);
     if (result.exitCode !== 0) {
+      if (isMissingDependenciesStderr(result.stderr)) {
+        throw new MissingBrowserDependenciesError();
+      }
       throw new PlaywrightCliError(args.join(" "), result.exitCode, result.stderr);
     }
     return result.stdout;
