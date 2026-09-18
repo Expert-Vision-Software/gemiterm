@@ -1300,3 +1300,26 @@ do not re-litigate them.
   validation is owned by the integrator (both shells). Invariant coverage:
   `tests/auth-regression/invariant-cross-os-profile-guard.test.ts` (+ unit
   cases in `tests/services/playwright-cli-driver-os-guard.test.ts`).
+
+- **2026-09-17** - missing browser system-dependencies are classified into an
+  actionable message (issue #30). On Linux/WSL, after
+  `install-browser` reported success, `gemiterm auth` (and rotation) failed at
+  daemon startup with the raw playwright-cli stack trace
+  ("Missing system dependencies required to run browser chrome-for-testing"
+  buried mid-trace, `at createPersistentBrowser` etc.) — the browser binary
+  was installed but its system libraries were not. `runCli`
+  (`src/services/playwright-cli-driver.ts`) now recognizes that stderr
+  signature (`isMissingDependenciesStderr`) and throws the typed
+  `MissingBrowserDependenciesError`, whose message is a single remediation
+  block naming both fixes — `sudo npx playwright install-deps
+  chrome-for-testing` (system libraries) and `npx @playwright/cli
+  install-browser --with-deps` (fresh-environment one-shot, verified in the
+  issue) — with no daemon stack trace. Under WSL the message additionally
+  directs the user to run the remediation inside the WSL distro shell and NOT
+  from a Windows-mounted `/mnt/*` path (appended via the existing
+  `wslDetector` seam; outside WSL the message is unchanged). Unrelated launch
+  failures keep the
+  raw `PlaywrightCliError`. Both browser-opening paths are covered
+  (`openHeaded` capture, `openHeadless` rotation); capture, persistence, and
+  rotation semantics unchanged (domain-only policy). Invariant coverage:
+  `tests/auth-regression/invariant-missing-deps-guidance.test.ts`.

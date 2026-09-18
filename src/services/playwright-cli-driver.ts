@@ -29,6 +29,31 @@ const WSL_INTEROP_HINT =
   "/mnt/* interop; install a distro-native one with 'npm i -g @playwright/cli' " +
   "inside the WSL distro (issue #27).";
 
+const MISSING_DEPS_MARKER = "missing system dependencies required to run browser";
+const MISSING_DEPS_REMEDIATION =
+  "Browser system dependencies are missing. Run one of:\n" +
+  "  sudo npx playwright install-deps chrome-for-testing\n" +
+  "  npx @playwright/cli install-browser --with-deps\n" +
+  "then retry the command (issue #30).";
+
+// Issue #30: the playwright-cli daemon leaks a multi-page stack trace when the
+// browser binary cannot launch for lack of system libraries; classify it so
+// callers print the remediation, not the trace.
+export function isMissingDependenciesStderr(stderr: string): boolean {
+  return stderr.toLowerCase().includes(MISSING_DEPS_MARKER);
+}
+
+const WSL_DISTRO_HINT =
+  "Under WSL, run this inside your WSL distro shell itself — not from a " +
+  "Windows-mounted path such as /mnt/c/... or /mnt/d/... (issue #30).";
+
+export class MissingBrowserDependenciesError extends Error {
+  constructor(message?: string) {
+    super(message ?? MISSING_DEPS_REMEDIATION);
+    this.name = "MissingBrowserDependenciesError";
+  }
+}
+
 export class PlaywrightCliUnavailableError extends Error {
   constructor(message?: string) {
     super(
@@ -210,9 +235,27 @@ export class PlaywrightCliDriver {
     }
     const result = await this.runner.run(args);
     if (result.exitCode !== 0) {
+      if (isMissingDependenciesStderr(result.stderr)) {
+        throw await this.missingDepsError();
+      }
       throw new PlaywrightCliError(args.join(" "), result.exitCode, result.stderr);
     }
     return result.stdout;
+  }
+
+  // Compose the issue #30 remediation, appending the WSL distro hint only
+  // when the detector says we're under WSL — the reminder to leave /mnt/*
+  // paths is noise elsewhere.
+  private async missingDepsError(): Promise<MissingBrowserDependenciesError> {
+    let message = MISSING_DEPS_REMEDIATION;
+    try {
+      if (await this.wslDetector()) {
+        message += `\n${WSL_DISTRO_HINT}`;
+      }
+    } catch {
+      // detector failure must not mask the classified remediation
+    }
+    return new MissingBrowserDependenciesError(message);
   }
 
   withSession(session: string, args: string[]): string[] {
