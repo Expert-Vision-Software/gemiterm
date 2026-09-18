@@ -40,9 +40,25 @@ describe("InstallBrowserCommand", () => {
   });
 
   test("succeeds when install completes", async () => {
-    const spy = spyOn(InstallBrowserService.prototype, "install").mockResolvedValue(undefined);
+    const spy = spyOn(InstallBrowserService.prototype, "install").mockResolvedValue({});
 
     await expect(command.execute([], { verbose: false })).resolves.toBeUndefined();
     spy.mockRestore();
+  });
+
+  test("warns with the deps remediation instead of an unqualified success (issue #31)", async () => {
+    const spy = spyOn(InstallBrowserService.prototype, "install").mockResolvedValue({
+      depsWarning: "sudo npx playwright install-deps chrome-for-testing",
+    });
+    const logSpy = spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(command.execute([], { verbose: false })).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("sudo npx playwright install-deps chrome-for-testing"));
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Browser ready."));
+    spy.mockRestore();
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 });

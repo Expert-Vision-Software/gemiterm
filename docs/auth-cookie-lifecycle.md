@@ -1323,3 +1323,21 @@ do not re-litigate them.
   (`openHeaded` capture, `openHeadless` rotation); capture, persistence, and
   rotation semantics unchanged (domain-only policy). Invariant coverage:
   `tests/auth-regression/invariant-missing-deps-guidance.test.ts`.
+
+- **2026-09-17** - install-browser verifies system dependencies on Linux
+  before declaring success (issue #31). A downloaded Chrome-for-Testing
+  binary can still be unlaunchable when shared system libraries are missing,
+  which until now only surfaced later as an `auth` failure. `install()`
+  (`src/services/install-browser-service.ts`) now runs a headless
+  launch-verification probe on Linux (non-Linux behaviour unchanged) and
+  classifies the outcome with the issue #30 dep classifier
+  (`isMissingDependenciesStderr`), reusing the canonical
+  `MISSING_DEPS_REMEDIATION` exported from
+  `src/services/playwright-cli-driver.ts` so both surfaces warn with the
+  exact same text. When deps are missing it attempts
+  `npx @playwright/cli install-browser --with-deps` automatically unless
+  running as root/sudo (elevated-run guard; root never triggers the
+  automatic install and is warned with the remediation instead). Capture,
+  persistence, and rotation semantics unchanged (domain-only policy).
+  Invariant coverage:
+  `tests/auth-regression/invariant-install-browser-deps-verification.test.ts`.

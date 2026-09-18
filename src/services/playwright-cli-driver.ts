@@ -30,7 +30,9 @@ const WSL_INTEROP_HINT =
   "inside the WSL distro (issue #27).";
 
 const MISSING_DEPS_MARKER = "missing system dependencies required to run browser";
-const MISSING_DEPS_REMEDIATION =
+// Exported for install-browser (issue #31) so the post-install verification
+// warns with the exact same remediation text the driver classifies at launch.
+export const MISSING_DEPS_REMEDIATION =
   "Browser system dependencies are missing. Run one of:\n" +
   "  sudo npx playwright install-deps chrome-for-testing\n" +
   "  npx @playwright/cli install-browser --with-deps\n" +

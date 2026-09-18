@@ -10,13 +10,21 @@ export class InstallBrowserCommand implements CliCommand {
   async execute(_args: string[], _context: CliCommandContext): Promise<void> {
     const logger = new Logger("install-browser-command");
     logger.debug("Executing install-browser command");
-    const service = new InstallBrowserService(logger);
+    const service = new InstallBrowserService({ logger });
 
     console.log(chalk.dim("Checking browser installation..."));
 
     try {
-      await service.install();
-      console.log(chalk.green("Browser ready."));
+      const result = await service.install();
+      // Issue #31: on Linux a downloaded binary may still be unlaunchable
+      // while system libraries are missing — warn with the exact remediation
+      // instead of an unqualified success message.
+      if (result.depsWarning) {
+        console.error(chalk.yellow("Browser installed, but system dependencies are missing:"));
+        console.error(chalk.yellow(result.depsWarning));
+      } else {
+        console.log(chalk.green("Browser ready."));
+      }
     } catch (error) {
       if (error instanceof InstallBrowserError) {
         logger.error(error.message);
