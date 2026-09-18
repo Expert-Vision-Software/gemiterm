@@ -1,11 +1,16 @@
-import { getProfileDir, getTempFilePath, isWSL, isWindowsInteropPath, joinPath } from "../infrastructure/path-utils.ts";
+import { getProfileDir, getTempFilePath, isWSL, joinPath } from "../infrastructure/path-utils.ts";
 import { IOError, readJsonFile, readTextFile, removeDir, writeTextFile } from "../infrastructure/io.ts";
 import { ProfileOsMismatchError } from "../core/errors.ts";
 import type { Cookie } from "../core/types.ts";
 
-const CLI_BIN_DIRECT = "playwright-cli";
-const CLI_BIN_FALLBACK = "bunx";
-const CLI_PACKAGE = "@playwright/cli";
+// Issue #31 (2026-09-18): bunx-only invocation. The direct `playwright-cli`
+// binary path is gone — a globally installed CLI pins its own playwright-core
+// browser revision, which silently skewed from the one `install-browser`
+// (which already spawned `bunx`) downloaded, causing "Browser chrome-for-testing
+// is not installed" with a revision no one ever asked for. Going through
+// `bunx @playwright/cli` everywhere means one resolution, no skew, and no
+// versioning for the user to manage.
+const CLI_ARGS = ["bunx", "@playwright/cli"] as const;
 const PROBE_TIMEOUT_MS = 5_000;
 const BROWSER_CLOSED_MARKERS = ["is not open", "not found"] as const;
 
@@ -24,13 +29,10 @@ export class PlaywrightCliError extends Error {
   }
 }
 
-const WSL_INTEROP_HINT =
-  "Under WSL this usually means the Windows playwright-cli was resolved via " +
-  "/mnt/* interop; install a distro-native one with 'npm i -g @playwright/cli' " +
-  "inside the WSL distro (issue #27).";
-
 const MISSING_DEPS_MARKER = "missing system dependencies required to run browser";
-const MISSING_DEPS_REMEDIATION =
+// Exported for install-browser (issue #31) so the post-install verification
+// warns with the exact same remediation text the driver classifies at launch.
+export const MISSING_DEPS_REMEDIATION =
   "Browser system dependencies are missing. Run one of:\n" +
   "  sudo npx playwright install-deps chrome-for-testing\n" +
   "  npx @playwright/cli install-browser --with-deps\n" +
@@ -58,8 +60,8 @@ export class PlaywrightCliUnavailableError extends Error {
   constructor(message?: string) {
     super(
       message ??
-        "Playwright CLI not found. Install it with 'npm i -g @playwright/cli' " +
-        "(or 'bun add -g @playwright/cli'), or ensure 'bunx' is available to run '@playwright/cli'.",
+        "Playwright CLI not available. Ensure 'bunx' is installed (comes with Bun) " +
+        "and that 'bunx @playwright/cli --version' succeeds.",
     );
     this.name = "PlaywrightCliUnavailableError";
   }
@@ -71,10 +73,7 @@ export interface PlaywrightRunnerResult {
   stderr: string;
 }
 
-export type PlaywrightStrategy = "direct" | "bunx";
-
 export interface PlaywrightRunner {
-  readonly strategy: PlaywrightStrategy;
   run(args: string[]): Promise<PlaywrightRunnerResult>;
   spawnDetached(args: string[]): void;
 }
@@ -118,13 +117,7 @@ export class FsProfileOsMarker implements ProfileOsMarker {
 // short-lived playwright-cli subprocess would flash its own console window
 // on Windows (no-op elsewhere).
 export class BunPlaywrightRunner implements PlaywrightRunner {
-  readonly strategy: PlaywrightStrategy;
-  private readonly bin: string[];
-
-  constructor(strategy: PlaywrightStrategy) {
-    this.strategy = strategy;
-    this.bin = strategy === "direct" ? [CLI_BIN_DIRECT] : [CLI_BIN_FALLBACK, CLI_PACKAGE];
-  }
+  private readonly bin: string[] = [...CLI_ARGS];
 
   async run(args: string[]): Promise<PlaywrightRunnerResult> {
     const proc = Bun.spawn([...this.bin, ...args], {
@@ -160,39 +153,16 @@ export interface PlaywrightCliDriverOptions {
   logger?: Console;
   runner?: PlaywrightRunner;
   profileDirResolver?: (profileName: string) => string;
-  probeRunners?: PlaywrightRunner[];
   wslDetector?: () => Promise<boolean>;
-  binaryPathResolver?: (bin: string) => Promise<string[]>;
   profileOsMarker?: ProfileOsMarker;
   platformDetector?: () => string;
-}
-
-// Default `binaryPathResolver`: `which -a <bin>`, one resolved path per line.
-// Empty on failure — the probe then falls back to the plain version check.
-async function whichAll(bin: string): Promise<string[]> {
-  try {
-    const proc = Bun.spawn(["which", "-a", bin], {
-      stdout: "pipe",
-      stderr: "ignore",
-      stdin: "ignore",
-      windowsHide: true,
-    });
-    const stdout = await new Response(proc.stdout).text();
-    const code = await proc.exited;
-    if (code !== 0) return [];
-    return stdout.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
-  } catch {
-    return [];
-  }
 }
 
 export class PlaywrightCliDriver {
   private readonly logger?: Console;
   private runner: PlaywrightRunner;
   private readonly profileDirResolver: (profileName: string) => string;
-  private readonly probeRunners: PlaywrightRunner[];
   private readonly wslDetector: () => Promise<boolean>;
-  private readonly binaryPathResolver: (bin: string) => Promise<string[]>;
   private readonly profileOsMarker: ProfileOsMarker;
   private readonly platformDetector: () => string;
   private probed = false;
@@ -201,13 +171,8 @@ export class PlaywrightCliDriver {
   constructor(opts: PlaywrightCliDriverOptions = {}) {
     this.logger = opts.logger;
     this.profileDirResolver = opts.profileDirResolver ?? ((name) => getProfileDir(name));
-    this.runner = opts.runner ?? new BunPlaywrightRunner("direct");
-    this.probeRunners = opts.probeRunners ?? [
-      new BunPlaywrightRunner("direct"),
-      new BunPlaywrightRunner("bunx"),
-    ];
+    this.runner = opts.runner ?? new BunPlaywrightRunner();
     this.wslDetector = opts.wslDetector ?? isWSL;
-    this.binaryPathResolver = opts.binaryPathResolver ?? whichAll;
     this.profileOsMarker = opts.profileOsMarker ?? new FsProfileOsMarker();
     this.platformDetector = opts.platformDetector ?? (() => process.platform);
     this.probed = opts.runner !== undefined;
@@ -220,10 +185,6 @@ export class PlaywrightCliDriver {
       return ok;
     }
     return true;
-  }
-
-  get strategy(): PlaywrightStrategy {
-    return this.runner.strategy;
   }
 
   async runCli(args: string[]): Promise<string> {
@@ -363,9 +324,10 @@ export class PlaywrightCliDriver {
     }
   }
 
-  // Distinguish "state-save claimed success but the file is not there" (the
-  // WSL interop signature — the Windows binary wrote it to the Windows
-  // filesystem, issue #27) from "the file exists but is not valid JSON".
+  // Distinguish "state-save claimed success but the file is not there" from
+  // "the file exists but is not valid JSON". The former historically pointed
+  // at the WSL interop path bug (issue #27); with the bunx-only invocation
+  // that cause is structurally gone, so the message reports the plain fact.
   private classifyStateReadError(path: string, err: unknown): Error {
     if (!(err instanceof IOError)) {
       return err instanceof Error ? err : new Error(String(err));
@@ -374,14 +336,13 @@ export class PlaywrightCliDriver {
     const code = (raw as NodeJS.ErrnoException | undefined)?.code;
     if (code === "ENOENT") {
       return new IOError(
-        `playwright-cli reported success writing '${path}' but the file was not found. ` +
-          WSL_INTEROP_HINT,
+        `playwright-cli reported success writing '${path}' but the file was not found.`,
         raw instanceof Error ? raw : err,
       );
     }
     return new IOError(
       `readJsonFile: state file '${path}' is not valid JSON; the playwright-cli ` +
-        `write may have failed silently. ${WSL_INTEROP_HINT}`,
+        `write may have failed silently.`,
       err,
     );
   }
@@ -409,39 +370,19 @@ export class PlaywrightCliDriver {
     await this.runCli(["close-all"]);
   }
 
+  // Issue #27 follow-up (see bunx-only note at the top of this file): with the
+  // direct binary gone there is no Windows-interop path to guard against —
+  // `bunx` under WSL resolves distro-natively, so a single version probe is
+  // the whole availability story.
   private async probe(): Promise<boolean> {
-    for (const candidate of this.probeRunners) {
-      if (candidate.strategy === "direct" && (await this.isWindowsInteropBinary())) {
-        continue;
-      }
-      if (await this.tryVersion(candidate)) {
-        this.runner = candidate;
-        return true;
-      }
-    }
-    this.logger?.warn("Neither 'playwright-cli' nor 'bunx @playwright/cli' is available on this system.");
-    return false;
-  }
-
-  // WSL guard (issue #27): a `playwright-cli` resolved under /mnt/* is the
-  // WINDOWS install reached through interop. It accepts POSIX paths but
-  // re-resolves them against the current drive (`/tmp/x` -> `C:\tmp\x`), so
-  // state-save round-trips land outside the WSL filesystem. Require a
-  // distro-native binary and fall through to the bunx strategy instead.
-  private async isWindowsInteropBinary(): Promise<boolean> {
-    if (!(await this.wslDetector())) {
-      return false;
-    }
-    const paths = await this.binaryPathResolver(CLI_BIN_DIRECT);
-    if (paths.length === 0 || !paths.every(isWindowsInteropPath)) {
-      return false;
+    if (await this.tryVersion(this.runner)) {
+      return true;
     }
     this.unavailableMessage =
-      "playwright-cli resolved only through Windows interop (" +
-      paths.join(", ") +
-      "). " + WSL_INTEROP_HINT;
+      "'bunx @playwright/cli --version' failed. Ensure Bun is installed and " +
+      "run 'bunx @playwright/cli --version' manually to see the underlying error.";
     this.logger?.warn(this.unavailableMessage);
-    return true;
+    return false;
   }
 
   private async tryVersion(r: PlaywrightRunner): Promise<boolean> {

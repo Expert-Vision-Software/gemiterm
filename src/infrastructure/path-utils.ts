@@ -74,15 +74,6 @@ function getTempFilePath(prefix: string, extension = ".tmp"): string {
   return join(tmpdir(), `${unique}${extension}`);
 }
 
-// A WSL Windows-interop path: `/mnt/<drive-letter>/...`. When a Linux-side
-// process hands such a resolved binary (or file) to a Windows exe over
-// interop, the Windows side re-resolves it relative to the current drive
-// (`/tmp/x` -> `C:\tmp\x`), so any `/mnt/*`-resolved playwright-cli is a
-// Windows install and must not be trusted from WSL (issue #27).
-function isWindowsInteropPath(path: string): boolean {
-  return /^\/mnt\/[a-zA-Z](\/|$)/.test(path);
-}
-
 async function isWSL(): Promise<boolean> {
   if (process.platform !== "linux") {
     return false;
@@ -180,7 +171,6 @@ export {
   getLogFilePath,
   getTempFilePath,
   isWSL,
-  isWindowsInteropPath,
   getProjectRoot,
   getPackageJson,
   STORAGE_STATE_FILE,

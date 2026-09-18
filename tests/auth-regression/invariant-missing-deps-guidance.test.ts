@@ -21,7 +21,6 @@ const DAEMON_STACK_STDERR = [
 
 function failingRunner(stderr: string): PlaywrightRunner {
   return {
-    strategy: "direct",
     run: async () => ({ exitCode: 1, stdout: "", stderr }),
     spawnDetached: () => {},
   };

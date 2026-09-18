@@ -1323,3 +1323,47 @@ do not re-litigate them.
   (`openHeaded` capture, `openHeadless` rotation); capture, persistence, and
   rotation semantics unchanged (domain-only policy). Invariant coverage:
   `tests/auth-regression/invariant-missing-deps-guidance.test.ts`.
+
+- **2026-09-17** - install-browser verifies system dependencies on Linux
+  before declaring success (issue #31). A downloaded Chrome-for-Testing
+  binary can still be unlaunchable when shared system libraries are missing,
+  which until now only surfaced later as an `auth` failure. `install()`
+  (`src/services/install-browser-service.ts`) now runs a headless
+  launch-verification probe on Linux (non-Linux behaviour unchanged) and
+  classifies the outcome with the issue #30 dep classifier
+  (`isMissingDependenciesStderr`), reusing the canonical
+  `MISSING_DEPS_REMEDIATION` exported from
+  `src/services/playwright-cli-driver.ts` so both surfaces warn with the
+  exact same text. When deps are missing it attempts
+  `npx @playwright/cli install-browser --with-deps` automatically unless
+  running as root/sudo (elevated-run guard; root never triggers the
+  automatic install and is warned with the remediation instead). Capture,
+  persistence, and rotation semantics unchanged (domain-only policy).
+  Invariant coverage:
+  `tests/auth-regression/invariant-install-browser-deps-verification.test.ts`.
+
+- **2026-09-18** - playwright-cli invocation unified on `bunx @playwright/cli`
+  (issue #31, supersedes the issue #27 WSL interop guard). Field incident:
+  `gemiterm auth` resolved the globally installed `playwright-cli`, whose
+  bundled playwright-core pinned chromium revision 1243, while `install-browser`
+  (already bunx-based) had downloaded revision 1244 — auth failed with
+  "Browser chrome-for-testing is not installed" for a revision nobody asked
+  for. Root cause: two invocation paths resolving two different browser
+  revisions. The driver now invokes the CLI exclusively as
+  `bunx @playwright/cli` (`BunPlaywrightRunner`; probe is a single
+  `bunx @playwright/cli --version` check with the same 5s timeout). The
+  `direct` strategy, the `probeRunners` multi-candidate seam, and the
+  `wslDetector`/`binaryPathResolver` (`which -a`) WSL interop guard are
+  deleted — bunx resolves distro-natively under WSL, so the /mnt/* interop
+  hazard is structurally unreachable. `PlaywrightStrategy`,
+  `PlaywrightRunner.strategy`, and `path-utils.isWindowsInteropPath` are gone;
+  `PlaywrightCliUnavailableError` and the probe warn message now point at
+  bunx only. `cookieListFromState` read-failure classification keeps the
+  ENOENT-vs-invalid-JSON distinction and `.cause`, minus the (now
+  unreachable) interop hint; the missing-deps classification (issue #30) and
+  its WSL distro hint are untouched (`wslDetector` remains solely as that
+  message seam). No argv changes to `openHeaded`/`openHeadless`/`stateSave`;
+  capture, persistence, and rotation semantics unchanged (domain-only
+  policy). Invariant coverage:
+  `tests/auth-regression/invariant-bunx-only-invocation.test.ts` (replaces
+  the deleted `invariant-wsl-interop-guard.test.ts`).
