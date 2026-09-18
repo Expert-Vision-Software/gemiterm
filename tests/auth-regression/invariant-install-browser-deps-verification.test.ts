@@ -6,7 +6,7 @@
 // exported from the driver (MISSING_DEPS_REMEDIATION) so both surfaces stay
 // in lockstep, and the automatic `--with-deps` install MUST respect the
 // elevated-run guard (never attempted as root/sudo).
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
 import {
   InstallBrowserService,
   type InstallBrowserServiceOptions,
@@ -17,13 +17,21 @@ import {
 } from "../../src/services/playwright-cli-driver.ts";
 
 function makeService(overrides: Partial<InstallBrowserServiceOptions> = {}): InstallBrowserService {
-  return new InstallBrowserService({
+  const service = new InstallBrowserService({
     platformDetector: () => "linux",
     launchProbe: async () => {},
     depsInstaller: async () => {},
     rootDetector: () => false,
     ...overrides,
   });
+  // Hermetic: `install()` always calls runInstall(), which spawns a real
+  // `bunx @playwright/cli install-browser`. On a cold CI runner that download
+  // exceeds the 5s test timeout, bun kills the dangling process, and the
+  // unhandled rejection poisons the file. These invariants exercise the
+  // launch-verification and elevated-run-guard logic, not the download.
+  spyOn(service as unknown as { runInstall: () => Promise<string> }, "runInstall")
+    .mockResolvedValue("ok");
+  return service;
 }
 
 function failingInstall(service: InstallBrowserService): Promise<ReturnType<InstallBrowserService["install"]>> {
