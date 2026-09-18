@@ -21,9 +21,15 @@ describe("InstallBrowserService", () => {
 
     test("resolves successfully when install succeeds", async () => {
       const runInstallSpy = spyOn(service as any, "runInstall").mockResolvedValue("Chrome for Testing downloaded");
+      // Hermetic on every platform: without this mock, a Linux CI runner
+      // takes the platformDetector() === "linux" branch and spawns a REAL
+      // `bunx @playwright/cli open` daemon, which fails the install (no
+      // browser in CI) and leaks a dangling process into later test files.
+      const probeSpy = spyOn(service as any, "launchProbe").mockResolvedValue(undefined);
 
       await expect(service.install()).resolves.toEqual({});
       runInstallSpy.mockRestore();
+      probeSpy.mockRestore();
     });
   });
 });
