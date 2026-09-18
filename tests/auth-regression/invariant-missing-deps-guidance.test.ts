@@ -78,6 +78,32 @@ describe("auth-regression: missing browser system-dependencies guidance", () => 
     expect(err).toBeInstanceOf(MissingBrowserDependenciesError);
   });
 
+  test("under WSL the message directs the user into the distro, off /mnt/* paths", async () => {
+    const d = new PlaywrightCliDriver({
+      runner: failingRunner(DAEMON_STACK_STDERR),
+      profileDirResolver: () => "/tmp/profiles/default",
+      wslDetector: async () => true,
+    });
+
+    const err = await d.openHeaded("https://gemini.google.com/app", "default").catch((e) => e);
+
+    expect(err).toBeInstanceOf(MissingBrowserDependenciesError);
+    expect(err.message).toContain("WSL distro");
+    expect(err.message).toContain("/mnt/");
+  });
+
+  test("outside WSL no distro hint is appended", async () => {
+    const d = new PlaywrightCliDriver({
+      runner: failingRunner(DAEMON_STACK_STDERR),
+      profileDirResolver: () => "/tmp/profiles/default",
+      wslDetector: async () => false,
+    });
+
+    const err = await d.openHeaded("https://gemini.google.com/app", "default").catch((e) => e);
+
+    expect(err.message).not.toContain("WSL distro");
+  });
+
   test("unrelated launch failures keep the raw PlaywrightCliError", async () => {
     const d = driverWith(failingRunner("Error: Daemon pid=7: something else went wrong"));
 

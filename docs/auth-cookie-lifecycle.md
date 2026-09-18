@@ -1314,7 +1314,11 @@ do not re-litigate them.
   block naming both fixes — `sudo npx playwright install-deps
   chrome-for-testing` (system libraries) and `npx @playwright/cli
   install-browser --with-deps` (fresh-environment one-shot, verified in the
-  issue) — with no daemon stack trace. Unrelated launch failures keep the
+  issue) — with no daemon stack trace. Under WSL the message additionally
+  directs the user to run the remediation inside the WSL distro shell and NOT
+  from a Windows-mounted `/mnt/*` path (appended via the existing
+  `wslDetector` seam; outside WSL the message is unchanged). Unrelated launch
+  failures keep the
   raw `PlaywrightCliError`. Both browser-opening paths are covered
   (`openHeaded` capture, `openHeadless` rotation); capture, persistence, and
   rotation semantics unchanged (domain-only policy). Invariant coverage:
